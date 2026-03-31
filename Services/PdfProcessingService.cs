@@ -69,18 +69,34 @@ public class PdfProcessingService
                 if (string.Equals(sourceText, targetText, StringComparison.Ordinal))
                 {
                     pair.Status = CompareStatus.Identical;
+                    pair.ErrorMessage = "Identique (Aucune différence)";
+                    pair.DiffCount = 0;
                 }
                 else
                 {
-                    pair.Status = CompareStatus.Different;
-                    // 2. Generation of the colored difference report
-                    await GenerateColoredDiffReportAsync(pair, sourceText, targetText, outputDiffDir);
+                    // 2. Generation of the colored difference report et récupération du nombre de différences
+                    int diffCount = await GenerateColoredDiffReportAsync(pair, sourceText, targetText, outputDiffDir);
+
+                    pair.DiffCount = diffCount;
+
+                    if (diffCount > 0)
+                    {
+                        pair.Status = CompareStatus.Different;
+                        pair.ErrorMessage = $"{diffCount} différence(s) détectée(s)";
+                    }
+                    else
+                    {
+                        // Cas où les fichiers sont différents bitairement mais identiques textuellement (faux positifs)
+                        pair.Status = CompareStatus.Identical;
+                        pair.ErrorMessage = "Faux positifs ignorés (espaces/sauts de ligne)";
+                    }
                 }
             }
             catch (Exception ex)
             {
                 pair.Status = CompareStatus.Error;
-                pair.ErrorMessage = ex.Message;
+                pair.ErrorMessage = $"Erreur: {ex.Message}";
+                pair.DiffCount = -1; // -1 pour les mettre en bas lors du tri
             }
             finally
             {
@@ -106,9 +122,10 @@ public class PdfProcessingService
         return sb.ToString();
     }
 
-    private async Task GenerateColoredDiffReportAsync(DocumentPair pair, string sourceText, string targetText, string outputDir)
+    // Changement ici : Task<int> pour retourner le nombre d'erreurs
+    private async Task<int> GenerateColoredDiffReportAsync(DocumentPair pair, string sourceText, string targetText, string outputDir)
     {
-        await Task.Run(() =>
+        return await Task.Run(() =>
         {
             Directory.CreateDirectory(outputDir);
             string reportPath = Path.Combine(outputDir, $"DiffReport_Doc_{pair.MatchKey}.pdf");
@@ -156,7 +173,7 @@ public class PdfProcessingService
             DrawText(ref page, builder, $"Fichier Cible (Vert)   : {targetFileName}", font, 11, ref yPosition, margin, 0, 128, 0);
             yPosition -= 20;
 
-            bool hasRealDifferences = false;
+            int differencesCount = 0; // Compteur de différences
 
             // --- CORPS DU RAPPORT ---
             foreach (var line in diff.Lines)
@@ -164,7 +181,7 @@ public class PdfProcessingService
                 // Ignore unchanged lines to only show differences
                 if (line.Type == ChangeType.Unchanged) continue;
 
-                hasRealDifferences = true;
+                differencesCount++; // On incrémente le nombre de différences trouvées
                 string prefix = "";
                 byte r = 0, g = 0, b = 0;
 
@@ -201,12 +218,14 @@ public class PdfProcessingService
             }
 
             // Si la normalisation a éliminé les faux positifs et qu'il n'y a pas de vraie différence
-            if (!hasRealDifferences)
+            if (differencesCount == 0)
             {
                 DrawText(ref page, builder, "Aucune différence textuelle majeure trouvée (possibles variations d'espaces invisibles).", font, 11, ref yPosition, margin, 100, 100, 100);
             }
 
             File.WriteAllBytes(reportPath, builder.Build());
+
+            return differencesCount; // Retourne le compteur final
         });
     }
 

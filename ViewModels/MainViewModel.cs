@@ -119,11 +119,27 @@ public partial class MainViewModel : ObservableObject
             // 3. Launch heavy asynchronous processing
             await _processingService.ProcessPairsAsync(pairsToProcess, OutputDirectory, progress);
 
+            // ==========================================
+            // TRI AUTOMATIQUE DES RÉSULTATS
+            // ==========================================
+            StatusMessage = "Tri des résultats en cours...";
+
+            // On trie la liste par nombre de différences décroissant (les plus modifiés en haut)
+            var sortedPairs = Pairs.OrderByDescending(p => p.DiffCount).ToList();
+
+            // On met à jour l'interface graphique avec la liste triée
+            Pairs.Clear();
+            foreach (var p in sortedPairs)
+            {
+                Pairs.Add(p);
+            }
+            // ==========================================
+
             StatusMessage = "Processing completed successfully!";
 
             // Final summary
             int diffCount = pairsToProcess.Count(p => p.Status == CompareStatus.Different);
-            MessageBox.Show($"Comparison completed!\n{diffCount} differences found out of {ProgressMax} compared documents.",
+            MessageBox.Show($"Comparison completed!\n{diffCount} documents présentent des différences sur {ProgressMax} comparés.",
                             "Completed", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
