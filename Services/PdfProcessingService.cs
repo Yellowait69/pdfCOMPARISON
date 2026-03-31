@@ -211,16 +211,31 @@ public class PdfProcessingService
     }
 
     /// <summary>
-    /// Fonction pour normaliser le texte du PDF.
-    /// Remplace les multiples sauts de lignes et espaces par un format unique
-    /// pour éviter que le diff considère des blocs modifiés à cause d'un saut de ligne PDF.
+    /// Fonction pour normaliser le texte du PDF de façon INTELLIGENTE.
+    /// Évite que l'ajout d'un seul mot décale tout le document.
+    /// Reconstruit le texte phrase par phrase pour un diff granulaire.
     /// </summary>
     private string NormalizePdfText(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return string.Empty;
 
-        // Sépare par ligne, enlève les espaces inutiles, et ignore les lignes vides
-        var lines = input.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+        // 1. On "aplatit" tout le texte : on remplace tous les sauts de lignes
+        // et espaces multiples par un seul et unique espace.
+        string flatText = Regex.Replace(input, @"\s+", " ");
+
+        // 2. Découpage intelligent : on recrée des lignes logiques basées sur la ponctuation.
+        // Cela permet au comparateur de comparer phrase par phrase !
+        flatText = flatText.Replace(". ", ".\n");
+        flatText = flatText.Replace("? ", "?\n");
+        flatText = flatText.Replace("! ", "!\n");
+        flatText = flatText.Replace(": ", ":\n");
+
+        // Gestion intelligente des listes à puces pour les isoler
+        flatText = flatText.Replace("•", "\n• ");
+        flatText = flatText.Replace(" o ", "\n o ");
+
+        // 3. Nettoyage : on sépare par nos nouveaux sauts de ligne et on enlève le vide
+        var lines = flatText.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries)
                          .Select(l => l.Trim())
                          .Where(l => l.Length > 0);
 
