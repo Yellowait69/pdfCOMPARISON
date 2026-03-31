@@ -1,9 +1,13 @@
 using DiffPlex.DiffBuilder;
 using DiffPlex.DiffBuilder.Model;
-using System.Collections.Concurrent;
+using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Core;
 using UglyToad.PdfPig.Fonts.Standard14Fonts;
@@ -44,10 +48,9 @@ public class PdfProcessingService
         return pairs;
     }
 
-    public async Task ProcessPairsAsync(IEnumerable<DocumentPair> pairs, string outputDiffDir, IProgress<int> progress)
+    public async Task ProcessPairsAsync(IEnumerable<DocumentPair> validPairs, string outputDiffDir, IProgress<int> progress)
     {
         int completed = 0;
-        var validPairs = pairs.Where(p => p.Status != CompareStatus.MissingInTarget).ToList();
 
         // Traitement parallèle asynchrone optimisé (I/O bound et CPU bound)
         var parallelOptions = new ParallelOptions
@@ -62,7 +65,7 @@ public class PdfProcessingService
                 var sourceText = ExtractTextFast(pair.SourcePath);
                 var targetText = ExtractTextFast(pair.TargetPath!);
 
-                // 1. Comparaison rapide en O(N)
+                // 1. Comparaison rapide en O(N) : vérification binaire du hachage des chaînes
                 if (string.Equals(sourceText, targetText, StringComparison.Ordinal))
                 {
                     pair.Status = CompareStatus.Identical;
@@ -70,8 +73,8 @@ public class PdfProcessingService
                 else
                 {
                     pair.Status = CompareStatus.Different;
-                    // 2. Génération du rapport de différences si différent
-                    await GenerateDiffReportAsync(pair, sourceText, targetText, outputDiffDir);
+                    // 2. Génération du rapport de différences en couleurs
+                    await GenerateColoredDiffReportAsync(pair, sourceText, targetText, outputDiffDir);
                 }
             }
             catch (Exception ex)
@@ -90,7 +93,7 @@ public class PdfProcessingService
     private string ExtractTextFast(string pdfPath)
     {
         var sb = new StringBuilder();
-        // Parsing Options optimisées pour ignorer les images et chemins (gain de vitesse)
+        // Parsing Options optimisées pour ignorer les images et chemins (gain de vitesse majeur)
         var options = new ParsingOptions { ClipPaths = false };
 
         using (var document = PdfDocument.Open(pdfPath, options))
@@ -103,12 +106,12 @@ public class PdfProcessingService
         return sb.ToString();
     }
 
-    private async Task GenerateDiffReportAsync(DocumentPair pair, string sourceText, string targetText, string outputDir)
+    private async Task GenerateColoredDiffReportAsync(DocumentPair pair, string sourceText, string targetText, string outputDir)
     {
-        return await Task.Run(() =>
+        await Task.Run(() =>
         {
             Directory.CreateDirectory(outputDir);
-            string reportPath = Path.Combine(outputDir, $"DiffReport_{pair.MatchKey}.pdf");
+            string reportPath = Path.Combine(outputDir, $"DiffReport_Doc_{pair.MatchKey}.pdf");
 
             // Utilisation de DiffPlex pour générer le diff ligne par ligne
             var diffBuilder = new InlineDiffBuilder(new DiffPlex.Differ());
@@ -116,46 +119,85 @@ public class PdfProcessingService
 
             var builder = new PdfDocumentBuilder();
             PdfPageBuilder page = builder.AddPage(PageSize.A4);
+
             var font = builder.AddStandard14Font(Standard14Font.Helvetica);
+            var fontBold = builder.AddStandard14Font(Standard14Font.HelveticaBold);
 
-            double yPosition = page.PageSize.Top - 50;
-            double xPosition = 50;
+            double margin = 40;
+            double yPosition = page.PageSize.Top - margin;
+            double xPosition = margin;
             double lineHeight = 12;
+            int maxCharsPerLine = 95; // Limite avant le retour à la ligne automatique
 
-            page.AddText($"Rapport de différence pour la clé: {pair.MatchKey}", 16, new PdfPoint(xPosition, yPosition), font);
+            // En-tête du PDF
+            page.SetTextAndFillColor(0, 0, 0); // Noir
+            page.AddText($"RAPPORT DE DIFFERENCES - Document Clé: {pair.MatchKey}", 14, new PdfPoint(xPosition, yPosition), fontBold);
             yPosition -= 30;
 
             foreach (var line in diff.Lines)
             {
-                if (yPosition < 50) // Nouvelle page si on arrive en bas
-                {
-                    page = builder.AddPage(PageSize.A4);
-                    yPosition = page.PageSize.Top - 50;
-                }
+                // On ignore les lignes inchangées pour ne montrer que les différences
+                if (line.Type == ChangeType.Unchanged) continue;
 
                 string prefix = line.Type switch
                 {
-                    ChangeType.Inserted => "[NOUVEAU] + ",
-                    ChangeType.Deleted => "[SUPPRIME] - ",
-                    ChangeType.Modified => "[MODIFIE] * ",
-                    _ => "  "
+                    ChangeType.Inserted => "[+] ",
+                    ChangeType.Deleted => "[-] ",
+                    ChangeType.Modified => "[*] ",
+                    _ => ""
                 };
 
-                // Si le texte est très long, PdfPig nécessite une gestion manuelle du retour à la ligne.
-                // Pour cet exemple robuste, on tronque à 90 caractères par ligne.
-                string safeText = (prefix + line.Text).Replace("\r", "").Replace("\n", "");
-                if (safeText.Length > 90) safeText = safeText.Substring(0, 90) + "...";
-
-                // Le surlignage visuel brut (dessin de rectangles de couleur) est possible mais verbeux.
-                // L'approche "préfixe" est claire et infaillible pour l'extraction de texte pur.
-                if (line.Type != ChangeType.Unchanged)
+                // Application des couleurs selon le type de modification
+                switch (line.Type)
                 {
-                    page.AddText(safeText, 10, new PdfPoint(xPosition, yPosition), font);
+                    case ChangeType.Inserted:
+                        page.SetTextAndFillColor(0, 128, 0); // Vert foncé
+                        break;
+                    case ChangeType.Deleted:
+                        page.SetTextAndFillColor(200, 0, 0); // Rouge
+                        break;
+                    case ChangeType.Modified:
+                        page.SetTextAndFillColor(0, 0, 200); // Bleu
+                        break;
+                }
+
+                // Nettoyage de la ligne
+                string cleanText = (prefix + line.Text).Replace("\r", "").Replace("\n", "").Replace("\t", "    ");
+
+                // Algorithme de Word Wrap (Découpage en plusieurs lignes au lieu de tronquer)
+                var wrappedLines = WrapText(cleanText, maxCharsPerLine);
+
+                foreach (var wrappedLine in wrappedLines)
+                {
+                    // Gestion du changement de page
+                    if (yPosition < margin)
+                    {
+                        page = builder.AddPage(PageSize.A4);
+                        yPosition = page.PageSize.Top - margin;
+                    }
+
+                    page.AddText(wrappedLine, 10, new PdfPoint(xPosition, yPosition), font);
                     yPosition -= lineHeight;
                 }
+
+                // Petit espacement supplémentaire entre les différents blocs modifiés
+                yPosition -= 4;
             }
 
             File.WriteAllBytes(reportPath, builder.Generate());
         });
+    }
+
+    /// <summary>
+    /// Fonction utilitaire pour découper un texte trop long en plusieurs lignes (Word Wrap)
+    /// </summary>
+    private List<string> WrapText(string text, int maxLength)
+    {
+        var lines = new List<string>();
+        for (int i = 0; i < text.Length; i += maxLength)
+        {
+            lines.Add(text.Substring(i, Math.Min(maxLength, text.Length - i)));
+        }
+        return lines;
     }
 }
