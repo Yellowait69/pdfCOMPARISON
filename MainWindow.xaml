@@ -15,7 +15,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>ggg
         </Grid.RowDefinitions>
 
         <GroupBox Header="Configuration des dossiers" Grid.Row="0" Padding="10">
