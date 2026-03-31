@@ -240,7 +240,10 @@ public class PdfProcessingService
         }
 
         page.SetTextAndFillColor(r, g, b);
-        page.AddText(text, fontSize, new PdfPoint(margin, yPosition), font);
+
+        // CORRECTION DE L'ERREUR CS1503 : (decimal)fontSize
+        page.AddText(text, (decimal)fontSize, new PdfPoint(margin, yPosition), font);
+
         yPosition -= (fontSize + 4); // Hauteur dynamique pour la prochaine ligne
     }
 
