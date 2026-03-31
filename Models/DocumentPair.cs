@@ -14,10 +14,18 @@ public partial class DocumentPair : ObservableObject
     [ObservableProperty]
     private string _errorMessage = string.Empty;
 
-    // NOUVEAU : Propriété pour stocker le nombre d'erreurs/différences
+    // Propriété pour stocker le nombre d'erreurs/différences
     // Permet de trier les documents pour afficher ceux avec le plus d'erreurs en premier
     [ObservableProperty]
     private int _diffCount;
+
+    // NOUVEAU : Chemin du rapport PDF généré (côte à côte)
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasReport))]
+    private string _reportPath = string.Empty;
+
+    // NOUVEAU : Booléen automatique pour activer/désactiver le bouton "Ouvrir PDF"
+    public bool HasReport => !string.IsNullOrEmpty(ReportPath);
 
     public DocumentPair(string matchKey, string sourcePath, string? targetPath)
     {

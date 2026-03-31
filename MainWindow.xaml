@@ -12,6 +12,8 @@
     </Window.DataContext>
 
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+
         <Style TargetType="Button" x:Key="ModernPrimaryButton">
             <Setter Property="Background" Value="#3B82F6"/>
             <Setter Property="Foreground" Value="White"/>
@@ -174,6 +176,30 @@
                     <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="150" FontWeight="SemiBold"/>
                     <DataGridTextColumn Header="Source File" Binding="{Binding SourcePath}" Width="350"/>
                     <DataGridTextColumn Header="Details / Errors" Binding="{Binding ErrorMessage}" Width="*"/>
+
+                    <DataGridTemplateColumn Header="Action" Width="120">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Button Content="Ouvrir PDF"
+                                        Command="{Binding DataContext.OpenReportCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                        CommandParameter="{Binding}"
+                                        Visibility="{Binding HasReport, Converter={StaticResource BooleanToVisibilityConverter}, FallbackValue=Hidden}"
+                                        IsEnabled="{Binding HasReport}"
+                                        Padding="10,4"
+                                        Background="#10B981" Foreground="White" BorderThickness="0" Cursor="Hand" FontWeight="SemiBold">
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Style.Triggers>
+                                                <Trigger Property="IsEnabled" Value="False">
+                                                    <Setter Property="Opacity" Value="0.3"/>
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
                 </DataGrid.Columns>
             </DataGrid>
         </Border>

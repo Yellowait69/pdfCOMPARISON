@@ -5,6 +5,7 @@ using PDFComparison.Models;
 using PDFComparison.Services;
 using System;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -39,6 +40,26 @@ public partial class MainViewModel : ObservableObject
 
         // Default output directory on the Desktop
         OutputDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "PDF_DiffReports");
+    }
+
+    // ====================================================================
+    // NOUVEAU : Commande exécutée lors du clic sur le bouton "Ouvrir PDF"
+    // ====================================================================
+    [RelayCommand]
+    private void OpenReport(DocumentPair pair)
+    {
+        if (pair != null && pair.HasReport && File.Exists(pair.ReportPath))
+        {
+            try
+            {
+                // Ouvre le fichier PDF avec le lecteur par défaut de l'ordinateur
+                Process.Start(new ProcessStartInfo(pair.ReportPath) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Impossible d'ouvrir le rapport : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
     }
 
     [RelayCommand]

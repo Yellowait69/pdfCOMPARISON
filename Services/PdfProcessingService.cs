@@ -74,10 +74,15 @@ public class PdfProcessingService
                 }
                 else
                 {
-                    // 2. Generation of the colored difference report et récupération du nombre de différences
-                    int diffCount = await GenerateColoredDiffReportAsync(pair, sourceText, targetText, outputDiffDir);
+                    // Définition du chemin du rapport
+                    string reportPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{pair.MatchKey}.pdf");
 
+                    // 2. Generation of the colored difference report (CÔTE À CÔTE)
+                    int diffCount = await GenerateColoredDiffReportAsync(pair, sourceText, targetText, reportPath);
+
+                    // Mise à jour des propriétés du modèle
                     pair.DiffCount = diffCount;
+                    pair.ReportPath = reportPath; // Active automatiquement le bouton "Ouvrir PDF"
 
                     if (diffCount > 0)
                     {
@@ -86,7 +91,7 @@ public class PdfProcessingService
                     }
                     else
                     {
-                        // Cas où les fichiers sont différents bitairement mais identiques textuellement (faux positifs)
+                        // Cas où les fichiers sont différents bitairement mais identiques textuellement
                         pair.Status = CompareStatus.Identical;
                         pair.ErrorMessage = "Faux positifs ignorés (espaces/sauts de ligne)";
                     }
@@ -122,25 +127,26 @@ public class PdfProcessingService
         return sb.ToString();
     }
 
-    // Changement ici : Task<int> pour retourner le nombre d'erreurs
-    private async Task<int> GenerateColoredDiffReportAsync(DocumentPair pair, string sourceText, string targetText, string outputDir)
+    // Génération du rapport PDF Côte à Côte (Side-by-Side)
+    private async Task<int> GenerateColoredDiffReportAsync(DocumentPair pair, string sourceText, string targetText, string reportPath)
     {
         return await Task.Run(() =>
         {
-            Directory.CreateDirectory(outputDir);
-            string reportPath = Path.Combine(outputDir, $"DiffReport_Doc_{pair.MatchKey}.pdf");
+            // S'assurer que le dossier existe
+            Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
 
-            // NORMALISATION : On nettoie les textes pour éviter que des sauts de ligne
-            // invisibles ne fassent apparaître tout le document comme une erreur.
+            // NORMALISATION : On nettoie les textes pour éviter les faux positifs
             string cleanSource = NormalizePdfText(sourceText);
             string cleanTarget = NormalizePdfText(targetText);
 
-            // Using DiffPlex to generate line-by-line diff sur le texte nettoyé
-            var diffBuilder = new InlineDiffBuilder(new DiffPlex.Differ());
+            // CHANGEMENT MAJEUR : Utilisation de SideBySideDiffBuilder pour avoir 2 colonnes synchronisées
+            var diffBuilder = new SideBySideDiffBuilder(new DiffPlex.Differ());
             var diff = diffBuilder.BuildDiffModel(cleanSource, cleanTarget);
 
             var builder = new PdfDocumentBuilder();
-            PdfPageBuilder page = builder.AddPage(PageSize.A4);
+
+            // Format Paysage (Landscape) : Largeur 842, Hauteur 595
+            PdfPageBuilder page = builder.AddPage(new PdfRectangle(0, 0, 842, 595));
 
             // ==========================================
             // FIX: Using system Arial fonts to support all Unicode characters
@@ -159,74 +165,114 @@ public class PdfProcessingService
             var fontBold = builder.AddTrueTypeFont(File.ReadAllBytes(arialBoldPath));
             // ==========================================
 
-            double margin = 40;
-            double yPosition = page.PageSize.Top - margin;
-            int maxCharsPerLine = 95; // Limit before automatic line break
+            double margin = 30;
+            double yPosition = 595 - margin;
+            int maxCharsPerLine = 70; // Environ 70 caractères max par moitié de page
 
-            // --- EN-TÊTE INTELLIGENT ---
+            // Noms de fichiers
             string sourceFileName = Path.GetFileName(pair.SourcePath);
             string targetFileName = Path.GetFileName(pair.TargetPath!);
 
-            DrawText(ref page, builder, $"RAPPORT DE DIFFÉRENCES - Document Key: {pair.MatchKey}", fontBold, 14, ref yPosition, margin, 0, 0, 0);
-            yPosition -= 15;
-            DrawText(ref page, builder, $"Fichier Source (Rouge) : {sourceFileName}", font, 11, ref yPosition, margin, 200, 0, 0);
-            DrawText(ref page, builder, $"Fichier Cible (Vert)   : {targetFileName}", font, 11, ref yPosition, margin, 0, 128, 0);
-            yPosition -= 20;
+            // --- EN-TÊTE DU RAPPORT ---
+            page.SetTextAndFillColor(0, 0, 0); // Noir
+            page.AddText($"RAPPORT DE DIFFÉRENCES (CÔTE À CÔTE) - Clé: {pair.MatchKey}", 14m, new PdfPoint(margin, yPosition), fontBold);
+            yPosition -= 25;
 
-            int differencesCount = 0; // Compteur de différences
+            // Titre Colonne Gauche (Source)
+            page.SetTextAndFillColor(200, 0, 0); // Rouge
+            page.AddText($"SOURCE (Rouge) : {sourceFileName}", 12m, new PdfPoint(20, yPosition), fontBold);
 
-            // --- CORPS DU RAPPORT ---
-            foreach (var line in diff.Lines)
+            // Titre Colonne Droite (Cible)
+            page.SetTextAndFillColor(0, 128, 0); // Vert
+            page.AddText($"CIBLE (Vert) : {targetFileName}", 12m, new PdfPoint(425, yPosition), fontBold);
+
+            yPosition -= 25; // Espace avant de commencer les textes
+
+            int differencesCount = 0; // Compteur de différences réelles
+
+            // --- CORPS DU RAPPORT (Lecture simultanée gauche/droite) ---
+            for (int i = 0; i < diff.OldText.Lines.Count; i++)
             {
-                // Ignore unchanged lines to only show differences
-                if (line.Type == ChangeType.Unchanged) continue;
+                var leftLine = diff.OldText.Lines[i];
+                var rightLine = diff.NewText.Lines[i];
 
-                differencesCount++; // On incrémente le nombre de différences trouvées
-                string prefix = "";
-                byte r = 0, g = 0, b = 0;
+                // Vérifier si cette ligne contient une différence
+                bool isDiff = (leftLine.Type != ChangeType.Unchanged && leftLine.Type != ChangeType.Imaginary) ||
+                              (rightLine.Type != ChangeType.Unchanged && rightLine.Type != ChangeType.Imaginary);
 
-                // Apply colors and labels according to modification type
-                switch (line.Type)
+                if (isDiff)
                 {
-                    case ChangeType.Inserted:
-                        prefix = "[CIBLE] + : ";
-                        r = 0; g = 128; b = 0; // Dark Green
-                        break;
-                    case ChangeType.Deleted:
-                        prefix = "[SOURCE] - : ";
-                        r = 200; g = 0; b = 0; // Red
-                        break;
-                    case ChangeType.Modified:
-                        prefix = "[MODIFIÉ] * : ";
-                        r = 0; g = 0; b = 200; // Blue
-                        break;
+                    differencesCount++;
                 }
 
-                // Line cleanup
-                string cleanText = (prefix + line.Text).Replace("\r", "").Replace("\n", "").Replace("\t", "    ");
+                // Découper le texte pour qu'il ne dépasse pas sa moitié de page
+                var leftWrapped = WrapText(leftLine.Text ?? "", maxCharsPerLine);
+                var rightWrapped = WrapText(rightLine.Text ?? "", maxCharsPerLine);
 
-                // Word Wrap Algorithm (Split into multiple lines instead of truncating)
-                var wrappedLines = WrapText(cleanText, maxCharsPerLine);
+                // On prend le plus grand nombre de lignes entre la gauche et la droite pour rester parfaitement aligné
+                int maxLines = Math.Max(1, Math.Max(leftWrapped.Count, rightWrapped.Count));
 
-                foreach (var wrappedLine in wrappedLines)
+                for (int j = 0; j < maxLines; j++)
                 {
-                    DrawText(ref page, builder, wrappedLine, font, 10, ref yPosition, margin, r, g, b);
+                    // Gestion du changement de page synchronisé pour les deux colonnes
+                    if (yPosition < margin)
+                    {
+                        page = builder.AddPage(new PdfRectangle(0, 0, 842, 595)); // Nouvelle page Paysage
+                        yPosition = 595 - margin;
+                    }
+
+                    string lText = j < leftWrapped.Count ? leftWrapped[j] : "";
+                    string rText = j < rightWrapped.Count ? rightWrapped[j] : "";
+
+                    // DESSIN COLONNE GAUCHE (Source)
+                    if (!string.IsNullOrEmpty(lText))
+                    {
+                        SetColorForType(page, leftLine.Type);
+                        page.AddText(lText, 10m, new PdfPoint(20, yPosition), font);
+                    }
+
+                    // DESSIN COLONNE DROITE (Cible)
+                    if (!string.IsNullOrEmpty(rText))
+                    {
+                        SetColorForType(page, rightLine.Type);
+                        page.AddText(rText, 10m, new PdfPoint(425, yPosition), font);
+                    }
+
+                    yPosition -= 13; // Interligne
                 }
 
-                // Small extra spacing between different modified blocks
-                yPosition -= 5;
-            }
-
-            // Si la normalisation a éliminé les faux positifs et qu'il n'y a pas de vraie différence
-            if (differencesCount == 0)
-            {
-                DrawText(ref page, builder, "Aucune différence textuelle majeure trouvée (possibles variations d'espaces invisibles).", font, 11, ref yPosition, margin, 100, 100, 100);
+                yPosition -= 4; // Petit espace entre chaque ligne/bloc de texte
             }
 
             File.WriteAllBytes(reportPath, builder.Build());
 
             return differencesCount; // Retourne le compteur final
         });
+    }
+
+    /// <summary>
+    /// Applique la couleur correcte en fonction du type de modification
+    /// </summary>
+    private void SetColorForType(PdfPageBuilder page, ChangeType type)
+    {
+        switch (type)
+        {
+            case ChangeType.Inserted:
+                page.SetTextAndFillColor(0, 128, 0); // Vert
+                break;
+            case ChangeType.Deleted:
+                page.SetTextAndFillColor(200, 0, 0); // Rouge
+                break;
+            case ChangeType.Modified:
+                page.SetTextAndFillColor(0, 0, 200); // Bleu
+                break;
+            case ChangeType.Unchanged:
+                page.SetTextAndFillColor(90, 90, 90); // Gris foncé pour le texte inchangé
+                break;
+            default:
+                page.SetTextAndFillColor(255, 255, 255); // Imaginary (invisible)
+                break;
+        }
     }
 
     /// <summary>
@@ -238,47 +284,25 @@ public class PdfProcessingService
     {
         if (string.IsNullOrWhiteSpace(input)) return string.Empty;
 
-        // 1. On "aplatit" tout le texte : on remplace tous les sauts de lignes
-        // et espaces multiples par un seul et unique espace.
+        // 1. On "aplatit" tout le texte
         string flatText = Regex.Replace(input, @"\s+", " ");
 
-        // 2. Découpage intelligent : on recrée des lignes logiques basées sur la ponctuation.
-        // Cela permet au comparateur de comparer phrase par phrase !
+        // 2. Découpage intelligent basé sur la ponctuation
         flatText = flatText.Replace(". ", ".\n");
         flatText = flatText.Replace("? ", "?\n");
         flatText = flatText.Replace("! ", "!\n");
         flatText = flatText.Replace(": ", ":\n");
 
-        // Gestion intelligente des listes à puces pour les isoler
+        // Gestion intelligente des listes à puces
         flatText = flatText.Replace("•", "\n• ");
         flatText = flatText.Replace(" o ", "\n o ");
 
-        // 3. Nettoyage : on sépare par nos nouveaux sauts de ligne et on enlève le vide
+        // 3. Nettoyage
         var lines = flatText.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries)
                          .Select(l => l.Trim())
                          .Where(l => l.Length > 0);
 
         return string.Join("\n", lines);
-    }
-
-    /// <summary>
-    /// Utilitaire pour dessiner le texte et gérer automatiquement le changement de page PDF.
-    /// </summary>
-    private void DrawText(ref PdfPageBuilder page, PdfDocumentBuilder builder, string text, PdfDocumentBuilder.AddedFont font, double fontSize, ref double yPosition, double margin, byte r, byte g, byte b)
-    {
-        // Page change management
-        if (yPosition < margin)
-        {
-            page = builder.AddPage(PageSize.A4);
-            yPosition = page.PageSize.Top - margin;
-        }
-
-        page.SetTextAndFillColor(r, g, b);
-
-        // CORRECTION DE L'ERREUR CS1503 : (decimal)fontSize
-        page.AddText(text, (decimal)fontSize, new PdfPoint(margin, yPosition), font);
-
-        yPosition -= (fontSize + 4); // Hauteur dynamique pour la prochaine ligne
     }
 
     /// <summary>
