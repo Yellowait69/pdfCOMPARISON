@@ -12,8 +12,7 @@ using System.Threading.Tasks;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Core;
-using UglyToad.PdfPig.Fonts.Standard14Fonts;
-using UglyToad.PdfPig.Writer;
+using UglyToad.PdfPig.Writer; // Standard14Fonts n'est plus nécessaire ici
 
 namespace PDFComparison.Services;
 
@@ -121,8 +120,22 @@ public class PdfProcessingService
             var builder = new PdfDocumentBuilder();
             PdfPageBuilder page = builder.AddPage(PageSize.A4);
 
-            var font = builder.AddStandard14Font(Standard14Font.Helvetica);
-            var fontBold = builder.AddStandard14Font(Standard14Font.HelveticaBold);
+            // ==========================================
+            // FIX: Using system Arial fonts to support all Unicode characters (accents, symbols)
+            // ==========================================
+            string fontsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
+            string arialPath = Path.Combine(fontsFolder, "arial.ttf");
+            string arialBoldPath = Path.Combine(fontsFolder, "arialbd.ttf");
+
+            // Verify if fonts exist, otherwise it might throw on missing files
+            if (!File.Exists(arialPath) || !File.Exists(arialBoldPath))
+            {
+                throw new FileNotFoundException("Required Arial fonts were not found on this system.");
+            }
+
+            var font = builder.AddTrueTypeFont(File.ReadAllBytes(arialPath));
+            var fontBold = builder.AddTrueTypeFont(File.ReadAllBytes(arialBoldPath));
+            // ==========================================
 
             double margin = 40;
             double yPosition = page.PageSize.Top - margin;
