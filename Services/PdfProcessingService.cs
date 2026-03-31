@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Core;
-using UglyToad.PdfPig.Writer; // Standard14Fonts n'est plus nécessaire ici
+using UglyToad.PdfPig.Writer;
 
 namespace PDFComparison.Services;
 
@@ -113,21 +113,26 @@ public class PdfProcessingService
             Directory.CreateDirectory(outputDir);
             string reportPath = Path.Combine(outputDir, $"DiffReport_Doc_{pair.MatchKey}.pdf");
 
-            // Using DiffPlex to generate line-by-line diff
+            // NORMALISATION : On nettoie les textes pour éviter que des sauts de ligne
+            // invisibles ne fassent apparaître tout le document comme une erreur.
+            string cleanSource = NormalizePdfText(sourceText);
+            string cleanTarget = NormalizePdfText(targetText);
+
+            // Using DiffPlex to generate line-by-line diff sur le texte nettoyé
             var diffBuilder = new InlineDiffBuilder(new DiffPlex.Differ());
-            var diff = diffBuilder.BuildDiffModel(sourceText, targetText);
+            var diff = diffBuilder.BuildDiffModel(cleanSource, cleanTarget);
 
             var builder = new PdfDocumentBuilder();
             PdfPageBuilder page = builder.AddPage(PageSize.A4);
 
             // ==========================================
-            // FIX: Using system Arial fonts to support all Unicode characters (accents, symbols)
+            // FIX: Using system Arial fonts to support all Unicode characters
             // ==========================================
             string fontsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
             string arialPath = Path.Combine(fontsFolder, "arial.ttf");
             string arialBoldPath = Path.Combine(fontsFolder, "arialbd.ttf");
 
-            // Verify if fonts exist, otherwise it might throw on missing files
+            // Verify if fonts exist
             if (!File.Exists(arialPath) || !File.Exists(arialBoldPath))
             {
                 throw new FileNotFoundException("Required Arial fonts were not found on this system.");
@@ -139,39 +144,44 @@ public class PdfProcessingService
 
             double margin = 40;
             double yPosition = page.PageSize.Top - margin;
-            double xPosition = margin;
-            double lineHeight = 12;
             int maxCharsPerLine = 95; // Limit before automatic line break
 
-            // PDF Header
-            page.SetTextAndFillColor(0, 0, 0); // Black
-            page.AddText($"DIFFERENCE REPORT - Document Key: {pair.MatchKey}", 14, new PdfPoint(xPosition, yPosition), fontBold);
-            yPosition -= 30;
+            // --- EN-TÊTE INTELLIGENT ---
+            string sourceFileName = Path.GetFileName(pair.SourcePath);
+            string targetFileName = Path.GetFileName(pair.TargetPath!);
 
+            DrawText(ref page, builder, $"RAPPORT DE DIFFÉRENCES - Document Key: {pair.MatchKey}", fontBold, 14, ref yPosition, margin, 0, 0, 0);
+            yPosition -= 15;
+            DrawText(ref page, builder, $"Fichier Source (Rouge) : {sourceFileName}", font, 11, ref yPosition, margin, 200, 0, 0);
+            DrawText(ref page, builder, $"Fichier Cible (Vert)   : {targetFileName}", font, 11, ref yPosition, margin, 0, 128, 0);
+            yPosition -= 20;
+
+            bool hasRealDifferences = false;
+
+            // --- CORPS DU RAPPORT ---
             foreach (var line in diff.Lines)
             {
                 // Ignore unchanged lines to only show differences
                 if (line.Type == ChangeType.Unchanged) continue;
 
-                string prefix = line.Type switch
-                {
-                    ChangeType.Inserted => "[+] ",
-                    ChangeType.Deleted => "[-] ",
-                    ChangeType.Modified => "[*] ",
-                    _ => ""
-                };
+                hasRealDifferences = true;
+                string prefix = "";
+                byte r = 0, g = 0, b = 0;
 
-                // Apply colors according to modification type
+                // Apply colors and labels according to modification type
                 switch (line.Type)
                 {
                     case ChangeType.Inserted:
-                        page.SetTextAndFillColor(0, 128, 0); // Dark Green
+                        prefix = "[CIBLE] + : ";
+                        r = 0; g = 128; b = 0; // Dark Green
                         break;
                     case ChangeType.Deleted:
-                        page.SetTextAndFillColor(200, 0, 0); // Red
+                        prefix = "[SOURCE] - : ";
+                        r = 200; g = 0; b = 0; // Red
                         break;
                     case ChangeType.Modified:
-                        page.SetTextAndFillColor(0, 0, 200); // Blue
+                        prefix = "[MODIFIÉ] * : ";
+                        r = 0; g = 0; b = 200; // Blue
                         break;
                 }
 
@@ -183,23 +193,55 @@ public class PdfProcessingService
 
                 foreach (var wrappedLine in wrappedLines)
                 {
-                    // Page change management
-                    if (yPosition < margin)
-                    {
-                        page = builder.AddPage(PageSize.A4);
-                        yPosition = page.PageSize.Top - margin;
-                    }
-
-                    page.AddText(wrappedLine, 10, new PdfPoint(xPosition, yPosition), font);
-                    yPosition -= lineHeight;
+                    DrawText(ref page, builder, wrappedLine, font, 10, ref yPosition, margin, r, g, b);
                 }
 
                 // Small extra spacing between different modified blocks
-                yPosition -= 4;
+                yPosition -= 5;
+            }
+
+            // Si la normalisation a éliminé les faux positifs et qu'il n'y a pas de vraie différence
+            if (!hasRealDifferences)
+            {
+                DrawText(ref page, builder, "Aucune différence textuelle majeure trouvée (possibles variations d'espaces invisibles).", font, 11, ref yPosition, margin, 100, 100, 100);
             }
 
             File.WriteAllBytes(reportPath, builder.Build());
         });
+    }
+
+    /// <summary>
+    /// Fonction pour normaliser le texte du PDF.
+    /// Remplace les multiples sauts de lignes et espaces par un format unique
+    /// pour éviter que le diff considère des blocs modifiés à cause d'un saut de ligne PDF.
+    /// </summary>
+    private string NormalizePdfText(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+
+        // Sépare par ligne, enlève les espaces inutiles, et ignore les lignes vides
+        var lines = input.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                         .Select(l => l.Trim())
+                         .Where(l => l.Length > 0);
+
+        return string.Join("\n", lines);
+    }
+
+    /// <summary>
+    /// Utilitaire pour dessiner le texte et gérer automatiquement le changement de page PDF.
+    /// </summary>
+    private void DrawText(ref PdfPageBuilder page, PdfDocumentBuilder builder, string text, PdfDocumentBuilder.AddedFont font, double fontSize, ref double yPosition, double margin, byte r, byte g, byte b)
+    {
+        // Page change management
+        if (yPosition < margin)
+        {
+            page = builder.AddPage(PageSize.A4);
+            yPosition = page.PageSize.Top - margin;
+        }
+
+        page.SetTextAndFillColor(r, g, b);
+        page.AddText(text, fontSize, new PdfPoint(margin, yPosition), font);
+        yPosition -= (fontSize + 4); // Hauteur dynamique pour la prochaine ligne
     }
 
     /// <summary>

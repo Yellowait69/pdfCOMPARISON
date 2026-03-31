@@ -106,12 +106,14 @@ public partial class MainViewModel : ObservableObject
                 return;
             }
 
-            StatusMessage = $"Comparing {ProgressMax} documents (Multithreading)...";
+            // Affichage plus clair du début de la comparaison
+            StatusMessage = $"Comparaison de {ProgressMax} documents en cours...";
 
             var progress = new Progress<int>(value =>
             {
                 ProgressValue = value;
-                StatusMessage = $"Processing: {value} / {ProgressMax}";
+                // Mise à jour claire du compteur pour l'utilisateur
+                StatusMessage = $"Analyse en cours : document {value} sur {ProgressMax}";
             });
 
             // 3. Launch heavy asynchronous processing
