@@ -145,8 +145,8 @@ public class PdfProcessingService
 
             var builder = new PdfDocumentBuilder();
 
-            // Format Paysage (Landscape) : Largeur 842, Hauteur 595
-            PdfPageBuilder page = builder.AddPage(new PdfRectangle(0, 0, 842, 595));
+            // CORRECTION ICI : Format Paysage (Landscape) : Largeur 842, Hauteur 595
+            PdfPageBuilder page = builder.AddPage(842, 595);
 
             // ==========================================
             // FIX: Using system Arial fonts to support all Unicode characters
@@ -217,7 +217,8 @@ public class PdfProcessingService
                     // Gestion du changement de page synchronisé pour les deux colonnes
                     if (yPosition < margin)
                     {
-                        page = builder.AddPage(new PdfRectangle(0, 0, 842, 595)); // Nouvelle page Paysage
+                        // CORRECTION ICI AUSSI : 842 de largeur, 595 de hauteur
+                        page = builder.AddPage(842, 595); // Nouvelle page Paysage
                         yPosition = 595 - margin;
                     }
 
