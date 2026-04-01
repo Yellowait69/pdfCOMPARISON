@@ -138,7 +138,7 @@ public class PdfProcessingService
         return sb.ToString();
     }
 
-    // NOUVEAU: Génère le rapport en PAYSAGE (Source à gauche, Target à droite)
+    // NOUVEAU: Génère le rapport en PAYSAGE (Source à gauche, Target à droite) avec les types Decimal (m)
     private async Task<(int DiffCount, DocumentDiffSummary Summary)> GenerateIndividualFullReportAsync(DocumentPair pair, string sourceText, string targetText, string reportPath)
     {
         return await Task.Run(() =>
@@ -156,27 +156,28 @@ public class PdfProcessingService
             PdfPageBuilder page = builder.AddPage(842, 595);
             var (font, fontBold) = LoadFonts(builder);
 
-            double margin = 30;
-            double colWidth = 370; // Largeur de chaque colonne
-            double leftColX = margin;
-            double rightColX = 842 / 2 + 10;
-            double yPosition = 595 - margin;
+            // CORRECTION: Utilisation de decimal ("m") à la place de double
+            decimal margin = 30m;
+            decimal colWidth = 370m;
+            decimal leftColX = margin;
+            decimal rightColX = 842m / 2m + 10m;
+            decimal yPosition = 595m - margin;
 
             string targetFileName = Path.GetFileName(pair.TargetPath!);
 
             // En-tête
             page.SetTextAndFillColor(0, 0, 0);
             page.AddText($"RAPPORT DÉTAILLÉ - Document: {targetFileName} (Format Paysage)", 14m, new PdfPoint(margin, yPosition), fontBold);
-            yPosition -= 15;
+            yPosition -= 15m;
             page.SetTextAndFillColor(100, 100, 100);
             page.AddText("Légende : Fond Rouge = Ajout/Suppression | Fond Jaune = Modification exacte", 10m, new PdfPoint(margin, yPosition), font);
-            yPosition -= 25;
+            yPosition -= 25m;
 
             // Titres des colonnes
             page.SetTextAndFillColor(0, 50, 150);
             page.AddText("DOCUMENT SOURCE (Original)", 12m, new PdfPoint(leftColX, yPosition), fontBold);
             page.AddText("DOCUMENT CIBLE (Modifié)", 12m, new PdfPoint(rightColX, yPosition), fontBold);
-            yPosition -= 20;
+            yPosition -= 20m;
 
             int differencesCount = 0;
             var summary = new DocumentDiffSummary { DocumentName = targetFileName };
@@ -212,11 +213,11 @@ public class PdfProcessingService
                 if (yPosition < margin)
                 {
                     page = builder.AddPage(842, 595);
-                    yPosition = 595 - margin;
+                    yPosition = 595m - margin;
                     page.SetTextAndFillColor(0, 50, 150);
                     page.AddText("DOCUMENT SOURCE (Suite)", 10m, new PdfPoint(leftColX, yPosition), fontBold);
                     page.AddText("DOCUMENT CIBLE (Suite)", 10m, new PdfPoint(rightColX, yPosition), fontBold);
-                    yPosition -= 20;
+                    yPosition -= 20m;
                 }
 
                 // Affichage côte à côte
@@ -240,7 +241,7 @@ public class PdfProcessingService
                     }
                 }
 
-                yPosition -= 14; // Espacement de ligne
+                yPosition -= 14m; // Espacement de ligne
             }
 
             File.WriteAllBytes(reportPath, builder.Build());
@@ -248,20 +249,19 @@ public class PdfProcessingService
         });
     }
 
-    // NOUVEAU : Dessine le texte avec l'analyse des mots modifiés (Fluo Jaune)
-    private void DrawLineWithWordDiff(PdfPageBuilder page, string oldText, string newText, double leftX, double rightX, double y, PdfDocumentBuilder.AddedFont font, double maxWidth)
+    // CORRECTION: types decimal
+    private void DrawLineWithWordDiff(PdfPageBuilder page, string oldText, string newText, decimal leftX, decimal rightX, decimal y, PdfDocumentBuilder.AddedFont font, decimal maxWidth)
     {
         oldText ??= "";
         newText ??= "";
 
-        // Comparaison mot par mot (On simule une comparaison de lignes en remplaçant les espaces par des sauts de ligne)
+        // Comparaison mot par mot
         var wordDiffBuilder = new SideBySideDiffBuilder(new DiffPlex.Differ());
         var wordDiff = wordDiffBuilder.BuildDiffModel(oldText.Replace(" ", "\n"), newText.Replace(" ", "\n"));
 
-        double currentLeftX = leftX;
-        double currentRightX = rightX;
+        decimal currentLeftX = leftX;
+        decimal currentRightX = rightX;
 
-        // Limite visuelle très basique pour éviter de sortir de la colonne (troncature)
         for (int i = 0; i < wordDiff.OldText.Lines.Count; i++)
         {
             var oldWord = wordDiff.OldText.Lines[i];
@@ -270,55 +270,59 @@ public class PdfProcessingService
             // Rendu à Gauche (Source)
             if (oldWord.Type != ChangeType.Imaginary && oldWord.Text != null)
             {
-                if (currentLeftX < leftX + maxWidth - 20)
+                if (currentLeftX < leftX + maxWidth - 20m)
                 {
                     string word = oldWord.Text + " ";
-                    if (oldWord.Type == ChangeType.Deleted) DrawHighlightBox(page, currentLeftX, y, word.Length * 5, 12, 255, 200, 200); // Rouge clair
-                    if (oldWord.Type == ChangeType.Modified) DrawHighlightBox(page, currentLeftX, y, word.Length * 5, 12, 255, 255, 150); // Jaune clair
+                    decimal wWidth = word.Length * 5m; // Approximation de la largeur
+
+                    if (oldWord.Type == ChangeType.Deleted) DrawHighlightBox(page, currentLeftX, y, wWidth, 12m, 255, 200, 200); // Rouge clair
+                    if (oldWord.Type == ChangeType.Modified) DrawHighlightBox(page, currentLeftX, y, wWidth, 12m, 255, 255, 150); // Jaune clair
 
                     page.SetTextAndFillColor(0, 0, 0);
                     page.AddText(word, 10m, new PdfPoint(currentLeftX, y), font);
-                    currentLeftX += word.Length * 5; // Approximation de la largeur
+                    currentLeftX += wWidth;
                 }
             }
 
             // Rendu à Droite (Cible)
             if (newWord.Type != ChangeType.Imaginary && newWord.Text != null)
             {
-                if (currentRightX < rightX + maxWidth - 20)
+                if (currentRightX < rightX + maxWidth - 20m)
                 {
                     string word = newWord.Text + " ";
-                    if (newWord.Type == ChangeType.Inserted) DrawHighlightBox(page, currentRightX, y, word.Length * 5, 12, 255, 200, 200); // Rouge clair
-                    if (newWord.Type == ChangeType.Modified) DrawHighlightBox(page, currentRightX, y, word.Length * 5, 12, 255, 255, 150); // Jaune clair
+                    decimal wWidth = word.Length * 5m;
+
+                    if (newWord.Type == ChangeType.Inserted) DrawHighlightBox(page, currentRightX, y, wWidth, 12m, 255, 200, 200); // Rouge clair
+                    if (newWord.Type == ChangeType.Modified) DrawHighlightBox(page, currentRightX, y, wWidth, 12m, 255, 255, 150); // Jaune clair
 
                     page.SetTextAndFillColor(0, 0, 0);
                     page.AddText(word, 10m, new PdfPoint(currentRightX, y), font);
-                    currentRightX += word.Length * 5; // Approximation de la largeur
+                    currentRightX += wWidth;
                 }
             }
         }
     }
 
-    private void DrawSimpleText(PdfPageBuilder page, string text, double x, double y, PdfDocumentBuilder.AddedFont font, double maxWidth, string colorCode)
+    // CORRECTION: types decimal
+    private void DrawSimpleText(PdfPageBuilder page, string text, decimal x, decimal y, PdfDocumentBuilder.AddedFont font, decimal maxWidth, string colorCode)
     {
-        // Troncature basique pour ne pas déborder
         string display = text.Length > 70 ? text.Substring(0, 67) + "..." : text;
 
         if (colorCode == "Red")
         {
-            // Surlignage rouge pour la phrase entière
-            DrawHighlightBox(page, x, y, display.Length * 5, 12, 255, 200, 200);
+            DrawHighlightBox(page, x, y, display.Length * 5m, 12m, 255, 200, 200);
         }
 
         page.SetTextAndFillColor(0, 0, 0);
         page.AddText(display, 10m, new PdfPoint(x, y), font);
     }
 
-    private void DrawHighlightBox(PdfPageBuilder page, double x, double y, double width, double height, byte r, byte g, byte b)
+    // CORRECTION: Utilisation de "fill: true" de PdfPig et suppression de FillPath()
+    private void DrawHighlightBox(PdfPageBuilder page, decimal x, decimal y, decimal width, decimal height, byte r, byte g, byte b)
     {
         page.SetTextAndFillColor(r, g, b);
-        page.DrawRectangle(new PdfPoint(x, y - 2), width, height);
-        page.FillPath();
+        // Signature PdfPig: DrawRectangle(PdfPoint bottomL, decimal width, decimal height, decimal lineWidth, bool fill)
+        page.DrawRectangle(new PdfPoint(x, y - 2m), width, height, 0m, true);
     }
 
     private async Task GenerateGlobalSynthesisReportAsync(List<DocumentDiffSummary> summaries, string outputDiffDir)
@@ -332,44 +336,44 @@ public class PdfProcessingService
             PdfPageBuilder page = builder.AddPage(595, 842); // Portrait classique pour la synthèse
             var (font, fontBold) = LoadFonts(builder);
 
-            double margin = 40;
-            double yPosition = 842 - margin;
+            decimal margin = 40m;
+            decimal yPosition = 842m - margin;
             int maxChars = 85;
 
             page.SetTextAndFillColor(0, 0, 0);
             page.AddText("SYNTHÈSE GLOBALE DES DIFFÉRENCES", 16m, new PdfPoint(margin, yPosition), fontBold);
-            yPosition -= 20;
+            yPosition -= 20m;
             page.SetTextAndFillColor(100, 100, 100);
             page.AddText("Ce document présente un résumé narratif de toutes les modifications détectées.", 10m, new PdfPoint(margin, yPosition), font);
-            yPosition -= 35;
+            yPosition -= 35m;
 
             foreach (var doc in summaries.OrderBy(s => s.DocumentName))
             {
-                if (yPosition < margin + 50) { page = builder.AddPage(595, 842); yPosition = 842 - margin; }
+                if (yPosition < margin + 50m) { page = builder.AddPage(595, 842); yPosition = 842m - margin; }
 
                 page.SetTextAndFillColor(0, 50, 150);
                 page.AddText($"► Fichier: {doc.DocumentName}", 13m, new PdfPoint(margin, yPosition), fontBold);
-                yPosition -= 20;
+                yPosition -= 20m;
 
                 foreach (var block in doc.Blocks)
                 {
-                    if (yPosition < margin + 40) { page = builder.AddPage(595, 842); yPosition = 842 - margin; }
+                    if (yPosition < margin + 40m) { page = builder.AddPage(595, 842); yPosition = 842m - margin; }
 
                     page.SetTextAndFillColor(0, 0, 0);
                     if (!string.IsNullOrWhiteSpace(block.ContextBefore))
                     {
                         foreach (var l in WrapText($"... {block.ContextBefore}", maxChars))
                         {
-                            page.AddText(l, 10m, new PdfPoint(margin + 15, yPosition), font);
-                            yPosition -= 12;
+                            page.AddText(l, 10m, new PdfPoint(margin + 15m, yPosition), font);
+                            yPosition -= 12m;
                         }
                     }
 
                     page.SetTextAndFillColor(200, 0, 0);
                     foreach (var l in WrapText($"-> {block.DiffContent}", maxChars))
                     {
-                        page.AddText(l, 11m, new PdfPoint(margin + 15, yPosition), fontBold);
-                        yPosition -= 13;
+                        page.AddText(l, 11m, new PdfPoint(margin + 15m, yPosition), fontBold);
+                        yPosition -= 13m;
                     }
 
                     page.SetTextAndFillColor(0, 0, 0);
@@ -377,13 +381,13 @@ public class PdfProcessingService
                     {
                         foreach (var l in WrapText($"{block.ContextAfter} ...", maxChars))
                         {
-                            page.AddText(l, 10m, new PdfPoint(margin + 15, yPosition), font);
-                            yPosition -= 12;
+                            page.AddText(l, 10m, new PdfPoint(margin + 15m, yPosition), font);
+                            yPosition -= 12m;
                         }
                     }
-                    yPosition -= 15;
+                    yPosition -= 15m;
                 }
-                yPosition -= 20;
+                yPosition -= 20m;
             }
 
             File.WriteAllBytes(reportPath, builder.Build());
