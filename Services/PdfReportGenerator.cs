@@ -7,7 +7,7 @@ using DiffPlex;
 using DiffPlex.DiffBuilder;
 using DiffPlex.DiffBuilder.Model;
 using PDFComparison.Models;
-using ScottPlot; // Intégration de ScottPlot pour les graphiques
+using ScottPlot;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Core;
@@ -69,8 +69,15 @@ public class PdfReportGenerator
         int totalInserts = 0, totalDeletes = 0, totalModifies = 0;
         int typeDates = 0, typeNumbers = 0, typeWords = 0;
 
+        int totalOldWords = 0;
+        int totalNewWords = 0;
+        int criticalAlerts = 0;
+
         var numRegex = new Regex(@"^\s*[\d.,%€$£]+\s*$");
         var dateRegex = new Regex(@"\b\d{1,4}[-/]\d{1,2}[-/]\d{1,4}\b");
+
+        // Mots sensibles pour l'audit juridique/financier
+        var criticalRegex = new Regex(@"(?i)\b(prix|pénalité|pénalités|résiliation|ttc|ht|garantie|article|euro|taxe|montant|facture)\b");
 
         foreach (var doc in summaries)
         {
@@ -80,31 +87,48 @@ public class PdfReportGenerator
                 else if (block.Type == ChangeType.Deleted) totalDeletes++;
                 else if (block.Type == ChangeType.Modified) totalModifies++;
 
-                string txtToAnalyze = block.Type == ChangeType.Deleted ? block.OldText : block.NewText;
+                string oldTxt = block.OldText ?? "";
+                string newTxt = block.NewText ?? "";
 
+                // Calcul du Bilan de Mots
+                totalOldWords += oldTxt.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
+                totalNewWords += newTxt.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
+
+                string txtToAnalyze = block.Type == ChangeType.Deleted ? oldTxt : newTxt;
+
+                // Typage des données
                 if (dateRegex.IsMatch(txtToAnalyze)) typeDates++;
                 else if (numRegex.IsMatch(txtToAnalyze)) typeNumbers++;
                 else typeWords++;
+
+                // Détection de termes critiques
+                criticalAlerts += criticalRegex.Matches(oldTxt).Count;
+                criticalAlerts += criticalRegex.Matches(newTxt).Count;
             }
         }
+
         int totalChanges = totalInserts + totalDeletes + totalModifies;
+        int wordBalance = totalNewWords - totalOldWords;
+
+        // Récupération du Top 3 des fichiers les plus modifiés
+        var topModifiedFiles = summaries
+            .OrderByDescending(s => s.Blocks.Count)
+            .Take(3)
+            .ToList();
 
         // ==========================================
         // 2. CRÉATION DU TABLEAU DE BORD
         // ==========================================
-        PdfPageBuilder page = builder.AddPage(842, 595); // Format Paysage (A4)
+        PdfPageBuilder page = builder.AddPage(842, 595); // Paysage (A4)
         decimal margin = 40m;
         decimal yPosition = 595m - margin;
 
-        page.SetTextAndFillColor(0, 0, 0);
-        page.AddText("SYNTHÈSE GLOBALE DES DIFFÉRENCES", 18m, new(margin, yPosition), fontBold);
-        yPosition -= 20m;
-        page.SetTextAndFillColor(100, 100, 100);
-        page.AddText("Analyse comparative automatisée des documents originaux et modifiés.", 10m, new(margin, yPosition), font);
-        yPosition -= 40m;
-
-        // Génère les graphiques via ScottPlot
-        DrawDashboardWithScottPlot(page, margin, yPosition, totalChanges, totalInserts, totalDeletes, totalModifies, typeDates, typeNumbers, typeWords, summaries.Count, font, fontBold);
+        // Dessin du Dashboard avec les nouveaux paramètres
+        DrawDashboardWithScottPlot(page, margin, yPosition,
+            totalChanges, totalInserts, totalDeletes, totalModifies,
+            typeDates, typeNumbers, typeWords, summaries.Count,
+            wordBalance, criticalAlerts, topModifiedFiles,
+            font, fontBold);
 
         // ==========================================
         // 3. GÉNÉRATION DES PAGES DE DÉTAILS
@@ -115,12 +139,11 @@ public class PdfReportGenerator
 
         foreach (var doc in summaries.OrderBy(s => s.DocumentName))
         {
-            // Nouvelle page pour chaque document après le tableau de bord
             page = builder.AddPage(842, 595);
             yPosition = 595m - margin;
 
             page.SetTextAndFillColor(0, 50, 150);
-            page.AddText($"► Fichier: {doc.DocumentName}", 14m, new(margin, yPosition), fontBold);
+            page.AddText($"► Fichier: {doc.DocumentName}", 14m, new PdfPoint((double)margin, (double)yPosition), fontBold);
             yPosition -= 25m;
 
             foreach (var block in doc.Blocks)
@@ -144,17 +167,16 @@ public class PdfReportGenerator
                 };
 
                 page.SetTextAndFillColor(0, 0, 0);
-                page.AddText(changeTypeStr, 11m, new(margin, yPosition), fontBold);
+                page.AddText(changeTypeStr, 11m, new PdfPoint((double)margin, (double)yPosition), fontBold);
 
                 yPosition -= 15m;
                 page.SetTextAndFillColor(150, 150, 150);
-                page.AddText("Document Original (Source)", 9m, new(leftColumnX, yPosition), fontBold);
-                page.AddText("Document Modifié (Cible)", 9m, new(rightColumnX, yPosition), fontBold);
+                page.AddText("Document Original (Source)", 9m, new PdfPoint((double)leftColumnX, (double)yPosition), fontBold);
+                page.AddText("Document Modifié (Cible)", 9m, new PdfPoint((double)rightColumnX, (double)yPosition), fontBold);
                 yPosition -= 15m;
 
                 var (leftChunks, rightChunks) = GetInlineDiffChunks(block.OldText, block.NewText);
 
-                // --- COLONNE GAUCHE ---
                 decimal currentYLeft = yPosition;
                 if (!string.IsNullOrWhiteSpace(block.ContextBefore))
                     currentYLeft = DrawTextLines(page, $"... {block.ContextBefore}", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
@@ -167,7 +189,6 @@ public class PdfReportGenerator
                 if (!string.IsNullOrWhiteSpace(block.ContextAfter))
                     currentYLeft = DrawTextLines(page, $"{block.ContextAfter} ...", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
 
-                // --- COLONNE DROITE ---
                 decimal currentYRight = yPosition;
                 if (!string.IsNullOrWhiteSpace(block.ContextBefore))
                     currentYRight = DrawTextLines(page, $"... {block.ContextBefore}", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
@@ -182,7 +203,7 @@ public class PdfReportGenerator
 
                 yPosition = Math.Min(currentYLeft, currentYRight) - 20m;
                 page.SetStrokeColor(220, 220, 220);
-                page.DrawLine(new(margin, yPosition + 10m), new(842m - margin, yPosition + 10m), 0.5m);
+                page.DrawLine(new PdfPoint((double)margin, (double)(yPosition + 10m)), new PdfPoint((double)(842m - margin), (double)(yPosition + 10m)), 0.5m);
             }
             yPosition -= 20m;
         }
@@ -191,38 +212,65 @@ public class PdfReportGenerator
     }
 
     // ==========================================
-    // MOTEUR DE DESSIN DU TABLEAU DE BORD (SCOTTPLOT)
+    // MOTEUR DE DESSIN DU TABLEAU DE BORD
     // ==========================================
 
     private void DrawDashboardWithScottPlot(PdfPageBuilder page, decimal startX, decimal startY,
         int totalChanges, int inserts, int deletes, int modifies,
         int dates, int numbers, int words, int totalFiles,
+        int wordBalance, int criticalAlerts, List<DocumentDiffSummary> topFiles,
         PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold)
     {
         decimal currentY = startY;
 
+        // EN-TÊTE ET MÉTADONNÉES
         page.SetTextAndFillColor(0, 50, 150);
-        page.AddText("TABLEAU DE BORD DES STATISTIQUES", 14m, new(startX, currentY), fontBold);
-        currentY -= 35m;
+        page.AddText("RAPPORT DE SYNTHÈSE GLOBALE", 18m, new PdfPoint((double)startX, (double)currentY), fontBold);
 
-        DrawStatBox(page, startX, currentY, "Fichiers impactés", totalFiles.ToString(), font, fontBold);
-        DrawStatBox(page, startX + 160m, currentY, "Total des changements", totalChanges.ToString(), font, fontBold);
+        page.SetTextAndFillColor(100, 100, 100);
+        page.AddText($"Généré le {DateTime.Now:dd/MM/yyyy à HH:mm} • Comparaison automatisée de documents.", 10m, new PdfPoint((double)startX, (double)(currentY - 18m)), font);
 
-        currentY -= 65m;
+        currentY -= 50m;
+
+        // CARTES DE KPI (4 Boîtes alignées)
+        string balanceText = wordBalance > 0 ? $"+ {wordBalance} mots" : $"{wordBalance} mots";
+        DrawStatBox(page, startX, currentY, "Fichiers impactés", totalFiles.ToString(), font, fontBold, 0, 50, 150);
+        DrawStatBox(page, startX + 155m, currentY, "Total changements", totalChanges.ToString(), font, fontBold, 0, 50, 150);
+        DrawStatBox(page, startX + 310m, currentY, "Bilan net (Volume)", balanceText, font, fontBold, wordBalance < 0 ? (byte)220 : (byte)16, wordBalance < 0 ? (byte)20 : (byte)185, wordBalance < 0 ? (byte)20 : (byte)129); // Rouge si perte, Vert si gain
+        DrawStatBox(page, startX + 465m, currentY, "Mots Sensibles", criticalAlerts.ToString(), font, fontBold, criticalAlerts > 0 ? (byte)255 : (byte)0, criticalAlerts > 0 ? (byte)140 : (byte)50, criticalAlerts > 0 ? (byte)0 : (byte)150); // Orange si alertes
+
+        currentY -= 60m;
 
         if (totalChanges == 0)
         {
             page.SetTextAndFillColor(100, 100, 100);
-            page.AddText("Aucune différence détectée lors de cette session.", 12m, new(startX, currentY), font);
+            page.AddText("Aucune différence détectée lors de cette session.", 12m, new PdfPoint((double)startX, (double)currentY), font);
             return;
         }
 
+        // TOP 3 DES FICHIERS ET ALERTES CRITIQUES
         page.SetTextAndFillColor(0, 0, 0);
-        page.AddText("Répartition par type d'action :", 12m, new(startX, currentY), fontBold);
-        page.AddText("Nature des données impactées :", 12m, new(startX + 380m, currentY), fontBold);
+        page.AddText("Top 3 des fichiers les plus modifiés :", 12m, new PdfPoint((double)startX, (double)currentY), fontBold);
+
+        decimal listY = currentY - 20m;
+        foreach (var file in topFiles)
+        {
+            page.SetTextAndFillColor(80, 80, 80);
+            page.AddText($"• {file.DocumentName}", 10m, new PdfPoint((double)startX, (double)listY), font);
+            page.SetTextAndFillColor(0, 50, 150);
+            page.AddText($"{file.Blocks.Count} diffs", 10m, new PdfPoint((double)(startX + 280m), (double)listY), fontBold);
+            listY -= 15m;
+        }
+
+        currentY -= 75m;
+
+        // TITRES DES GRAPHIQUES
+        page.SetTextAndFillColor(0, 0, 0);
+        page.AddText("Répartition par type d'action :", 12m, new PdfPoint((double)startX, (double)currentY), fontBold);
+        page.AddText("Nature des données impactées :", 12m, new PdfPoint((double)(startX + 380m), (double)currentY), fontBold);
         currentY -= 10m;
 
-        // Graphique 1
+        // GRAPHIQUE 1 : ACTIONS
         var plt1 = new Plot();
         plt1.HideGrid();
         plt1.HideAxesAndGrid();
@@ -235,12 +283,10 @@ public class PdfReportGenerator
         var pie1 = plt1.Add.Pie(slices1);
         pie1.ExplodeFraction = 0.05;
 
-        byte[] imgBytes1 = plt1.GetImageBytes(350, 250, ImageFormat.Png);
+        byte[] imgBytes1 = plt1.GetImageBytes(350, 220, ImageFormat.Png);
+        page.AddPng(imgBytes1, new PdfRectangle((short)startX, (short)(currentY - 220m), (short)(startX + 350m), (short)currentY));
 
-        // CORRECTION : Cast explicite en (short) pour le constructeur de PdfRectangle
-        page.AddPng(imgBytes1, new PdfRectangle((short)startX, (short)(currentY - 250m), (short)(startX + 350m), (short)currentY));
-
-        // Graphique 2
+        // GRAPHIQUE 2 : NATURE DES DONNÉES
         var plt2 = new Plot();
         plt2.HideGrid();
         plt2.HideAxesAndGrid();
@@ -253,20 +299,18 @@ public class PdfReportGenerator
         var pie2 = plt2.Add.Pie(slices2);
         pie2.ExplodeFraction = 0.05;
 
-        byte[] imgBytes2 = plt2.GetImageBytes(350, 250, ImageFormat.Png);
-
-        // CORRECTION : Cast explicite en (short) pour le constructeur de PdfRectangle
-        page.AddPng(imgBytes2, new PdfRectangle((short)(startX + 380m), (short)(currentY - 250m), (short)(startX + 380m + 350m), (short)currentY));
+        byte[] imgBytes2 = plt2.GetImageBytes(350, 220, ImageFormat.Png);
+        page.AddPng(imgBytes2, new PdfRectangle((short)(startX + 380m), (short)(currentY - 220m), (short)(startX + 380m + 350m), (short)currentY));
     }
 
-    private void DrawStatBox(PdfPageBuilder page, decimal x, decimal y, string label, string value, PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold)
+    private void DrawStatBox(PdfPageBuilder page, decimal x, decimal y, string label, string value, PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold, byte rValue, byte gValue, byte bValue)
     {
         page.SetTextAndFillColor(245, 247, 250);
-        page.DrawRectangle(new(x, y - 25m), 140m, 45m, 0m, true);
+        page.DrawRectangle(new PdfPoint((double)x, (double)(y - 25m)), 140m, 45m, 0m, true);
         page.SetTextAndFillColor(100, 100, 100);
-        page.AddText(label, 9m, new(x + 10m, y + 2m), font);
-        page.SetTextAndFillColor(0, 50, 150);
-        page.AddText(value, 18m, new(x + 10m, y - 18m), fontBold);
+        page.AddText(label, 9m, new PdfPoint((double)(x + 10m), (double)(y + 2m)), font);
+        page.SetTextAndFillColor(rValue, gValue, bValue); // Couleur dynamique de la valeur
+        page.AddText(value, 18m, new PdfPoint((double)(x + 10m), (double)(y - 18m)), fontBold);
     }
 
     // ==========================================
@@ -336,22 +380,18 @@ public class PdfReportGenerator
                 {
                     currentY -= 13m;
                     currentX = startX;
-
                     if (string.IsNullOrWhiteSpace(word)) continue;
                 }
 
                 var font = chunk.isBold ? fontBold : fontNormal;
                 page.SetTextAndFillColor(chunk.r, chunk.g, chunk.b);
-                page.AddText(word.Replace("\n", ""), fontSize, new(currentX, currentY), font);
+                page.AddText(word.Replace("\n", ""), fontSize, new PdfPoint((double)currentX, (double)currentY), font);
 
                 currentX += wordWidth;
             }
         }
 
-        if (currentX > startX)
-        {
-            currentY -= 13m;
-        }
+        if (currentX > startX) currentY -= 13m;
         return currentY;
     }
 
@@ -412,13 +452,13 @@ public class PdfReportGenerator
             switch (style)
             {
                 case MarkupStyle.Strikethrough:
-                    pageBuilder.DrawLine(new(seg.minX, seg.baselineY + (seg.fontSize * 0.3m)), new(seg.maxX, seg.baselineY + (seg.fontSize * 0.3m)), strokeWidth);
+                    pageBuilder.DrawLine(new PdfPoint((double)seg.minX, (double)(seg.baselineY + (seg.fontSize * 0.3m))), new PdfPoint((double)seg.maxX, (double)(seg.baselineY + (seg.fontSize * 0.3m))), strokeWidth);
                     break;
                 case MarkupStyle.Underline:
-                    pageBuilder.DrawLine(new(seg.minX, seg.baselineY - (seg.fontSize * 0.12m)), new(seg.maxX, seg.baselineY - (seg.fontSize * 0.12m)), strokeWidth);
+                    pageBuilder.DrawLine(new PdfPoint((double)seg.minX, (double)(seg.baselineY - (seg.fontSize * 0.12m))), new PdfPoint((double)seg.maxX, (double)(seg.baselineY - (seg.fontSize * 0.12m))), strokeWidth);
                     break;
                 case MarkupStyle.Box:
-                    pageBuilder.DrawRectangle(new(seg.minX - 1m, seg.baselineY - (seg.fontSize * 0.15m)), width + 2m, seg.fontSize * 0.9m, strokeWidth, false);
+                    pageBuilder.DrawRectangle(new PdfPoint((double)(seg.minX - 1m), (double)(seg.baselineY - (seg.fontSize * 0.15m))), width + 2m, seg.fontSize * 0.9m, strokeWidth, false);
                     break;
             }
         }
@@ -428,9 +468,9 @@ public class PdfReportGenerator
     {
         decimal yPosition = Math.Max((decimal)pageBuilder.PageSize.Height - 30m, 10m);
         pageBuilder.SetTextAndFillColor(255, 255, 255);
-        pageBuilder.DrawRectangle(new(10m, yPosition), 300m, 20m, 0m, true);
+        pageBuilder.DrawRectangle(new PdfPoint(10.0, (double)yPosition), 300m, 20m, 0m, true);
         pageBuilder.SetTextAndFillColor(0, 50, 150);
-        pageBuilder.AddText(text, 12m, new(15m, yPosition + 5m), fontBold);
+        pageBuilder.AddText(text, 12m, new PdfPoint(15.0, (double)(yPosition + 5m)), fontBold);
     }
 
     private decimal DrawTextLines(PdfPageBuilder page, string text, decimal startY, decimal startX, int maxChars, byte r, byte g, byte b, PdfDocumentBuilder.AddedFont fontToUse)
@@ -440,7 +480,7 @@ public class PdfReportGenerator
 
         foreach (var line in WrapText(text, maxChars))
         {
-            page.AddText(line, 10m, new(startX, currentY), fontToUse);
+            page.AddText(line, 10m, new PdfPoint((double)startX, (double)currentY), fontToUse);
             currentY -= 13m;
         }
         return currentY;
