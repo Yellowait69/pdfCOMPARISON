@@ -345,20 +345,20 @@ public class PdfProcessingService
         return string.Empty;
     }
 
-    private (UglyToad.PdfPig.Writer.PdfFont Font, UglyToad.PdfPig.Writer.PdfFont FontBold) LoadFonts(PdfDocumentBuilder builder)
+    private (AddedFont Font, AddedFont FontBold) LoadFonts(PdfDocumentBuilder builder)
     {
         string fontsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
         string arialPath = Path.Combine(fontsFolder, "arial.ttf");
         string arialBoldPath = Path.Combine(fontsFolder, "arialbd.ttf");
 
         if (!File.Exists(arialPath) || !File.Exists(arialBoldPath))
-            throw new FileNotFoundException("Required Arial fonts were not found on this system.");
+           throw new FileNotFoundException("Required Arial fonts were not found on this system.");
 
-        //builder.AddTrueTypeFont returns an UglyToad.PdfPig.Writer.PdfFont object
-        var regularFont = builder.AddTrueTypeFont(File.ReadAllBytes(arialPath));
-        var boldFont = builder.AddTrueTypeFont(File.ReadAllBytes(arialBoldPath));
+        // Dans PdfPig.Writer, la méthode AddTrueTypeFont retourne un objet de type 'AddedFont'
+        AddedFont regular = builder.AddTrueTypeFont(File.ReadAllBytes(arialPath));
+        AddedFont bold = builder.AddTrueTypeFont(File.ReadAllBytes(arialBoldPath));
 
-        return (regularFont, boldFont);
+        return (regular, bold);
     }
 
     private string NormalizePdfText(string input)
