@@ -17,7 +17,6 @@ using UglyToad.PdfPig.Writer;
 
 namespace PDFComparison.Services;
 
-// Local models to store data for the global synthesis report
 public class DiffSummaryBlock
 {
     public string ContextBefore { get; set; } = string.Empty;
@@ -34,7 +33,6 @@ public class DocumentDiffSummary
 
 public class PdfProcessingService
 {
-    // Precompiled Regex for performance: captures the digits before ".pdf"
     private static readonly Regex KeyRegex = new(@"(\d+)\.pdf$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public List<DocumentPair> MatchFiles(string sourceDir, string targetDir)
@@ -42,7 +40,6 @@ public class PdfProcessingService
         var sourceFiles = Directory.GetFiles(sourceDir, "*.pdf");
         var targetFiles = Directory.GetFiles(targetDir, "*.pdf");
 
-        // Dictionary for O(1) access to target files
         var targetDict = targetFiles
             .Select(f => new { Path = f, Match = KeyRegex.Match(f) })
             .Where(x => x.Match.Success)
@@ -67,15 +64,9 @@ public class PdfProcessingService
     public async Task ProcessPairsAsync(IEnumerable<DocumentPair> validPairs, string outputDiffDir, IProgress<int> progress)
     {
         int completed = 0;
-
-        // Concurrent bag to safely store all summaries from parallel threads
         var allSummaries = new ConcurrentBag<DocumentDiffSummary>();
 
-        // Optimized asynchronous parallel processing
-        var parallelOptions = new ParallelOptions
-        {
-            MaxDegreeOfParallelism = Environment.ProcessorCount
-        };
+        var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
 
         await Parallel.ForEachAsync(validPairs, parallelOptions, async (pair, ct) =>
         {
@@ -84,7 +75,6 @@ public class PdfProcessingService
                 var sourceText = ExtractTextFast(pair.SourcePath);
                 var targetText = ExtractTextFast(pair.TargetPath!);
 
-                // 1. Fast O(N) comparison: binary check of string hashes
                 if (string.Equals(sourceText, targetText, StringComparison.Ordinal))
                 {
                     pair.Status = CompareStatus.Identical;
@@ -95,10 +85,8 @@ public class PdfProcessingService
                 {
                     string reportPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{pair.MatchKey}.pdf");
 
-                    // 2. Generate the individual full report AND extract data for the global synthesis
                     var result = await GenerateIndividualFullReportAsync(pair, sourceText, targetText, reportPath);
 
-                    // Update model properties
                     pair.DiffCount = result.DiffCount;
                     pair.ReportPath = reportPath;
 
@@ -106,8 +94,6 @@ public class PdfProcessingService
                     {
                         pair.Status = CompareStatus.Different;
                         pair.ErrorMessage = $"{result.DiffCount} difference(s) detected";
-
-                        // Add to the global synthesis
                         allSummaries.Add(result.Summary);
                     }
                     else
@@ -116,15 +102,13 @@ public class PdfProcessingService
                         pair.ErrorMessage = "False positives ignored";
                     }
                 }
-
-                // Save completion time at the end of processing the pair
                 pair.CompletedTime = DateTime.Now;
             }
             catch (Exception ex)
             {
                 pair.Status = CompareStatus.Error;
                 pair.ErrorMessage = $"Error: {ex.Message}";
-                pair.DiffCount = -1; // -1 to put them at the bottom during sorting
+                pair.DiffCount = -1;
             }
             finally
             {
@@ -133,7 +117,6 @@ public class PdfProcessingService
             }
         });
 
-        // NEW: Once all files are processed, generate the grand synthesis report
         if (!allSummaries.IsEmpty)
         {
             await GenerateGlobalSynthesisReportAsync(allSummaries.ToList(), outputDiffDir);
@@ -143,7 +126,6 @@ public class PdfProcessingService
     private string ExtractTextFast(string pdfPath)
     {
         var sb = new StringBuilder();
-        // Parsing Options optimized to ignore images and paths
         var options = new ParsingOptions { ClipPaths = false };
 
         using (var document = PdfDocument.Open(pdfPath, options))
@@ -156,7 +138,7 @@ public class PdfProcessingService
         return sb.ToString();
     }
 
-    // NEW: Generates the full PDF content with highlights
+    // NOUVEAU: Génère le rapport en PAYSAGE (Source à gauche, Target à droite)
     private async Task<(int DiffCount, DocumentDiffSummary Summary)> GenerateIndividualFullReportAsync(DocumentPair pair, string sourceText, string targetText, string reportPath)
     {
         return await Task.Run(() =>
@@ -170,80 +152,95 @@ public class PdfProcessingService
             var diff = diffBuilder.BuildDiffModel(cleanSource, cleanTarget);
 
             var builder = new PdfDocumentBuilder();
-            // Standard Portrait format
-            PdfPageBuilder page = builder.AddPage(595, 842);
-
+            // Format A4 Paysage (Landscape): 842 x 595
+            PdfPageBuilder page = builder.AddPage(842, 595);
             var (font, fontBold) = LoadFonts(builder);
 
-            double margin = 40;
-            double yPosition = 842 - margin;
-            int maxCharsPerLine = 90; // Width for Portrait
+            double margin = 30;
+            double colWidth = 370; // Largeur de chaque colonne
+            double leftColX = margin;
+            double rightColX = 842 / 2 + 10;
+            double yPosition = 595 - margin;
 
             string targetFileName = Path.GetFileName(pair.TargetPath!);
 
-            // Individual document header
+            // En-tête
             page.SetTextAndFillColor(0, 0, 0);
-            page.AddText($"DETAILED REPORT - Document: {targetFileName}", 14m, new PdfPoint(margin, yPosition), fontBold);
+            page.AddText($"RAPPORT DÉTAILLÉ - Document: {targetFileName} (Format Paysage)", 14m, new PdfPoint(margin, yPosition), fontBold);
             yPosition -= 15;
             page.SetTextAndFillColor(100, 100, 100);
-            page.AddText("Legend: Red = Added text | Yellow = Modified text", 10m, new PdfPoint(margin, yPosition), font);
-            yPosition -= 30;
+            page.AddText("Légende : Fond Rouge = Ajout/Suppression | Fond Jaune = Modification exacte", 10m, new PdfPoint(margin, yPosition), font);
+            yPosition -= 25;
+
+            // Titres des colonnes
+            page.SetTextAndFillColor(0, 50, 150);
+            page.AddText("DOCUMENT SOURCE (Original)", 12m, new PdfPoint(leftColX, yPosition), fontBold);
+            page.AddText("DOCUMENT CIBLE (Modifié)", 12m, new PdfPoint(rightColX, yPosition), fontBold);
+            yPosition -= 20;
 
             int differencesCount = 0;
             var summary = new DocumentDiffSummary { DocumentName = targetFileName };
 
-            // Traverse the target document to display it in full
             for (int i = 0; i < diff.NewText.Lines.Count; i++)
             {
                 var newLine = diff.NewText.Lines[i];
-                var oldLine = diff.OldText.Lines[i]; // Used to extract old text in the synthesis
+                var oldLine = diff.OldText.Lines[i];
 
-                // Record data for the Global Synthesis
                 if (newLine.Type == ChangeType.Inserted || newLine.Type == ChangeType.Modified || oldLine.Type == ChangeType.Deleted)
                 {
                     differencesCount++;
                     var block = new DiffSummaryBlock
                     {
                         Type = newLine.Type != ChangeType.Unchanged ? newLine.Type : oldLine.Type,
-                        // Find a non-imaginary line before and after for context
                         ContextBefore = GetValidContextLine(diff.NewText.Lines, i, -1),
                         ContextAfter = GetValidContextLine(diff.NewText.Lines, i, 1),
                     };
 
                     if (newLine.Type == ChangeType.Modified)
-                        block.DiffContent = $"The initial text \"{oldLine.Text}\" was replaced by \"{newLine.Text}\".";
+                        block.DiffContent = $"Le texte initial \"{oldLine.Text}\" a été remplacé par \"{newLine.Text}\".";
                     else if (newLine.Type == ChangeType.Inserted)
-                        block.DiffContent = $"The following text was added: \"{newLine.Text}\".";
+                        block.DiffContent = $"Ajout : \"{newLine.Text}\".";
                     else if (oldLine.Type == ChangeType.Deleted)
-                        block.DiffContent = $"The following text was deleted: \"{oldLine.Text}\".";
+                        block.DiffContent = $"Suppression : \"{oldLine.Text}\".";
 
                     summary.Blocks.Add(block);
                 }
 
-                // Skip drawing imaginary lines in the new document view
-                if (newLine.Type == ChangeType.Imaginary) continue;
+                if (newLine.Type == ChangeType.Imaginary && oldLine.Type == ChangeType.Imaginary) continue;
 
-                // Display in the individual PDF
-                var wrappedText = WrapText(newLine.Text ?? "", maxCharsPerLine);
-                foreach (var lineContent in wrappedText)
+                // Pagination
+                if (yPosition < margin)
                 {
-                    if (yPosition < margin)
-                    {
-                        page = builder.AddPage(595, 842);
-                        yPosition = 842 - margin;
-                    }
-
-                    // Apply the requested color code
-                    if (newLine.Type == ChangeType.Inserted)
-                        page.SetTextAndFillColor(220, 20, 20); // Red for addition
-                    else if (newLine.Type == ChangeType.Modified)
-                        page.SetTextAndFillColor(200, 150, 0); // Dark Yellow/Mustard for readability
-                    else
-                        page.SetTextAndFillColor(0, 0, 0); // Normal Black
-
-                    page.AddText(lineContent, 11m, new PdfPoint(margin, yPosition), font);
-                    yPosition -= 14;
+                    page = builder.AddPage(842, 595);
+                    yPosition = 595 - margin;
+                    page.SetTextAndFillColor(0, 50, 150);
+                    page.AddText("DOCUMENT SOURCE (Suite)", 10m, new PdfPoint(leftColX, yPosition), fontBold);
+                    page.AddText("DOCUMENT CIBLE (Suite)", 10m, new PdfPoint(rightColX, yPosition), fontBold);
+                    yPosition -= 20;
                 }
+
+                // Affichage côte à côte
+                if (newLine.Type == ChangeType.Modified || oldLine.Type == ChangeType.Modified)
+                {
+                    // MODIFICATION : On compare mot par mot pour surligner en jaune
+                    DrawLineWithWordDiff(page, oldLine.Text, newLine.Text, leftColX, rightColX, yPosition, font, colWidth);
+                }
+                else
+                {
+                    // LIGNE INCHANGÉE, AJOUTÉE OU SUPPRIMÉE (Rouge ou Noir)
+                    if (oldLine.Type != ChangeType.Imaginary)
+                    {
+                        bool isDeleted = oldLine.Type == ChangeType.Deleted;
+                        DrawSimpleText(page, oldLine.Text ?? "", leftColX, yPosition, font, colWidth, isDeleted ? "Red" : "Black");
+                    }
+                    if (newLine.Type != ChangeType.Imaginary)
+                    {
+                        bool isInserted = newLine.Type == ChangeType.Inserted;
+                        DrawSimpleText(page, newLine.Text ?? "", rightColX, yPosition, font, colWidth, isInserted ? "Red" : "Black");
+                    }
+                }
+
+                yPosition -= 14; // Espacement de ligne
             }
 
             File.WriteAllBytes(reportPath, builder.Build());
@@ -251,18 +248,88 @@ public class PdfProcessingService
         });
     }
 
-    // NEW: Generates the global narrative merged document
+    // NOUVEAU : Dessine le texte avec l'analyse des mots modifiés (Fluo Jaune)
+    private void DrawLineWithWordDiff(PdfPageBuilder page, string oldText, string newText, double leftX, double rightX, double y, PdfDocumentBuilder.AddedFont font, double maxWidth)
+    {
+        oldText ??= "";
+        newText ??= "";
+
+        // Comparaison mot par mot (On simule une comparaison de lignes en remplaçant les espaces par des sauts de ligne)
+        var wordDiffBuilder = new SideBySideDiffBuilder(new DiffPlex.Differ());
+        var wordDiff = wordDiffBuilder.BuildDiffModel(oldText.Replace(" ", "\n"), newText.Replace(" ", "\n"));
+
+        double currentLeftX = leftX;
+        double currentRightX = rightX;
+
+        // Limite visuelle très basique pour éviter de sortir de la colonne (troncature)
+        for (int i = 0; i < wordDiff.OldText.Lines.Count; i++)
+        {
+            var oldWord = wordDiff.OldText.Lines[i];
+            var newWord = wordDiff.NewText.Lines[i];
+
+            // Rendu à Gauche (Source)
+            if (oldWord.Type != ChangeType.Imaginary && oldWord.Text != null)
+            {
+                if (currentLeftX < leftX + maxWidth - 20)
+                {
+                    string word = oldWord.Text + " ";
+                    if (oldWord.Type == ChangeType.Deleted) DrawHighlightBox(page, currentLeftX, y, word.Length * 5, 12, 255, 200, 200); // Rouge clair
+                    if (oldWord.Type == ChangeType.Modified) DrawHighlightBox(page, currentLeftX, y, word.Length * 5, 12, 255, 255, 150); // Jaune clair
+
+                    page.SetTextAndFillColor(0, 0, 0);
+                    page.AddText(word, 10m, new PdfPoint(currentLeftX, y), font);
+                    currentLeftX += word.Length * 5; // Approximation de la largeur
+                }
+            }
+
+            // Rendu à Droite (Cible)
+            if (newWord.Type != ChangeType.Imaginary && newWord.Text != null)
+            {
+                if (currentRightX < rightX + maxWidth - 20)
+                {
+                    string word = newWord.Text + " ";
+                    if (newWord.Type == ChangeType.Inserted) DrawHighlightBox(page, currentRightX, y, word.Length * 5, 12, 255, 200, 200); // Rouge clair
+                    if (newWord.Type == ChangeType.Modified) DrawHighlightBox(page, currentRightX, y, word.Length * 5, 12, 255, 255, 150); // Jaune clair
+
+                    page.SetTextAndFillColor(0, 0, 0);
+                    page.AddText(word, 10m, new PdfPoint(currentRightX, y), font);
+                    currentRightX += word.Length * 5; // Approximation de la largeur
+                }
+            }
+        }
+    }
+
+    private void DrawSimpleText(PdfPageBuilder page, string text, double x, double y, PdfDocumentBuilder.AddedFont font, double maxWidth, string colorCode)
+    {
+        // Troncature basique pour ne pas déborder
+        string display = text.Length > 70 ? text.Substring(0, 67) + "..." : text;
+
+        if (colorCode == "Red")
+        {
+            // Surlignage rouge pour la phrase entière
+            DrawHighlightBox(page, x, y, display.Length * 5, 12, 255, 200, 200);
+        }
+
+        page.SetTextAndFillColor(0, 0, 0);
+        page.AddText(display, 10m, new PdfPoint(x, y), font);
+    }
+
+    private void DrawHighlightBox(PdfPageBuilder page, double x, double y, double width, double height, byte r, byte g, byte b)
+    {
+        page.SetTextAndFillColor(r, g, b);
+        page.DrawRectangle(new PdfPoint(x, y - 2), width, height);
+        page.FillPath();
+    }
+
     private async Task GenerateGlobalSynthesisReportAsync(List<DocumentDiffSummary> summaries, string outputDiffDir)
     {
         await Task.Run(() =>
         {
             string reportPath = Path.Combine(outputDiffDir, "Global_Synthesis_Report.pdf");
-
-            // Ensure folder exists
             Directory.CreateDirectory(outputDiffDir);
 
             var builder = new PdfDocumentBuilder();
-            PdfPageBuilder page = builder.AddPage(595, 842);
+            PdfPageBuilder page = builder.AddPage(595, 842); // Portrait classique pour la synthèse
             var (font, fontBold) = LoadFonts(builder);
 
             double margin = 40;
@@ -270,19 +337,18 @@ public class PdfProcessingService
             int maxChars = 85;
 
             page.SetTextAndFillColor(0, 0, 0);
-            page.AddText("GLOBAL DIFFERENCES SYNTHESIS", 16m, new PdfPoint(margin, yPosition), fontBold);
+            page.AddText("SYNTHÈSE GLOBALE DES DIFFÉRENCES", 16m, new PdfPoint(margin, yPosition), fontBold);
             yPosition -= 20;
             page.SetTextAndFillColor(100, 100, 100);
-            page.AddText("This document presents a narrative summary of all detected modifications.", 10m, new PdfPoint(margin, yPosition), font);
+            page.AddText("Ce document présente un résumé narratif de toutes les modifications détectées.", 10m, new PdfPoint(margin, yPosition), font);
             yPosition -= 35;
 
-            // Group by document name alphabetically
             foreach (var doc in summaries.OrderBy(s => s.DocumentName))
             {
                 if (yPosition < margin + 50) { page = builder.AddPage(595, 842); yPosition = 842 - margin; }
 
-                page.SetTextAndFillColor(0, 50, 150); // Document title in Dark Blue
-                page.AddText($"► File: {doc.DocumentName}", 13m, new PdfPoint(margin, yPosition), fontBold);
+                page.SetTextAndFillColor(0, 50, 150);
+                page.AddText($"► Fichier: {doc.DocumentName}", 13m, new PdfPoint(margin, yPosition), fontBold);
                 yPosition -= 20;
 
                 foreach (var block in doc.Blocks)
@@ -290,8 +356,6 @@ public class PdfProcessingService
                     if (yPosition < margin + 40) { page = builder.AddPage(595, 842); yPosition = 842 - margin; }
 
                     page.SetTextAndFillColor(0, 0, 0);
-
-                    // Context Before
                     if (!string.IsNullOrWhiteSpace(block.ContextBefore))
                     {
                         foreach (var l in WrapText($"... {block.ContextBefore}", maxChars))
@@ -301,15 +365,13 @@ public class PdfProcessingService
                         }
                     }
 
-                    // The reformulated error (Synthesis)
-                    page.SetTextAndFillColor(200, 0, 0); // Red to draw attention to the modification
+                    page.SetTextAndFillColor(200, 0, 0);
                     foreach (var l in WrapText($"-> {block.DiffContent}", maxChars))
                     {
                         page.AddText(l, 11m, new PdfPoint(margin + 15, yPosition), fontBold);
                         yPosition -= 13;
                     }
 
-                    // Context After
                     page.SetTextAndFillColor(0, 0, 0);
                     if (!string.IsNullOrWhiteSpace(block.ContextAfter))
                     {
@@ -319,18 +381,15 @@ public class PdfProcessingService
                             yPosition -= 12;
                         }
                     }
-                    yPosition -= 15; // Space between two errors
+                    yPosition -= 15;
                 }
-                yPosition -= 20; // Space between two documents
+                yPosition -= 20;
             }
 
             File.WriteAllBytes(reportPath, builder.Build());
         });
     }
 
-    /// <summary>
-    /// Helper method to safely get a valid context line ignoring "Imaginary" lines
-    /// </summary>
     private string GetValidContextLine(List<DiffPiece> lines, int currentIndex, int direction)
     {
         int i = currentIndex + direction;
@@ -345,7 +404,6 @@ public class PdfProcessingService
         return string.Empty;
     }
 
-    // MODIFICATION ICI: Changement de type de retour (PdfFont -> PdfDocumentBuilder.AddedFont)
     private (PdfDocumentBuilder.AddedFont Font, PdfDocumentBuilder.AddedFont FontBold) LoadFonts(PdfDocumentBuilder builder)
     {
         string fontsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
@@ -362,18 +420,11 @@ public class PdfProcessingService
     private string NormalizePdfText(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return string.Empty;
-
-        // 1. Flatten all text
         string flatText = Regex.Replace(input, @"\s+", " ");
-
-        // 2. Smart splitting based on punctuation
         flatText = flatText.Replace(". ", ".\n").Replace("? ", "?\n").Replace("! ", "!\n").Replace(": ", ":\n");
         flatText = flatText.Replace("•", "\n• ").Replace(" o ", "\n o ");
-
-        // 3. Cleanup
         var lines = flatText.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries)
                          .Select(l => l.Trim()).Where(l => l.Length > 0);
-
         return string.Join("\n", lines);
     }
 
