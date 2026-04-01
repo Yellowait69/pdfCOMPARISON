@@ -296,8 +296,13 @@ public class PdfProcessingService
         foreach (var word in words)
         {
             var rect = word.BoundingBox;
-            // Rectangle vide (stroke=true, fill=false), avec une petite marge
-            pageBuilder.DrawRectangle(new PdfPoint(rect.BottomLeft.X - 1.5m, rect.BottomLeft.Y - 1.5m), rect.Width + 3m, rect.Height + 3m, 1.5m, false);
+            // Rectangle vide (stroke=true, fill=false), avec cast explicite en (decimal)
+            pageBuilder.DrawRectangle(
+                new PdfPoint((decimal)rect.BottomLeft.X - 1.5m, (decimal)rect.BottomLeft.Y - 1.5m),
+                (decimal)rect.Width + 3m,
+                (decimal)rect.Height + 3m,
+                1.5m,
+                false);
         }
     }
 
@@ -306,7 +311,8 @@ public class PdfProcessingService
     {
         decimal rectHeight = 20m;
         decimal rectWidth = 300m;
-        decimal yPosition = pageBuilder.PageSize.Height - 30m;
+        // Cast explicite en (decimal)
+        decimal yPosition = (decimal)pageBuilder.PageSize.Height - 30m;
 
         // Si on est trop haut, on ajuste le tampon
         if (yPosition < 0) yPosition = 10m;
