@@ -27,7 +27,8 @@ public enum MarkupStyle
 public class DiffSummaryBlock
 {
     public string ContextBefore { get; set; } = string.Empty;
-    public string DiffContent { get; set; } = string.Empty;
+    public string OldText { get; set; } = string.Empty; // Texte original (colonne gauche)
+    public string NewText { get; set; } = string.Empty; // Texte modifié (colonne droite)
     public string ContextAfter { get; set; } = string.Empty;
     public ChangeType Type { get; set; }
 }
@@ -223,12 +224,22 @@ public class PdfProcessingService
                         ContextAfter = GetValidContextLine(diffLines.NewText.Lines, i, 1),
                     };
 
+                    // Peupler les textes séparés pour les colonnes
                     if (newLine.Type == ChangeType.Modified)
-                        block.DiffContent = $"Texte modifié : \"{oldLine.Text}\" -> \"{newLine.Text}\"";
+                    {
+                        block.OldText = oldLine.Text;
+                        block.NewText = newLine.Text;
+                    }
                     else if (newLine.Type == ChangeType.Inserted)
-                        block.DiffContent = $"Ajout : \"{newLine.Text}\"";
+                    {
+                        block.OldText = string.Empty;
+                        block.NewText = newLine.Text;
+                    }
                     else if (oldLine.Type == ChangeType.Deleted)
-                        block.DiffContent = $"Suppression : \"{oldLine.Text}\"";
+                    {
+                        block.OldText = oldLine.Text;
+                        block.NewText = string.Empty;
+                    }
 
                     summary.Blocks.Add(block);
                 }
@@ -445,6 +456,7 @@ public class PdfProcessingService
         pageBuilder.AddText(text, 12m, new PdfPoint(15m, yPosition + 5m), fontBold);
     }
 
+    // NOUVELLE VERSION : Synthèse Globale en format Paysage (A4 Landscape) avec 2 colonnes
     private async Task GenerateGlobalSynthesisReportAsync(List<DocumentDiffSummary> summaries, string outputDiffDir)
     {
         await Task.Run(() =>
@@ -453,65 +465,131 @@ public class PdfProcessingService
             Directory.CreateDirectory(outputDiffDir);
 
             var builder = new PdfDocumentBuilder();
-            PdfPageBuilder page = builder.AddPage(595, 842); // Portrait
+            // Format A4 Paysage (842 x 595)
+            PdfPageBuilder page = builder.AddPage(842, 595);
             var (font, fontBold) = LoadFonts(builder);
 
             decimal margin = 40m;
-            decimal yPosition = 842m - margin;
-            int maxChars = 85;
+            decimal yPosition = 595m - margin;
 
+            // Paramètres de colonnes
+            decimal leftColumnX = margin;
+            decimal rightColumnX = 430m;
+            int maxCharsCol = 65; // Ajusté pour ne pas déborder au milieu
+
+            // Titre Principal
             page.SetTextAndFillColor(0, 0, 0);
-            page.AddText("SYNTHÈSE GLOBALE DES DIFFÉRENCES", 16m, new PdfPoint(margin, yPosition), fontBold);
+            page.AddText("SYNTHÈSE GLOBALE DES DIFFÉRENCES", 18m, new PdfPoint(margin, yPosition), fontBold);
             yPosition -= 20m;
             page.SetTextAndFillColor(100, 100, 100);
-            page.AddText("Ce document présente un résumé narratif de toutes les modifications détectées.", 10m, new PdfPoint(margin, yPosition), font);
-            yPosition -= 35m;
+            page.AddText("Ce document présente une comparaison côte à côte des documents originaux et modifiés.", 10m, new PdfPoint(margin, yPosition), font);
+            yPosition -= 40m;
 
             foreach (var doc in summaries.OrderBy(s => s.DocumentName))
             {
-                if (yPosition < margin + 50m) { page = builder.AddPage(595, 842); yPosition = 842m - margin; }
+                if (yPosition < margin + 60m) { page = builder.AddPage(842, 595); yPosition = 595m - margin; }
 
                 page.SetTextAndFillColor(0, 50, 150);
-                page.AddText($"► Fichier: {doc.DocumentName}", 13m, new PdfPoint(margin, yPosition), fontBold);
-                yPosition -= 20m;
+                page.AddText($"► Fichier: {doc.DocumentName}", 14m, new PdfPoint(margin, yPosition), fontBold);
+                yPosition -= 25m;
 
                 foreach (var block in doc.Blocks)
                 {
-                    if (yPosition < margin + 40m) { page = builder.AddPage(595, 842); yPosition = 842m - margin; }
+                    // Calcul approximatif de la hauteur pour ce bloc pour gérer les sauts de page
+                    int linesLeft = (block.ContextBefore.Length + block.OldText.Length + block.ContextAfter.Length) / maxCharsCol;
+                    int linesRight = (block.ContextBefore.Length + block.NewText.Length + block.ContextAfter.Length) / maxCharsCol;
+                    decimal estimatedHeight = Math.Max(linesLeft, linesRight) * 13m + 60m;
+
+                    if (yPosition - estimatedHeight < margin)
+                    {
+                        page = builder.AddPage(842, 595);
+                        yPosition = 595m - margin;
+                    }
+
+                    // En-tête du type de changement (centré sur le bloc)
+                    string changeTypeStr = block.Type switch
+                    {
+                        ChangeType.Inserted => "[ AJOUT ]",
+                        ChangeType.Deleted => "[ SUPPRESSION ]",
+                        ChangeType.Modified => "[ MODIFICATION ]",
+                        _ => "[ CHANGEMENT ]"
+                    };
 
                     page.SetTextAndFillColor(0, 0, 0);
-                    if (!string.IsNullOrWhiteSpace(block.ContextBefore))
-                    {
-                        foreach (var l in WrapText($"... {block.ContextBefore}", maxChars))
-                        {
-                            page.AddText(l, 10m, new PdfPoint(margin + 15m, yPosition), font);
-                            yPosition -= 12m;
-                        }
-                    }
+                    page.AddText(changeTypeStr, 11m, new PdfPoint(margin, yPosition), fontBold);
 
-                    page.SetTextAndFillColor(200, 0, 0);
-                    foreach (var l in WrapText($"-> {block.DiffContent}", maxChars))
-                    {
-                        page.AddText(l, 11m, new PdfPoint(margin + 15m, yPosition), fontBold);
-                        yPosition -= 13m;
-                    }
-
-                    page.SetTextAndFillColor(0, 0, 0);
-                    if (!string.IsNullOrWhiteSpace(block.ContextAfter))
-                    {
-                        foreach (var l in WrapText($"{block.ContextAfter} ...", maxChars))
-                        {
-                            page.AddText(l, 10m, new PdfPoint(margin + 15m, yPosition), font);
-                            yPosition -= 12m;
-                        }
-                    }
                     yPosition -= 15m;
+                    page.SetTextAndFillColor(150, 150, 150);
+                    page.AddText("Document Original (Source)", 9m, new PdfPoint(leftColumnX, yPosition), fontBold);
+                    page.AddText("Document Modifié (Cible)", 9m, new PdfPoint(rightColumnX, yPosition), fontBold);
+                    yPosition -= 15m;
+
+                    // --- COLONNE GAUCHE (Original) ---
+                    decimal currentYLeft = yPosition;
+
+                    if (!string.IsNullOrWhiteSpace(block.ContextBefore))
+                        currentYLeft = DrawTextLines(page, $"... {block.ContextBefore}", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
+
+                    if (!string.IsNullOrWhiteSpace(block.OldText))
+                    {
+                        // Modification ou Suppression = Texte original en rouge/gras
+                        currentYLeft = DrawTextLines(page, block.OldText, currentYLeft, leftColumnX, maxCharsCol, 200, 0, 0, fontBold);
+                    }
+                    else
+                    {
+                        // C'est un pur ajout, on met un placeholder côté original
+                        currentYLeft = DrawTextLines(page, "(Aucun texte original)", currentYLeft, leftColumnX, maxCharsCol, 180, 180, 180, font);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(block.ContextAfter))
+                        currentYLeft = DrawTextLines(page, $"{block.ContextAfter} ...", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
+
+                    // --- COLONNE DROITE (Cible) ---
+                    decimal currentYRight = yPosition;
+
+                    if (!string.IsNullOrWhiteSpace(block.ContextBefore))
+                        currentYRight = DrawTextLines(page, $"... {block.ContextBefore}", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
+
+                    if (!string.IsNullOrWhiteSpace(block.NewText))
+                    {
+                        // Modification ou Ajout = Nouveau texte en vert/gras
+                        currentYRight = DrawTextLines(page, block.NewText, currentYRight, rightColumnX, maxCharsCol, 0, 150, 0, fontBold);
+                    }
+                    else
+                    {
+                        // C'est une pure suppression, on met un placeholder côté cible
+                        currentYRight = DrawTextLines(page, "(Texte supprimé)", currentYRight, rightColumnX, maxCharsCol, 180, 180, 180, font);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(block.ContextAfter))
+                        currentYRight = DrawTextLines(page, $"{block.ContextAfter} ...", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
+
+                    // On aligne le Y sur la colonne qui est descendue le plus bas
+                    yPosition = Math.Min(currentYLeft, currentYRight) - 20m;
+
+                    // Ligne de séparation légère entre chaque bloc
+                    page.SetStrokeColor(220, 220, 220);
+                    page.DrawLine(new PdfPoint(margin, yPosition + 10m), new PdfPoint(842m - margin, yPosition + 10m), 0.5m);
                 }
                 yPosition -= 20m;
             }
 
             File.WriteAllBytes(reportPath, builder.Build());
         });
+    }
+
+    // Méthode utilitaire pour dessiner du texte multiligne et renvoyer la nouvelle position Y
+    private decimal DrawTextLines(PdfPageBuilder page, string text, decimal startY, decimal startX, int maxChars, byte r, byte g, byte b, PdfDocumentBuilder.AddedFont fontToUse)
+    {
+        decimal currentY = startY;
+        page.SetTextAndFillColor(r, g, b);
+
+        foreach (var line in WrapText(text, maxChars))
+        {
+            page.AddText(line, 10m, new PdfPoint(startX, currentY), fontToUse);
+            currentY -= 13m; // Interligne
+        }
+        return currentY;
     }
 
     private string GetValidContextLine(List<DiffPiece> lines, int currentIndex, int direction)
