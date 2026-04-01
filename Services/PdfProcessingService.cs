@@ -133,7 +133,7 @@ public class PdfProcessingService
             }
         });
 
-        // NEW: Once all files are processed, generate the grand synthesis report
+        // Once all files are processed, generate the grand synthesis report
         if (!allSummaries.IsEmpty)
         {
             await GenerateGlobalSynthesisReportAsync(allSummaries.ToList(), outputDiffDir);
@@ -156,7 +156,7 @@ public class PdfProcessingService
         return sb.ToString();
     }
 
-    // NEW: Generates the full PDF content with highlights
+    // Generates the full PDF content with highlights
     private async Task<(int DiffCount, DocumentDiffSummary Summary)> GenerateIndividualFullReportAsync(DocumentPair pair, string sourceText, string targetText, string reportPath)
     {
         return await Task.Run(() =>
@@ -251,7 +251,7 @@ public class PdfProcessingService
         });
     }
 
-    // NEW: Generates the global narrative merged document
+    // Generates the global narrative merged document
     private async Task GenerateGlobalSynthesisReportAsync(List<DocumentDiffSummary> summaries, string outputDiffDir)
     {
         await Task.Run(() =>
@@ -282,7 +282,8 @@ public class PdfProcessingService
                 if (yPosition < margin + 50) { page = builder.AddPage(595, 842); yPosition = 842 - margin; }
 
                 page.SetTextAndFillColor(0, 50, 150); // Document title in Dark Blue
-                page.AddText($"► File: {doc.DocumentName}", 13m, new PdfPoint(margin, yPosition), fontBold);
+                // FIXED: Replaced '►' with '-' to avoid font exceptions
+                page.AddText($"- File: {doc.DocumentName}", 13m, new PdfPoint(margin, yPosition), fontBold);
                 yPosition -= 20;
 
                 foreach (var block in doc.Blocks)
@@ -303,7 +304,8 @@ public class PdfProcessingService
 
                     // The reformulated error (Synthesis)
                     page.SetTextAndFillColor(200, 0, 0); // Red to draw attention to the modification
-                    foreach (var l in WrapText($"➔ {block.DiffContent}", maxChars))
+                    // FIXED: Replaced '➔' with '>' to avoid font exceptions
+                    foreach (var l in WrapText($"> {block.DiffContent}", maxChars))
                     {
                         page.AddText(l, 11m, new PdfPoint(margin + 15, yPosition), fontBold);
                         yPosition -= 13;
@@ -354,7 +356,7 @@ public class PdfProcessingService
         if (!File.Exists(arialPath) || !File.Exists(arialBoldPath))
            throw new FileNotFoundException("Required Arial fonts were not found on this system.");
 
-        // Dans PdfPig.Writer, la méthode AddTrueTypeFont retourne un objet de type 'AddedFont'
+        // AddedFont is the correct type from UglyToad.PdfPig.Writer
         AddedFont regular = builder.AddTrueTypeFont(File.ReadAllBytes(arialPath));
         AddedFont bold = builder.AddTrueTypeFont(File.ReadAllBytes(arialBoldPath));
 
