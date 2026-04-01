@@ -6,52 +6,66 @@ namespace PDFComparison.Models;
 
 public partial class DocumentPair : ObservableObject
 {
-    // Added "set" to allow restoration from the save file (JSON deserialization)
-    public string MatchKey { get; set; } = string.Empty;
-    public string SourcePath { get; set; } = string.Empty;
-    public string? TargetPath { get; set; }
+    // Clé de correspondance (ex: le numéro du document extrait via Regex)
+    [ObservableProperty]
+    private string _matchKey = string.Empty;
 
+    // Chemin du document original
+    [ObservableProperty]
+    private string _sourcePath = string.Empty;
+
+    // Chemin du document cible (peut être null s'il n'a pas été trouvé)
+    [ObservableProperty]
+    private string? _targetPath;
+
+    // Statut de la comparaison
     [ObservableProperty]
     private CompareStatus _status = CompareStatus.Pending;
 
+    // Message d'erreur ou de succès détaillé
     [ObservableProperty]
     private string _errorMessage = string.Empty;
 
-    // Property to store the number of errors/differences
-    // Allows sorting documents to display those with the most errors first
+    // Nombre de différences détectées (utile pour trier la liste dans l'UI)
     [ObservableProperty]
     private int _diffCount;
 
-    // NEW: Path of the generated PDF report (side-by-side)
+    // Chemin du rapport PDF généré
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasReport))]
     private string _reportPath = string.Empty;
 
-    // NEW: End date and time of processing (Completed Time)
+    // Date et heure de fin de traitement
     [ObservableProperty]
     private DateTime? _completedTime;
 
-    // NEW: Automatic boolean to enable/disable the "Open PDF" button
-    // [JsonIgnore] prevents saving this property in the file because it is calculated dynamically
+    // Propriété calculée dynamiquement pour activer/désactiver le bouton "Ouvrir le PDF"
+    // [JsonIgnore] empêche la sérialisation de cette propriété dans le fichier de sauvegarde
     [JsonIgnore]
     public bool HasReport => !string.IsNullOrEmpty(ReportPath);
 
-    // NEW: Empty constructor required by the JSON deserializer
+    /// <summary>
+    /// Constructeur vide requis par le désérialiseur JSON
+    /// </summary>
     public DocumentPair()
     {
     }
 
+    /// <summary>
+    /// Constructeur principal utilisé par le PdfFileService lors du matching
+    /// </summary>
     public DocumentPair(string matchKey, string sourcePath, string? targetPath)
     {
         MatchKey = matchKey;
         SourcePath = sourcePath;
         TargetPath = targetPath;
 
+        // Si le fichier cible est introuvable dès la création, on met à jour le statut
         if (string.IsNullOrEmpty(TargetPath))
         {
             Status = CompareStatus.MissingInTarget;
             ErrorMessage = "Missing target file";
-            DiffCount = -1; // -1 to ensure they are placed at the end during a descending sort
+            DiffCount = -1; // -1 pour s'assurer qu'ils finissent en bas lors d'un tri décroissant
         }
     }
 }
