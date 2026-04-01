@@ -11,7 +11,10 @@ public partial class PdfFileService
     // Utilisation du Source Generator de Regex (C# 11) pour des performances optimales.
     // L'expression régulière est compilée à la création de l'application (Build time) plutôt qu'à l'exécution.
     // (Nécessite que la classe soit 'partial')
-    [GeneratedRegex(@"(\d+)\.pdf$", RegexOptions.IgnoreCase)]
+
+    // NOUVELLE REGEX : Capture la langue (2 lettres) et les deux blocs de chiffres finaux
+    // Exemple : "_NL_44980_36.PDF" donnera la clé "NL_44980_36"
+    [GeneratedRegex(@"([A-Z]{2}_\d+_\d+)\.pdf$", RegexOptions.IgnoreCase)]
     private static partial Regex KeyRegex();
 
     public List<DocumentPair> MatchFiles(string sourceDir, string targetDir)
@@ -23,7 +26,7 @@ public partial class PdfFileService
             // C'est plus léger en mémoire et plus rapide.
             .Select(f => (Path: f, Match: KeyRegex().Match(f)))
             .Where(x => x.Match.Success)
-            .ToDictionary(x => x.Match.Groups[1].Value, x => x.Path);
+            .ToDictionary(x => x.Match.Groups[1].Value.ToUpper(), x => x.Path); // .ToUpper() pour normaliser la clé (ex: "nl" devient "NL")
 
         var pairs = new List<DocumentPair>();
 
@@ -32,7 +35,8 @@ public partial class PdfFileService
             var match = KeyRegex().Match(sourceFile);
             if (match.Success)
             {
-                string key = match.Groups[1].Value;
+                // On normalise également la clé source en majuscules pour s'assurer qu'elle match bien le dictionnaire
+                string key = match.Groups[1].Value.ToUpper();
 
                 // Pattern matching pour ignorer la déclaration explicite de la variable en amont (out var)
                 targetDict.TryGetValue(key, out var targetPath);
