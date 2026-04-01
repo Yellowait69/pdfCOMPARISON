@@ -303,7 +303,7 @@ public class PdfProcessingService
 
                     // The reformulated error (Synthesis)
                     page.SetTextAndFillColor(200, 0, 0); // Red to draw attention to the modification
-                    foreach (var l in WrapText($"➔ {block.DiffContent}", maxChars))
+                    foreach (var l in WrapText($"-> {block.DiffContent}", maxChars))
                     {
                         page.AddText(l, 11m, new PdfPoint(margin + 15, yPosition), fontBold);
                         yPosition -= 13;
