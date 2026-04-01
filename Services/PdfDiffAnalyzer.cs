@@ -27,13 +27,60 @@ public class PdfDiffAnalyzer
 
         var diffBuilder = new SideBySideDiffBuilder(new Differ());
 
-        // 1. Analyse Ligne par Ligne (Pour le résumé global textuel)
+        // ====================================================================
+        // 1. Analyse Ligne par Ligne (Pour le résumé global textuel du Dashboard)
+        // ====================================================================
         var diffLines = diffBuilder.BuildDiffModel(CleanLineForDiff(cleanSource), CleanLineForDiff(cleanTarget));
+
+        // -- DÉTECTION GLOBALE DE DÉPLACEMENT POUR LE RÉSUMÉ TEXTUEL --
+        var sumDel = new Dictionary<string, int>();
+        var sumIns = new Dictionary<string, int>();
+
+        for (int i = 0; i < diffLines.NewText.Lines.Count; i++) {
+            if (diffLines.OldText.Lines[i].Type == ChangeType.Deleted) {
+                string t = diffLines.OldText.Lines[i].Text.Trim();
+                if (t.Length > 0) sumDel[t] = sumDel.GetValueOrDefault(t) + 1;
+            }
+            if (diffLines.NewText.Lines[i].Type == ChangeType.Inserted) {
+                string t = diffLines.NewText.Lines[i].Text.Trim();
+                if (t.Length > 0) sumIns[t] = sumIns.GetValueOrDefault(t) + 1;
+            }
+        }
+
+        var skipDel = new Dictionary<string, int>();
+        var skipIns = new Dictionary<string, int>();
+        foreach(var kvp in sumDel) {
+            if (sumIns.TryGetValue(kvp.Key, out int insC)) {
+                int moves = Math.Min(kvp.Value, insC);
+                skipDel[kvp.Key] = moves;
+                skipIns[kvp.Key] = moves;
+            }
+        }
 
         for (int i = 0; i < diffLines.NewText.Lines.Count; i++)
         {
             var newLine = diffLines.NewText.Lines[i];
             var oldLine = diffLines.OldText.Lines[i];
+
+            // Si la ligne a simplement été déplacée (ex: changement de page), on l'ignore.
+            if (oldLine.Type == ChangeType.Deleted)
+            {
+                string txt = oldLine.Text.Trim();
+                if (skipDel.TryGetValue(txt, out int moves) && moves > 0)
+                {
+                    skipDel[txt] = moves - 1;
+                    continue;
+                }
+            }
+            else if (newLine.Type == ChangeType.Inserted)
+            {
+                string txt = newLine.Text.Trim();
+                if (skipIns.TryGetValue(txt, out int moves) && moves > 0)
+                {
+                    skipIns[txt] = moves - 1;
+                    continue;
+                }
+            }
 
             if (newLine.Type is ChangeType.Inserted or ChangeType.Modified || oldLine.Type is ChangeType.Deleted)
             {
@@ -70,8 +117,8 @@ public class PdfDiffAnalyzer
         }
 
         // ====================================================================
-        // 2. CORRECTION DÉFINITIVE: Algorithme Hybride (Ligne globale -> Mot local)
-        // Bloque la fragmentation des grands paragraphes et les décalages de page
+        // 2. CORRECTION DÉFINITIVE: Algorithme Hybride + Détection de Déplacement
+        // Pour les surlignages visuels exacts sur le PDF
         // ====================================================================
         var sourceLinesList = GroupIntoLines(sourceWords);
         var targetLinesList = GroupIntoLines(targetWords);
@@ -81,32 +128,90 @@ public class PdfDiffAnalyzer
 
         var diffLinesModel = diffBuilder.BuildDiffModel(sourceDiffText, targetDiffText);
 
+        // -- DÉTECTION GLOBALE DE DÉPLACEMENT POUR LES COULEURS VISUELLES --
+        var visDel = new Dictionary<string, int>();
+        var visIns = new Dictionary<string, int>();
+
+        for (int i = 0; i < diffLinesModel.NewText.Lines.Count; i++)
+        {
+            if (diffLinesModel.OldText.Lines[i].Type == ChangeType.Deleted)
+            {
+                string t = diffLinesModel.OldText.Lines[i].Text.Trim();
+                if (t.Length > 0) visDel[t] = visDel.GetValueOrDefault(t) + 1;
+            }
+            if (diffLinesModel.NewText.Lines[i].Type == ChangeType.Inserted)
+            {
+                string t = diffLinesModel.NewText.Lines[i].Text.Trim();
+                if (t.Length > 0) visIns[t] = visIns.GetValueOrDefault(t) + 1;
+            }
+        }
+
+        var visSkipDel = new Dictionary<string, int>();
+        var visSkipIns = new Dictionary<string, int>();
+        foreach(var kvp in visDel)
+        {
+            if (visIns.TryGetValue(kvp.Key, out int insC))
+            {
+                int moves = Math.Min(kvp.Value, insC);
+                visSkipDel[kvp.Key] = moves;
+                visSkipIns[kvp.Key] = moves;
+            }
+        }
+
         var currentDeletes = new List<List<(string CleanText, List<LetterLoc> Letters)>>();
         var currentInserts = new List<List<(string CleanText, List<LetterLoc> Letters)>>();
 
         int sLineIdx = 0;
         int tLineIdx = 0;
 
-        // Fonction locale pour traiter un bloc accumulé
         void FlushBlocks()
         {
-            if (currentDeletes.Count > 0 && currentInserts.Count == 0)
+            var actualDeletes = new List<List<(string CleanText, List<LetterLoc> Letters)>>();
+            var actualInserts = new List<List<(string CleanText, List<LetterLoc> Letters)>>();
+
+            // Filtrage des lignes qui ont juste été déplacées (elles ne seront ni rouges, ni vertes)
+            foreach (var l in currentDeletes)
             {
-                // Suppression pure de lignes complètes (Aucun mot ne sera épargné)
-                foreach (var l in currentDeletes)
+                string text = string.Join(" ", l.Select(w => w.CleanText)).Trim();
+                if (visSkipDel.TryGetValue(text, out int moves) && moves > 0)
+                {
+                    visSkipDel[text] = moves - 1;
+                }
+                else
+                {
+                    actualDeletes.Add(l);
+                }
+            }
+
+            foreach (var l in currentInserts)
+            {
+                string text = string.Join(" ", l.Select(w => w.CleanText)).Trim();
+                if (visSkipIns.TryGetValue(text, out int moves) && moves > 0)
+                {
+                    visSkipIns[text] = moves - 1;
+                }
+                else
+                {
+                    actualInserts.Add(l);
+                }
+            }
+
+            // Dessin des vraies différences
+            if (actualDeletes.Count > 0 && actualInserts.Count == 0)
+            {
+                foreach (var l in actualDeletes)
                     foreach (var w in l) result.Highlights.SourceRed.AddRange(w.Letters);
             }
-            else if (currentInserts.Count > 0 && currentDeletes.Count == 0)
+            else if (actualInserts.Count > 0 && actualDeletes.Count == 0)
             {
-                // Insertion pure d'un nouveau paragraphe (Tout sera vert, même les mots communs comme "EUR")
-                foreach (var l in currentInserts)
+                foreach (var l in actualInserts)
                     foreach (var w in l) result.Highlights.TargetRed.AddRange(w.Letters);
             }
-            else if (currentDeletes.Count > 0 && currentInserts.Count > 0)
+            else if (actualDeletes.Count > 0 || actualInserts.Count > 0)
             {
-                // Modification ciblée d'un bloc -> On zoome et on utilise DiffPlex Mot par Mot pour la précision
-                var sWords = currentDeletes.SelectMany(l => l).ToList();
-                var tWords = currentInserts.SelectMany(l => l).ToList();
+                // Différence subtile : on zoome mot par mot pour colorier le mot modifié
+                var sWords = actualDeletes.SelectMany(l => l).ToList();
+                var tWords = actualInserts.SelectMany(l => l).ToList();
 
                 string sText = string.Join('\n', sWords.Select(w => w.CleanText));
                 string tText = string.Join('\n', tWords.Select(w => w.CleanText));
@@ -115,10 +220,10 @@ public class PdfDiffAnalyzer
 
                 int swIdx = 0, twIdx = 0;
 
-                for (int i = 0; i < wordDiff.NewText.Lines.Count; i++)
+                for (int j = 0; j < wordDiff.NewText.Lines.Count; j++)
                 {
-                    var oldWord = wordDiff.OldText.Lines[i];
-                    var newWord = wordDiff.NewText.Lines[i];
+                    var oldWord = wordDiff.OldText.Lines[j];
+                    var newWord = wordDiff.NewText.Lines[j];
 
                     bool hasSW = oldWord.Type != ChangeType.Imaginary && swIdx < sWords.Count;
                     bool hasTW = newWord.Type != ChangeType.Imaginary && twIdx < tWords.Count;
@@ -146,7 +251,6 @@ public class PdfDiffAnalyzer
             currentInserts.Clear();
         }
 
-        // Lecture de haut en bas
         for (int i = 0; i < diffLinesModel.NewText.Lines.Count; i++)
         {
             var oldLineDiff = diffLinesModel.OldText.Lines[i];
@@ -170,18 +274,16 @@ public class PdfDiffAnalyzer
             {
                 if (oldLineDiff.Type == ChangeType.Unchanged && newLineDiff.Type == ChangeType.Unchanged)
                 {
-                    // La ligne est intacte, on déclenche l'analyse du bloc précédent
                     FlushBlocks();
                 }
                 else
                 {
-                    // La ligne contient des différences, on l'ajoute au bloc courant pour l'analyser au microscope
                     currentDeletes.Add(sLine!);
                     currentInserts.Add(tLine!);
                 }
             }
         }
-        FlushBlocks(); // S'assure que les modifications de fin de document sont bien traitées
+        FlushBlocks();
 
         return result;
     }
