@@ -17,6 +17,13 @@ using UglyToad.PdfPig.Writer;
 
 namespace PDFComparison.Services;
 
+public enum MarkupStyle
+{
+    Strikethrough, // Pour le texte supprimé (barré)
+    Underline,     // Pour le texte ajouté (souligné)
+    Box            // Pour le texte modifié (encadré)
+}
+
 public class DiffSummaryBlock
 {
     public string ContextBefore { get; set; } = string.Empty;
@@ -264,7 +271,7 @@ public class PdfProcessingService
                 {
                     sourceHighlightsRed.AddRange(oldWordInfo.Letters.Select(l => new LetterLoc(l.GlyphRectangle, oldWordInfo.PageNumber, (decimal)l.Location.Y, (decimal)l.PointSize)));
                 }
-                // Ajout pur (mot complet en rouge)
+                // Ajout pur (mot complet en vert)
                 else if (newWordDiff.Type == ChangeType.Inserted && newWordInfo != null)
                 {
                     targetHighlightsRed.AddRange(newWordInfo.Letters.Select(l => new LetterLoc(l.GlyphRectangle, newWordInfo.PageNumber, (decimal)l.Location.Y, (decimal)l.PointSize)));
@@ -297,7 +304,7 @@ public class PdfProcessingService
                         {
                             var let = newWordInfo.Letters[nC];
                             if (nChar.Type == ChangeType.Inserted)
-                                targetHighlightsRed.Add(new LetterLoc(let.GlyphRectangle, newWordInfo.PageNumber, (decimal)let.Location.Y, (decimal)let.PointSize)); // Les nouveautés partielles passent au ROUGE !
+                                targetHighlightsRed.Add(new LetterLoc(let.GlyphRectangle, newWordInfo.PageNumber, (decimal)let.Location.Y, (decimal)let.PointSize));
                             else if (nChar.Type == ChangeType.Modified)
                                 targetHighlightsYellow.Add(new LetterLoc(let.GlyphRectangle, newWordInfo.PageNumber, (decimal)let.Location.Y, (decimal)let.PointSize));
                             nC++;
@@ -306,7 +313,7 @@ public class PdfProcessingService
                 }
             }
 
-            // 3. Construction du PDF alterné avec le vrai effet fluo
+            // 3. Construction du PDF alterné avec le style "Track Changes"
             var builder = new PdfDocumentBuilder();
             var (font, fontBold) = LoadFonts(builder);
 
@@ -320,16 +327,22 @@ public class PdfProcessingService
                     if (pageIndex <= sourceDoc.NumberOfPages)
                     {
                         var sPage = builder.AddPage(sourceDoc, pageIndex);
-                        DrawFluoHighlights(sPage, sourceHighlightsRed.Where(w => w.PageNumber == pageIndex), 255, 160, 160); // Rouge pastel
-                        DrawFluoHighlights(sPage, sourceHighlightsYellow.Where(w => w.PageNumber == pageIndex), 255, 235, 100); // Jaune fluo
+
+                        // Source : Suppressions pures (Rouge barré) et Modifications (Orange encadré)
+                        DrawDiffMarkup(sPage, sourceHighlightsRed.Where(w => w.PageNumber == pageIndex), 220, 20, 20, MarkupStyle.Strikethrough);
+                        DrawDiffMarkup(sPage, sourceHighlightsYellow.Where(w => w.PageNumber == pageIndex), 255, 140, 0, MarkupStyle.Box);
+
                         DrawPageStamp(sPage, $"[ DOCUMENT SOURCE - Page {pageIndex} ]", fontBold);
                     }
 
                     if (pageIndex <= targetDoc.NumberOfPages)
                     {
                         var tPage = builder.AddPage(targetDoc, pageIndex);
-                        DrawFluoHighlights(tPage, targetHighlightsRed.Where(w => w.PageNumber == pageIndex), 255, 160, 160); // Rouge pastel
-                        DrawFluoHighlights(tPage, targetHighlightsYellow.Where(w => w.PageNumber == pageIndex), 255, 235, 100); // Jaune fluo
+
+                        // Cible : Ajouts purs (Vert souligné) et Modifications (Orange encadré)
+                        DrawDiffMarkup(tPage, targetHighlightsRed.Where(w => w.PageNumber == pageIndex), 20, 180, 20, MarkupStyle.Underline);
+                        DrawDiffMarkup(tPage, targetHighlightsYellow.Where(w => w.PageNumber == pageIndex), 255, 140, 0, MarkupStyle.Box);
+
                         DrawPageStamp(tPage, $"[ DOCUMENT CIBLE (Modifié) - Page {pageIndex} ]", fontBold);
                     }
                 }
@@ -340,67 +353,79 @@ public class PdfProcessingService
         });
     }
 
-    // Le vrai effet surligneur (Fluo unifié) qui laisse le texte parfaitement lisible
-    private void DrawFluoHighlights(PdfPageBuilder pageBuilder, IEnumerable<LetterLoc> letters, byte r, byte g, byte b)
+    // Le nouvel effet visuel typographique (Suivi des modifications)
+    private void DrawDiffMarkup(PdfPageBuilder pageBuilder, IEnumerable<LetterLoc> letters, byte r, byte g, byte b, MarkupStyle style)
     {
-        if (!letters.Any()) return;
-
-        pageBuilder.SetTextAndFillColor(r, g, b);
-
-        // On regroupe par la Ligne de Base (Baseline) de la police pour ignorer les lettres descendantes (p, q, g)
         var sorted = letters.OrderByDescending(l => l.BaselineY)
                             .ThenBy(l => l.BoundingBox.BottomLeft.X)
                             .ToList();
 
+        if (sorted.Count == 0) return;
+
         var segments = new List<(decimal minX, decimal maxX, decimal baselineY, decimal fontSize)>();
 
-        if (sorted.Count > 0)
+        // Logique de regroupement des lettres en segments continus
+        var first = sorted[0];
+        decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X;
+        decimal cMaxX = (decimal)first.BoundingBox.TopRight.X;
+        decimal cBaseline = first.BaselineY;
+        decimal cFontSize = first.FontSize;
+
+        for (int i = 1; i < sorted.Count; i++)
         {
-            var first = sorted[0];
-            decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X;
-            decimal cMaxX = (decimal)first.BoundingBox.TopRight.X;
-            decimal cBaseline = first.BaselineY;
-            decimal cFontSize = first.FontSize;
+            var loc = sorted[i];
+            decimal x = (decimal)loc.BoundingBox.BottomLeft.X;
+            decimal y = loc.BaselineY;
 
-            for (int i = 1; i < sorted.Count; i++)
+            // Si c'est sur la même ligne et assez proche (espacement < 15pts)
+            if (Math.Abs(y - cBaseline) < 3m && (x - cMaxX) < 15m)
             {
-                var loc = sorted[i];
-                decimal x = (decimal)loc.BoundingBox.BottomLeft.X;
-                decimal y = loc.BaselineY;
-
-                // Si c'est sur la même ligne (tolérance 3pts) et assez proche horizontalement (espacement < 15pts = 1 espace)
-                if (Math.Abs(y - cBaseline) < 3m && (x - cMaxX) < 15m)
-                {
-                    // On fusionne les lettres dans un seul et unique segment continu !
-                    cMaxX = Math.Max(cMaxX, (decimal)loc.BoundingBox.TopRight.X);
-                    cFontSize = Math.Max(cFontSize, loc.FontSize); // Au cas où
-                }
-                else
-                {
-                    // Fin du segment, on sauvegarde la ligne de fluo et on en commence une nouvelle
-                    segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
-                    cMinX = x;
-                    cMaxX = (decimal)loc.BoundingBox.TopRight.X;
-                    cBaseline = y;
-                    cFontSize = loc.FontSize;
-                }
+                cMaxX = Math.Max(cMaxX, (decimal)loc.BoundingBox.TopRight.X);
+                cFontSize = Math.Max(cFontSize, loc.FontSize);
             }
-            segments.Add((cMinX, cMaxX, cBaseline, cFontSize)); // Dernier segment
+            else
+            {
+                segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
+                cMinX = x;
+                cMaxX = (decimal)loc.BoundingBox.TopRight.X;
+                cBaseline = y;
+                cFontSize = loc.FontSize;
+            }
         }
+        segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
 
-        // On dessine de beaux rectangles fluos, unifiés et lisses
+        // Application des styles visuels
+        pageBuilder.SetStrokeColor(r, g, b); // Couleur du trait (Stroke)
+
         foreach (var seg in segments)
         {
-            // Épaisseur dynamique basée sur la taille de la police (45% de la hauteur)
-            decimal strokeHeight = seg.fontSize * 0.45m;
-            if (strokeHeight < 3m) strokeHeight = 3m; // Minimum lisible
+            // Épaisseur dynamique du trait basée sur la taille de la police
+            decimal strokeWidth = seg.fontSize * 0.08m;
+            if (strokeWidth < 0.75m) strokeWidth = 0.75m; // Minimum visible
 
-            decimal width = seg.maxX - seg.minX + 2.5m; // Dépasse un peu de chaque côté (effet marqueur)
-            decimal x = seg.minX - 1.25m;
-            decimal y = seg.baselineY - (strokeHeight * 0.2m); // Aligné sur la base du texte, descend légèrement
+            pageBuilder.SetLineWidth(strokeWidth);
+            decimal width = seg.maxX - seg.minX;
 
-            // Le "true" remplit le rectangle avec la couleur pastel, la position laisse la moitié supérieure du texte nue
-            pageBuilder.DrawRectangle(new PdfPoint(x, y), width, strokeHeight, 0m, true);
+            if (style == MarkupStyle.Strikethrough)
+            {
+                // Barre horizontale au milieu de la hauteur de la lettre
+                decimal y = seg.baselineY + (seg.fontSize * 0.3m);
+                pageBuilder.DrawLine(new PdfPoint(seg.minX, y), new PdfPoint(seg.maxX, y));
+            }
+            else if (style == MarkupStyle.Underline)
+            {
+                // Ligne juste en dessous de la ligne de base
+                decimal y = seg.baselineY - (seg.fontSize * 0.12m);
+                pageBuilder.DrawLine(new PdfPoint(seg.minX, y), new PdfPoint(seg.maxX, y));
+            }
+            else if (style == MarkupStyle.Box)
+            {
+                // Cadre léger autour du mot (fill = false pour ne dessiner que les bords)
+                decimal y = seg.baselineY - (seg.fontSize * 0.15m);
+                decimal height = seg.fontSize * 0.9m;
+                // On élargit très légèrement la boîte pour ne pas coller aux lettres
+                pageBuilder.DrawRectangle(new PdfPoint(seg.minX - 1m, y), width + 2m, height, strokeWidth, false);
+            }
         }
     }
 
