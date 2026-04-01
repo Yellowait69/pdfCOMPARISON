@@ -345,7 +345,7 @@ public class PdfProcessingService
         return string.Empty;
     }
 
-    private (PdfFont Font, PdfFont FontBold) LoadFonts(PdfDocumentBuilder builder)
+    private (UglyToad.PdfPig.Writer.PdfFont Font, UglyToad.PdfPig.Writer.PdfFont FontBold) LoadFonts(PdfDocumentBuilder builder)
     {
         string fontsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
         string arialPath = Path.Combine(fontsFolder, "arial.ttf");
@@ -354,8 +354,11 @@ public class PdfProcessingService
         if (!File.Exists(arialPath) || !File.Exists(arialBoldPath))
             throw new FileNotFoundException("Required Arial fonts were not found on this system.");
 
-        return (builder.AddTrueTypeFont(File.ReadAllBytes(arialPath)),
-                builder.AddTrueTypeFont(File.ReadAllBytes(arialBoldPath)));
+        //builder.AddTrueTypeFont returns an UglyToad.PdfPig.Writer.PdfFont object
+        var regularFont = builder.AddTrueTypeFont(File.ReadAllBytes(arialPath));
+        var boldFont = builder.AddTrueTypeFont(File.ReadAllBytes(arialBoldPath));
+
+        return (regularFont, boldFont);
     }
 
     private string NormalizePdfText(string input)
