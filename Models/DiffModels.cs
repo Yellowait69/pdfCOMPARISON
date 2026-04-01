@@ -36,6 +36,9 @@ public class DocumentDiffSummary
 {
     public string DocumentName { get; init; } = string.Empty;
 
+    // NOUVELLE PROPRIÉTÉ : Stocke la langue extraite du fichier (ex: "NL", "FR", "DE")
+    public string Language { get; init; } = string.Empty;
+
     // Le setter a été retiré. La liste est instanciée une fois pour toutes.
     public List<DiffSummaryBlock> Blocks { get; } = new();
 }

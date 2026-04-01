@@ -12,10 +12,17 @@ public class PdfDiffAnalyzer
 {
     public DiffAnalysisResult AnalyzeDifferences(DocumentPair pair, string cleanSource, string cleanTarget, IReadOnlyList<PdfWordInfo> sourceWords, IReadOnlyList<PdfWordInfo> targetWords)
     {
+        // NOUVEAU : On extrait la langue de la clé (ex: "NL_44980_36" -> "NL")
+        string lang = pair.MatchKey.Contains('_') ? pair.MatchKey.Split('_')[0].ToUpper() : "ND";
+
         // Utilisation du "Target-typed new" (C# 9+) pour alléger l'écriture
         var result = new DiffAnalysisResult
         {
-            Summary = new() { DocumentName = Path.GetFileName(pair.TargetPath!) }
+            Summary = new()
+            {
+                DocumentName = Path.GetFileName(pair.TargetPath!),
+                Language = lang // ON ASSIGNE LA LANGUE ICI POUR LES STATISTIQUES
+            }
         };
 
         var diffBuilder = new SideBySideDiffBuilder(new Differ());

@@ -79,8 +79,25 @@ public class PdfReportGenerator
         // Mots sensibles pour l'audit juridique/financier
         var criticalRegex = new Regex(@"(?i)\b(prix|pénalité|pénalités|résiliation|ttc|ht|garantie|article|euro|taxe|montant|facture)\b");
 
+        // NOUVEAU : Dictionnaires pour stocker les statistiques par langue
+        var languageFileCounts = new Dictionary<string, int>();
+        var languageDiffCounts = new Dictionary<string, int>();
+
         foreach (var doc in summaries)
         {
+            string lang = string.IsNullOrWhiteSpace(doc.Language) ? "ND" : doc.Language;
+
+            if (!languageFileCounts.ContainsKey(lang))
+            {
+                languageFileCounts[lang] = 0;
+                languageDiffCounts[lang] = 0;
+            }
+
+            // On compte le nombre de fichiers impactés par langue
+            languageFileCounts[lang]++;
+            // On compte le nombre TOTAL de différences trouvées par langue
+            languageDiffCounts[lang] += doc.Blocks.Count;
+
             foreach (var block in doc.Blocks)
             {
                 if (block.Type == ChangeType.Inserted) totalInserts++;
@@ -128,6 +145,7 @@ public class PdfReportGenerator
             totalChanges, totalInserts, totalDeletes, totalModifies,
             typeDates, typeNumbers, typeWords, summaries.Count,
             wordBalance, criticalAlerts, topModifiedFiles,
+            languageFileCounts, languageDiffCounts, // NOUVEAUX PARAMÈTRES
             font, fontBold);
 
         // ==========================================
@@ -219,6 +237,7 @@ public class PdfReportGenerator
         int totalChanges, int inserts, int deletes, int modifies,
         int dates, int numbers, int words, int totalFiles,
         int wordBalance, int criticalAlerts, List<DocumentDiffSummary> topFiles,
+        Dictionary<string, int> languageFileCounts, Dictionary<string, int> languageDiffCounts, // NOUVEAUX PARAMÈTRES
         PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold)
     {
         decimal currentY = startY;
@@ -248,9 +267,12 @@ public class PdfReportGenerator
             return;
         }
 
-        // TOP 3 DES FICHIERS ET ALERTES CRITIQUES
+        // TOP 3 DES FICHIERS ET STATS PAR LANGUE
         page.SetTextAndFillColor(0, 0, 0);
         page.AddText("Top 3 des fichiers les plus modifiés :", 12m, new PdfPoint((double)startX, (double)currentY), fontBold);
+
+        // NOUVEAU : Titre pour les statistiques textuelles par langue
+        page.AddText("Volume de différences par Langue :", 12m, new PdfPoint((double)(startX + 400m), (double)currentY), fontBold);
 
         decimal listY = currentY - 20m;
         foreach (var file in topFiles)
@@ -262,45 +284,77 @@ public class PdfReportGenerator
             listY -= 15m;
         }
 
+        // NOUVEAU : Affichage textuel des diffs par langue
+        decimal langY = currentY - 20m;
+        foreach (var kvp in languageDiffCounts.OrderByDescending(x => x.Value).Take(4))
+        {
+            page.SetTextAndFillColor(80, 80, 80);
+            page.AddText($"• Documents [{kvp.Key}]", 10m, new PdfPoint((double)(startX + 400m), (double)langY), font);
+            page.SetTextAndFillColor(0, 50, 150);
+            page.AddText($"{kvp.Value} erreurs", 10m, new PdfPoint((double)(startX + 520m), (double)langY), fontBold);
+            langY -= 15m;
+        }
+
         currentY -= 75m;
 
-        // TITRES DES GRAPHIQUES
+        // TITRES DES 3 GRAPHIQUES
         page.SetTextAndFillColor(0, 0, 0);
-        page.AddText("Répartition par type d'action :", 12m, new PdfPoint((double)startX, (double)currentY), fontBold);
-        page.AddText("Nature des données impactées :", 12m, new PdfPoint((double)(startX + 380m), (double)currentY), fontBold);
+        page.AddText("Répartition par type d'action :", 11m, new PdfPoint((double)startX, (double)currentY), fontBold);
+        page.AddText("Nature des données impactées :", 11m, new PdfPoint((double)(startX + 260m), (double)currentY), fontBold);
+        // NOUVEAU TITRE GRAPHIQUE 3
+        page.AddText("Documents modifiés par Langue :", 11m, new PdfPoint((double)(startX + 520m), (double)currentY), fontBold);
         currentY -= 10m;
 
         // GRAPHIQUE 1 : ACTIONS
         var plt1 = new Plot();
         plt1.HideGrid();
         plt1.HideAxesAndGrid();
-
         var slices1 = new List<PieSlice>();
         if (inserts > 0) slices1.Add(new PieSlice { Value = inserts, Label = $"{inserts} Ajouts", FillColor = ScottPlot.Color.FromHex("#10B981") });
         if (deletes > 0) slices1.Add(new PieSlice { Value = deletes, Label = $"{deletes} Supp.", FillColor = ScottPlot.Color.FromHex("#EF4444") });
         if (modifies > 0) slices1.Add(new PieSlice { Value = modifies, Label = $"{modifies} Modif.", FillColor = ScottPlot.Color.FromHex("#F59E0B") });
-
-        var pie1 = plt1.Add.Pie(slices1);
-        pie1.ExplodeFraction = 0.05;
-
-        byte[] imgBytes1 = plt1.GetImageBytes(350, 220, ImageFormat.Png);
-        page.AddPng(imgBytes1, new PdfRectangle((short)startX, (short)(currentY - 220m), (short)(startX + 350m), (short)currentY));
+        if (slices1.Count > 0) {
+            var pie1 = plt1.Add.Pie(slices1);
+            pie1.ExplodeFraction = 0.05;
+        }
+        // Tailles réduites (240px) pour faire de la place au 3e graphique
+        byte[] imgBytes1 = plt1.GetImageBytes(240, 200, ImageFormat.Png);
+        page.AddPng(imgBytes1, new PdfRectangle((short)startX, (short)(currentY - 200m), (short)(startX + 240m), (short)currentY));
 
         // GRAPHIQUE 2 : NATURE DES DONNÉES
         var plt2 = new Plot();
         plt2.HideGrid();
         plt2.HideAxesAndGrid();
-
         var slices2 = new List<PieSlice>();
         if (words > 0) slices2.Add(new PieSlice { Value = words, Label = $"{words} Textes", FillColor = ScottPlot.Color.FromHex("#3B82F6") });
         if (numbers > 0) slices2.Add(new PieSlice { Value = numbers, Label = $"{numbers} Nombres", FillColor = ScottPlot.Color.FromHex("#8B5CF6") });
         if (dates > 0) slices2.Add(new PieSlice { Value = dates, Label = $"{dates} Dates", FillColor = ScottPlot.Color.FromHex("#14B8A6") });
+        if (slices2.Count > 0) {
+            var pie2 = plt2.Add.Pie(slices2);
+            pie2.ExplodeFraction = 0.05;
+        }
+        byte[] imgBytes2 = plt2.GetImageBytes(240, 200, ImageFormat.Png);
+        page.AddPng(imgBytes2, new PdfRectangle((short)(startX + 260m), (short)(currentY - 200m), (short)(startX + 260m + 240m), (short)currentY));
 
-        var pie2 = plt2.Add.Pie(slices2);
-        pie2.ExplodeFraction = 0.05;
-
-        byte[] imgBytes2 = plt2.GetImageBytes(350, 220, ImageFormat.Png);
-        page.AddPng(imgBytes2, new PdfRectangle((short)(startX + 380m), (short)(currentY - 220m), (short)(startX + 380m + 350m), (short)currentY));
+        // NOUVEAU - GRAPHIQUE 3 : LANGUES
+        var plt3 = new Plot();
+        plt3.HideGrid();
+        plt3.HideAxesAndGrid();
+        var slices3 = new List<PieSlice>();
+        string[] colors = { "#3B82F6", "#F59E0B", "#10B981", "#8B5CF6", "#EF4444", "#14B8A6" };
+        int cIdx = 0;
+        foreach (var kvp in languageFileCounts.Where(x => x.Value > 0))
+        {
+            slices3.Add(new PieSlice { Value = kvp.Value, Label = $"{kvp.Key} ({kvp.Value})", FillColor = ScottPlot.Color.FromHex(colors[cIdx % colors.Length]) });
+            cIdx++;
+        }
+        if (slices3.Count > 0)
+        {
+            var pie3 = plt3.Add.Pie(slices3);
+            pie3.ExplodeFraction = 0.05;
+        }
+        byte[] imgBytes3 = plt3.GetImageBytes(240, 200, ImageFormat.Png);
+        page.AddPng(imgBytes3, new PdfRectangle((short)(startX + 520m), (short)(currentY - 200m), (short)(startX + 520m + 240m), (short)currentY));
     }
 
     private void DrawStatBox(PdfPageBuilder page, decimal x, decimal y, string label, string value, PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold, byte rValue, byte gValue, byte bValue)
