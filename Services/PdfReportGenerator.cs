@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
+using DiffPlex;
+using DiffPlex.DiffBuilder;
 using DiffPlex.DiffBuilder.Model;
 using PDFComparison.Models;
 using UglyToad.PdfPig;
@@ -120,18 +123,38 @@ public class PdfReportGenerator
                 page.AddText("Document Modifié (Cible)", 9m, new(rightColumnX, yPosition), fontBold);
                 yPosition -= 15m;
 
+                // NOUVEAU : Récupération des mots avec leurs couleurs respectives
+                var (leftChunks, rightChunks) = GetInlineDiffChunks(block.OldText, block.NewText);
+
+                // --- COLONNE GAUCHE ---
                 decimal currentYLeft = yPosition;
-                if (!string.IsNullOrWhiteSpace(block.ContextBefore)) currentYLeft = DrawTextLines(page, $"... {block.ContextBefore}", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
-                if (!string.IsNullOrWhiteSpace(block.OldText)) currentYLeft = DrawTextLines(page, block.OldText, currentYLeft, leftColumnX, maxCharsCol, 200, 0, 0, fontBold);
-                else currentYLeft = DrawTextLines(page, "(Aucun texte original)", currentYLeft, leftColumnX, maxCharsCol, 180, 180, 180, font);
-                if (!string.IsNullOrWhiteSpace(block.ContextAfter)) currentYLeft = DrawTextLines(page, $"{block.ContextAfter} ...", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
+                if (!string.IsNullOrWhiteSpace(block.ContextBefore))
+                    currentYLeft = DrawTextLines(page, $"... {block.ContextBefore}", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
 
+                if (leftChunks.Count > 0)
+                    currentYLeft = DrawMixedTextLines(page, leftChunks, currentYLeft, leftColumnX, 370m, font, fontBold);
+                else
+                    currentYLeft = DrawTextLines(page, "(Aucun texte original)", currentYLeft, leftColumnX, maxCharsCol, 180, 180, 180, font);
+
+                if (!string.IsNullOrWhiteSpace(block.ContextAfter))
+                    currentYLeft = DrawTextLines(page, $"{block.ContextAfter} ...", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
+
+
+                // --- COLONNE DROITE ---
                 decimal currentYRight = yPosition;
-                if (!string.IsNullOrWhiteSpace(block.ContextBefore)) currentYRight = DrawTextLines(page, $"... {block.ContextBefore}", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
-                if (!string.IsNullOrWhiteSpace(block.NewText)) currentYRight = DrawTextLines(page, block.NewText, currentYRight, rightColumnX, maxCharsCol, 0, 150, 0, fontBold);
-                else currentYRight = DrawTextLines(page, "(Texte supprimé)", currentYRight, rightColumnX, maxCharsCol, 180, 180, 180, font);
-                if (!string.IsNullOrWhiteSpace(block.ContextAfter)) currentYRight = DrawTextLines(page, $"{block.ContextAfter} ...", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
+                if (!string.IsNullOrWhiteSpace(block.ContextBefore))
+                    currentYRight = DrawTextLines(page, $"... {block.ContextBefore}", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
 
+                if (rightChunks.Count > 0)
+                    currentYRight = DrawMixedTextLines(page, rightChunks, currentYRight, rightColumnX, 370m, font, fontBold);
+                else
+                    currentYRight = DrawTextLines(page, "(Texte supprimé)", currentYRight, rightColumnX, maxCharsCol, 180, 180, 180, font);
+
+                if (!string.IsNullOrWhiteSpace(block.ContextAfter))
+                    currentYRight = DrawTextLines(page, $"{block.ContextAfter} ...", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
+
+
+                // Tracé de la ligne de séparation
                 yPosition = Math.Min(currentYLeft, currentYRight) - 20m;
                 page.SetStrokeColor(220, 220, 220);
                 page.DrawLine(new(margin, yPosition + 10m), new(842m - margin, yPosition + 10m), 0.5m);
@@ -141,6 +164,112 @@ public class PdfReportGenerator
 
         File.WriteAllBytes(reportPath, builder.Build());
     }
+
+    // ==========================================
+    // MÉTHODES DE RENDU "INLINE" DES MOTS
+    // ==========================================
+
+    private (List<(string Text, byte r, byte g, byte b, bool isBold)> Left, List<(string Text, byte r, byte g, byte b, bool isBold)> Right) GetInlineDiffChunks(string oldText, string newText)
+    {
+        var leftChunks = new List<(string Text, byte r, byte g, byte b, bool isBold)>();
+        var rightChunks = new List<(string Text, byte r, byte g, byte b, bool isBold)>();
+
+        if (string.IsNullOrWhiteSpace(oldText) && string.IsNullOrWhiteSpace(newText))
+            return (leftChunks, rightChunks);
+
+        var oldWords = Regex.Split(oldText ?? string.Empty, @"(?<=\s+)").Where(x => x.Length > 0).ToList();
+        var newWords = Regex.Split(newText ?? string.Empty, @"(?<=\s+)").Where(x => x.Length > 0).ToList();
+
+        var diff = new SideBySideDiffBuilder(new Differ()).BuildDiffModel(
+            string.Join("\n", oldWords),
+            string.Join("\n", newWords)
+        );
+
+        for (int i = 0; i < diff.OldText.Lines.Count; i++)
+        {
+            var oLine = diff.OldText.Lines[i];
+            var nLine = diff.NewText.Lines[i];
+
+            if (oLine.Type != ChangeType.Imaginary)
+            {
+                if (oLine.Type == ChangeType.Deleted || oLine.Type == ChangeType.Modified)
+                    leftChunks.Add((oLine.Text.Replace("\n", ""), 200, 0, 0, true)); // Rouge et Gras
+                else
+                    leftChunks.Add((oLine.Text.Replace("\n", ""), 100, 100, 100, false)); // Gris
+            }
+
+            if (nLine.Type != ChangeType.Imaginary)
+            {
+                if (nLine.Type == ChangeType.Inserted || nLine.Type == ChangeType.Modified)
+                    rightChunks.Add((nLine.Text.Replace("\n", ""), 0, 150, 0, true)); // Vert et Gras
+                else
+                    rightChunks.Add((nLine.Text.Replace("\n", ""), 100, 100, 100, false)); // Gris
+            }
+        }
+
+        return (leftChunks, rightChunks);
+    }
+
+    private decimal DrawMixedTextLines(PdfPageBuilder page, List<(string Text, byte r, byte g, byte b, bool isBold)> chunks, decimal startY, decimal startX, decimal maxWidth, PdfDocumentBuilder.AddedFont fontNormal, PdfDocumentBuilder.AddedFont fontBold)
+    {
+        decimal currentY = startY;
+        decimal currentX = startX;
+        decimal fontSize = 10m;
+
+        foreach (var chunk in chunks)
+        {
+            if (string.IsNullOrEmpty(chunk.Text)) continue;
+
+            var words = Regex.Split(chunk.Text, @"(?<=\s+)");
+
+            foreach (var word in words)
+            {
+                if (string.IsNullOrEmpty(word)) continue;
+
+                decimal wordWidth = MeasureStringWidth(word, fontSize, chunk.isBold);
+
+                if (currentX + wordWidth > startX + maxWidth && currentX > startX)
+                {
+                    currentY -= 13m;
+                    currentX = startX;
+
+                    if (string.IsNullOrWhiteSpace(word)) continue;
+                }
+
+                var font = chunk.isBold ? fontBold : fontNormal;
+                page.SetTextAndFillColor(chunk.r, chunk.g, chunk.b);
+                page.AddText(word.Replace("\n", ""), fontSize, new(currentX, currentY), font);
+
+                currentX += wordWidth;
+            }
+        }
+
+        if (currentX > startX)
+        {
+            currentY -= 13m;
+        }
+        return currentY;
+    }
+
+    private decimal MeasureStringWidth(string text, decimal fontSize, bool isBold)
+    {
+        decimal width = 0m;
+        foreach (char c in text)
+        {
+            if (c == ' ') width += 0.278m;
+            else if (c == 'i' || c == 'j' || c == 'l') width += 0.222m;
+            else if (c == 'f' || c == 't' || c == 'I') width += 0.278m;
+            else if (c == 'm' || c == 'w' || c == 'M' || c == 'W') width += 0.833m;
+            else if (char.IsUpper(c)) width += 0.667m;
+            else if (char.IsDigit(c)) width += 0.556m;
+            else width += 0.556m;
+        }
+        return width * fontSize * (isBold ? 1.05m : 1.0m);
+    }
+
+    // ==========================================
+    // MÉTHODES CONSERVÉES
+    // ==========================================
 
     private void DrawDiffMarkup(PdfPageBuilder pageBuilder, IEnumerable<LetterLoc> letters, byte r, byte g, byte b, MarkupStyle style)
     {
@@ -176,7 +305,6 @@ public class PdfReportGenerator
             decimal strokeWidth = Math.Max(seg.fontSize * 0.08m, 0.75m);
             decimal width = seg.maxX - seg.minX;
 
-            // Remplacement des suites de "if/else if" par un beau switch statement C#
             switch (style)
             {
                 case MarkupStyle.Strikethrough:
@@ -228,10 +356,6 @@ public class PdfReportGenerator
         return (builder.AddTrueTypeFont(File.ReadAllBytes(arialPath)), builder.AddTrueTypeFont(File.ReadAllBytes(arialBoldPath)));
     }
 
-    // OPTIMISATION MAJEURE : On utilise IEnumerable et "yield return".
-    // Au lieu de créer et d'allouer une nouvelle List<string> en mémoire pour chaque bloc de texte,
-    // l'itérateur renvoie les bouts de chaîne à la volée.
-    // Sur des milliers de lignes de rapports, cela soulage grandement le Garbage Collector.
     private IEnumerable<string> WrapText(string text, int maxLength)
     {
         for (int i = 0; i < text.Length; i += maxLength)
