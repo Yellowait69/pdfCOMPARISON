@@ -4,18 +4,30 @@ using Microsoft.Win32;
 using PDFComparison.Models;
 using PDFComparison.Services;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 
 namespace PDFComparison.ViewModels;
 
+// Local class to structure save data
+public class AppSessionData
+{
+    public string SourceDirectory { get; set; } = string.Empty;
+    public string TargetDirectory { get; set; } = string.Empty;
+    public string OutputDirectory { get; set; } = string.Empty;
+    public List<DocumentPair> Pairs { get; set; } = new();
+}
+
 public partial class MainViewModel : ObservableObject
 {
     private readonly PdfProcessingService _processingService;
+    private readonly string _sessionFilePath; // Path of the save file
 
     [ObservableProperty] private string _sourceDirectory = string.Empty;
     [ObservableProperty] private string _targetDirectory = string.Empty;
@@ -38,13 +50,84 @@ public partial class MainViewModel : ObservableObject
     {
         _processingService = new PdfProcessingService();
 
+        // Save folder in "AppData/Roaming/PDFComparisonPro"
+        string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        string appFolder = Path.Combine(appData, "PDFComparisonPro");
+        Directory.CreateDirectory(appFolder);
+        _sessionFilePath = Path.Combine(appFolder, "last_session.json");
+
         // Default output directory on the Desktop
         OutputDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "PDF_DiffReports");
+
+        // Attempt to load previous session on startup
+        LoadSession();
     }
 
-    // ====================================================================
-    // NOUVEAU : Commande exécutée lors du clic sur le bouton "Ouvrir PDF"
-    // ====================================================================
+    // ==========================================
+    // SAVE AND LOAD METHODS
+    // ==========================================
+    private void SaveSession()
+    {
+        try
+        {
+            var data = new AppSessionData
+            {
+                SourceDirectory = this.SourceDirectory,
+                TargetDirectory = this.TargetDirectory,
+                OutputDirectory = this.OutputDirectory,
+                Pairs = this.Pairs.ToList()
+            };
+
+            string json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(_sessionFilePath, json);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Save error: {ex.Message}");
+        }
+    }
+
+    private void LoadSession()
+    {
+        if (!File.Exists(_sessionFilePath)) return;
+
+        try
+        {
+            string json = File.ReadAllText(_sessionFilePath);
+            var data = JsonSerializer.Deserialize<AppSessionData>(json);
+
+            if (data != null)
+            {
+                SourceDirectory = data.SourceDirectory ?? string.Empty;
+                TargetDirectory = data.TargetDirectory ?? string.Empty;
+
+                if (!string.IsNullOrEmpty(data.OutputDirectory))
+                {
+                    OutputDirectory = data.OutputDirectory;
+                }
+
+                Pairs.Clear();
+                if (data.Pairs != null)
+                {
+                    foreach (var pair in data.Pairs)
+                    {
+                        Pairs.Add(pair);
+                    }
+
+                    if (Pairs.Count > 0)
+                    {
+                        StatusMessage = $"Session restored ({Pairs.Count} documents).";
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Load error: {ex.Message}");
+        }
+    }
+    // ==========================================
+
     [RelayCommand]
     private void OpenReport(DocumentPair pair)
     {
@@ -52,13 +135,18 @@ public partial class MainViewModel : ObservableObject
         {
             try
             {
-                // Ouvre le fichier PDF avec le lecteur par défaut de l'ordinateur
+                // Opens the PDF file with the computer's default reader
                 Process.Start(new ProcessStartInfo(pair.ReportPath) { UseShellExecute = true });
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Impossible d'ouvrir le rapport : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"Cannot open the report: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+        else if (pair != null && !File.Exists(pair.ReportPath))
+        {
+             // Security added if the file was deleted or moved between two sessions
+             MessageBox.Show("The report file has been moved or deleted since the last session.", "File not found", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -66,22 +154,67 @@ public partial class MainViewModel : ObservableObject
     private void BrowseSource()
     {
         var dialog = new OpenFolderDialog { Title = "Select Source Directory" };
-        if (dialog.ShowDialog() == true) SourceDirectory = dialog.FolderName;
+        if (dialog.ShowDialog() == true)
+        {
+            SourceDirectory = dialog.FolderName;
+            SaveSession(); // Saves the path as soon as it is modified
+        }
     }
 
     [RelayCommand]
     private void BrowseTarget()
     {
         var dialog = new OpenFolderDialog { Title = "Select Target Directory" };
-        if (dialog.ShowDialog() == true) TargetDirectory = dialog.FolderName;
+        if (dialog.ShowDialog() == true)
+        {
+            TargetDirectory = dialog.FolderName;
+            SaveSession(); // Saves the path as soon as it is modified
+        }
+    }
+
+    // ==========================================
+    // NEW COMMANDS FOR OUTPUT FOLDER
+    // ==========================================
+    [RelayCommand]
+    private void OpenOutputDirectory()
+    {
+        if (Directory.Exists(OutputDirectory))
+        {
+            try
+            {
+                // Opens the folder directly in Windows Explorer
+                Process.Start(new ProcessStartInfo(OutputDirectory) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Cannot open the directory: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        else
+        {
+            MessageBox.Show("The reports directory does not exist yet. Please run a comparison first.", "Directory not found", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
     }
 
     [RelayCommand]
-    private void BrowseOutput()
+    private void ShareViaOutlook()
     {
-        var dialog = new OpenFolderDialog { Title = "Select Reports Directory" };
-        if (dialog.ShowDialog() == true) OutputDirectory = dialog.FolderName;
+        try
+        {
+            string subject = "PDF Comparison Reports";
+            string body = $"Hello,\n\nThe PDF comparison reports have been generated.\nYou can access them in the following directory:\n{OutputDirectory}\n\nBest regards.";
+
+            // mailto: creates a draft in Outlook (or default mail client) with pre-filled text
+            string mailtoUri = $"mailto:?subject={Uri.EscapeDataString(subject)}&body={Uri.EscapeDataString(body)}";
+
+            Process.Start(new ProcessStartInfo(mailtoUri) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Cannot open the default mail client: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
+    // ==========================================
 
     [RelayCommand]
     private async Task StartComparisonAsync()
@@ -127,28 +260,28 @@ public partial class MainViewModel : ObservableObject
                 return;
             }
 
-            // Affichage plus clair du début de la comparaison
-            StatusMessage = $"Comparaison de {ProgressMax} documents en cours...";
+            // Clearer display of the start of comparison
+            StatusMessage = $"Comparing {ProgressMax} documents...";
 
             var progress = new Progress<int>(value =>
             {
                 ProgressValue = value;
-                // Mise à jour claire du compteur pour l'utilisateur
-                StatusMessage = $"Analyse en cours : document {value} sur {ProgressMax}";
+                // Clear update of the counter for the user
+                StatusMessage = $"Analyzing: document {value} of {ProgressMax}";
             });
 
             // 3. Launch heavy asynchronous processing
             await _processingService.ProcessPairsAsync(pairsToProcess, OutputDirectory, progress);
 
             // ==========================================
-            // TRI AUTOMATIQUE DES RÉSULTATS
+            // AUTOMATIC SORTING OF RESULTS
             // ==========================================
-            StatusMessage = "Tri des résultats en cours...";
+            StatusMessage = "Sorting results...";
 
-            // On trie la liste par nombre de différences décroissant (les plus modifiés en haut)
+            // Sort the list by descending number of differences (most modified at the top)
             var sortedPairs = Pairs.OrderByDescending(p => p.DiffCount).ToList();
 
-            // On met à jour l'interface graphique avec la liste triée
+            // Update the GUI with the sorted list
             Pairs.Clear();
             foreach (var p in sortedPairs)
             {
@@ -158,9 +291,12 @@ public partial class MainViewModel : ObservableObject
 
             StatusMessage = "Processing completed successfully!";
 
+            // Save the complete session once processing is finished
+            SaveSession();
+
             // Final summary
             int diffCount = pairsToProcess.Count(p => p.Status == CompareStatus.Different);
-            MessageBox.Show($"Comparison completed!\n{diffCount} documents présentent des différences sur {ProgressMax} comparés.",
+            MessageBox.Show($"Comparison completed!\n{diffCount} documents have differences out of {ProgressMax} compared.",
                             "Completed", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)

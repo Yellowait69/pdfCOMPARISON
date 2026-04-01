@@ -69,39 +69,42 @@ public class PdfProcessingService
                 if (string.Equals(sourceText, targetText, StringComparison.Ordinal))
                 {
                     pair.Status = CompareStatus.Identical;
-                    pair.ErrorMessage = "Identique (Aucune différence)";
+                    pair.ErrorMessage = "Identical (No differences)";
                     pair.DiffCount = 0;
                 }
                 else
                 {
-                    // Définition du chemin du rapport
+                    // Definition of the report path
                     string reportPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{pair.MatchKey}.pdf");
 
-                    // 2. Generation of the colored difference report (CÔTE À CÔTE)
+                    // 2. Generation of the colored difference report (SIDE-BY-SIDE)
                     int diffCount = await GenerateColoredDiffReportAsync(pair, sourceText, targetText, reportPath);
 
-                    // Mise à jour des propriétés du modèle
+                    // Update model properties
                     pair.DiffCount = diffCount;
-                    pair.ReportPath = reportPath; // Active automatiquement le bouton "Ouvrir PDF"
+                    pair.ReportPath = reportPath; // Automatically enables the "Open PDF" button
 
                     if (diffCount > 0)
                     {
                         pair.Status = CompareStatus.Different;
-                        pair.ErrorMessage = $"{diffCount} différence(s) détectée(s)";
+                        pair.ErrorMessage = $"{diffCount} difference(s) detected";
                     }
                     else
                     {
-                        // Cas où les fichiers sont différents bitairement mais identiques textuellement
+                        // Case where files are binary different but textually identical
                         pair.Status = CompareStatus.Identical;
-                        pair.ErrorMessage = "Faux positifs ignorés (espaces/sauts de ligne)";
+                        pair.ErrorMessage = "False positives ignored (spaces/line breaks)";
                     }
                 }
+
+                // NEW: Save completion time at the end of processing the pair
+                pair.CompletedTime = DateTime.Now;
             }
             catch (Exception ex)
             {
                 pair.Status = CompareStatus.Error;
-                pair.ErrorMessage = $"Erreur: {ex.Message}";
-                pair.DiffCount = -1; // -1 pour les mettre en bas lors du tri
+                pair.ErrorMessage = $"Error: {ex.Message}";
+                pair.DiffCount = -1; // -1 to put them at the bottom during sorting
             }
             finally
             {
@@ -127,25 +130,25 @@ public class PdfProcessingService
         return sb.ToString();
     }
 
-    // Génération du rapport PDF Côte à Côte (Side-by-Side)
+    // Generation of the Side-by-Side PDF report
     private async Task<int> GenerateColoredDiffReportAsync(DocumentPair pair, string sourceText, string targetText, string reportPath)
     {
         return await Task.Run(() =>
         {
-            // S'assurer que le dossier existe
+            // Ensure the folder exists
             Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
 
-            // NORMALISATION : On nettoie les textes pour éviter les faux positifs
+            // NORMALIZATION: Clean texts to avoid false positives
             string cleanSource = NormalizePdfText(sourceText);
             string cleanTarget = NormalizePdfText(targetText);
 
-            // CHANGEMENT MAJEUR : Utilisation de SideBySideDiffBuilder pour avoir 2 colonnes synchronisées
+            // MAJOR CHANGE: Using SideBySideDiffBuilder to have 2 synchronized columns
             var diffBuilder = new SideBySideDiffBuilder(new DiffPlex.Differ());
             var diff = diffBuilder.BuildDiffModel(cleanSource, cleanTarget);
 
             var builder = new PdfDocumentBuilder();
 
-            // CORRECTION ICI : Format Paysage (Landscape) : Largeur 842, Hauteur 595
+            // Landscape format: Width 842, Height 595
             PdfPageBuilder page = builder.AddPage(842, 595);
 
             // ==========================================
@@ -167,108 +170,149 @@ public class PdfProcessingService
 
             double margin = 30;
             double yPosition = 595 - margin;
-            int maxCharsPerLine = 70; // Environ 70 caractères max par moitié de page
+            int maxCharsPerLine = 70; // About 70 chars max per half-page
 
-            // Noms de fichiers
+            // File names
             string sourceFileName = Path.GetFileName(pair.SourcePath);
             string targetFileName = Path.GetFileName(pair.TargetPath!);
 
-            // --- EN-TÊTE DU RAPPORT ---
-            page.SetTextAndFillColor(0, 0, 0); // Noir
-            page.AddText($"RAPPORT DE DIFFÉRENCES (CÔTE À CÔTE) - Clé: {pair.MatchKey}", 14m, new PdfPoint(margin, yPosition), fontBold);
+            // --- REPORT HEADER ---
+            page.SetTextAndFillColor(0, 0, 0); // Black
+            page.AddText($"DIFFERENCE REPORT (SIDE-BY-SIDE) - Key: {pair.MatchKey}", 14m, new PdfPoint(margin, yPosition), fontBold);
             yPosition -= 25;
 
-            // Titre Colonne Gauche (Source)
-            page.SetTextAndFillColor(200, 0, 0); // Rouge
-            page.AddText($"SOURCE (Rouge) : {sourceFileName}", 12m, new PdfPoint(20, yPosition), fontBold);
+            // Left Column Title (Source)
+            page.SetTextAndFillColor(200, 0, 0); // Red
+            page.AddText($"SOURCE (Red): {sourceFileName}", 12m, new PdfPoint(20, yPosition), fontBold);
 
-            // Titre Colonne Droite (Cible)
-            page.SetTextAndFillColor(0, 128, 0); // Vert
-            page.AddText($"CIBLE (Vert) : {targetFileName}", 12m, new PdfPoint(425, yPosition), fontBold);
+            // Right Column Title (Target)
+            page.SetTextAndFillColor(0, 128, 0); // Green
+            page.AddText($"TARGET (Green): {targetFileName}", 12m, new PdfPoint(425, yPosition), fontBold);
 
-            yPosition -= 25; // Espace avant de commencer les textes
+            yPosition -= 25; // Space before starting the text
 
-            int differencesCount = 0; // Compteur de différences réelles
+            int differencesCount = 0; // Real differences counter
+            var linesToPrint = new HashSet<int>();
+            int contextLines = 1; // 1 sentence of context before and 1 after
 
-            // --- CORPS DU RAPPORT (Lecture simultanée gauche/droite) ---
+            // --- 1st PASS: Identify differences and target context lines ---
             for (int i = 0; i < diff.OldText.Lines.Count; i++)
             {
                 var leftLine = diff.OldText.Lines[i];
                 var rightLine = diff.NewText.Lines[i];
 
-                // Vérifier si cette ligne contient une différence
+                // Check if this line contains a difference
                 bool isDiff = (leftLine.Type != ChangeType.Unchanged && leftLine.Type != ChangeType.Imaginary) ||
                               (rightLine.Type != ChangeType.Unchanged && rightLine.Type != ChangeType.Imaginary);
 
                 if (isDiff)
                 {
                     differencesCount++;
+
+                    // Add the current line and context lines (before/after)
+                    for (int c = -contextLines; c <= contextLines; c++)
+                    {
+                        int indexToAdd = i + c;
+                        // Ensure we don't go out of array bounds
+                        if (indexToAdd >= 0 && indexToAdd < diff.OldText.Lines.Count)
+                        {
+                            linesToPrint.Add(indexToAdd);
+                        }
+                    }
+                }
+            }
+
+            int lastPrintedIndex = -2; // Variable to track skipped lines
+
+            // --- 2nd PASS: DRAW REPORT BODY (Only relevant text) ---
+            for (int i = 0; i < diff.OldText.Lines.Count; i++)
+            {
+                // Ignore lines that are neither differences nor context
+                if (!linesToPrint.Contains(i)) continue;
+
+                // If lines were skipped, display a visual separator "[...]"
+                if (lastPrintedIndex != -2 && i > lastPrintedIndex + 1)
+                {
+                    if (yPosition < margin + 15)
+                    {
+                        page = builder.AddPage(842, 595); // New Landscape page
+                        yPosition = 595 - margin;
+                    }
+
+                    page.SetTextAndFillColor(150, 150, 150); // Light Gray
+                    page.AddText(" [...]", 10m, new PdfPoint(20, yPosition), font);
+                    page.AddText(" [...]", 10m, new PdfPoint(425, yPosition), font);
+                    yPosition -= 17; // Separator line spacing
                 }
 
-                // Découper le texte pour qu'il ne dépasse pas sa moitié de page
+                lastPrintedIndex = i;
+
+                var leftLine = diff.OldText.Lines[i];
+                var rightLine = diff.NewText.Lines[i];
+
+                // Wrap text so it doesn't exceed its half-page
                 var leftWrapped = WrapText(leftLine.Text ?? "", maxCharsPerLine);
                 var rightWrapped = WrapText(rightLine.Text ?? "", maxCharsPerLine);
 
-                // On prend le plus grand nombre de lignes entre la gauche et la droite pour rester parfaitement aligné
+                // Take the maximum number of lines between left and right to stay perfectly aligned
                 int maxLines = Math.Max(1, Math.Max(leftWrapped.Count, rightWrapped.Count));
 
                 for (int j = 0; j < maxLines; j++)
                 {
-                    // Gestion du changement de page synchronisé pour les deux colonnes
+                    // Synchronized page change handling for both columns
                     if (yPosition < margin)
                     {
-                        // CORRECTION ICI AUSSI : 842 de largeur, 595 de hauteur
-                        page = builder.AddPage(842, 595); // Nouvelle page Paysage
+                        page = builder.AddPage(842, 595); // New Landscape page
                         yPosition = 595 - margin;
                     }
 
                     string lText = j < leftWrapped.Count ? leftWrapped[j] : "";
                     string rText = j < rightWrapped.Count ? rightWrapped[j] : "";
 
-                    // DESSIN COLONNE GAUCHE (Source)
+                    // DRAW LEFT COLUMN (Source)
                     if (!string.IsNullOrEmpty(lText))
                     {
                         SetColorForType(page, leftLine.Type);
                         page.AddText(lText, 10m, new PdfPoint(20, yPosition), font);
                     }
 
-                    // DESSIN COLONNE DROITE (Cible)
+                    // DRAW RIGHT COLUMN (Target)
                     if (!string.IsNullOrEmpty(rText))
                     {
                         SetColorForType(page, rightLine.Type);
                         page.AddText(rText, 10m, new PdfPoint(425, yPosition), font);
                     }
 
-                    yPosition -= 13; // Interligne
+                    yPosition -= 13; // Line spacing
                 }
 
-                yPosition -= 4; // Petit espace entre chaque ligne/bloc de texte
+                yPosition -= 4; // Small space between each line/block of text
             }
 
             File.WriteAllBytes(reportPath, builder.Build());
 
-            return differencesCount; // Retourne le compteur final
+            return differencesCount; // Return the final counter
         });
     }
 
     /// <summary>
-    /// Applique la couleur correcte en fonction du type de modification
+    /// Applies the correct color based on the type of modification
     /// </summary>
     private void SetColorForType(PdfPageBuilder page, ChangeType type)
     {
         switch (type)
         {
             case ChangeType.Inserted:
-                page.SetTextAndFillColor(0, 128, 0); // Vert
+                page.SetTextAndFillColor(0, 128, 0); // Green
                 break;
             case ChangeType.Deleted:
-                page.SetTextAndFillColor(200, 0, 0); // Rouge
+                page.SetTextAndFillColor(200, 0, 0); // Red
                 break;
             case ChangeType.Modified:
-                page.SetTextAndFillColor(0, 0, 200); // Bleu
+                page.SetTextAndFillColor(0, 0, 200); // Blue
                 break;
             case ChangeType.Unchanged:
-                page.SetTextAndFillColor(90, 90, 90); // Gris foncé pour le texte inchangé
+                page.SetTextAndFillColor(90, 90, 90); // Dark gray for unchanged text
                 break;
             default:
                 page.SetTextAndFillColor(255, 255, 255); // Imaginary (invisible)
@@ -277,28 +321,28 @@ public class PdfProcessingService
     }
 
     /// <summary>
-    /// Fonction pour normaliser le texte du PDF de façon INTELLIGENTE.
-    /// Évite que l'ajout d'un seul mot décale tout le document.
-    /// Reconstruit le texte phrase par phrase pour un diff granulaire.
+    /// Function to SMARTLY normalize the PDF text.
+    /// Prevents adding a single word from shifting the entire document.
+    /// Rebuilds text sentence by sentence for a granular diff.
     /// </summary>
     private string NormalizePdfText(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return string.Empty;
 
-        // 1. On "aplatit" tout le texte
+        // 1. Flatten all text
         string flatText = Regex.Replace(input, @"\s+", " ");
 
-        // 2. Découpage intelligent basé sur la ponctuation
+        // 2. Smart splitting based on punctuation
         flatText = flatText.Replace(". ", ".\n");
         flatText = flatText.Replace("? ", "?\n");
         flatText = flatText.Replace("! ", "!\n");
         flatText = flatText.Replace(": ", ":\n");
 
-        // Gestion intelligente des listes à puces
+        // Smart handling of bullet points
         flatText = flatText.Replace("•", "\n• ");
         flatText = flatText.Replace(" o ", "\n o ");
 
-        // 3. Nettoyage
+        // 3. Cleanup
         var lines = flatText.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries)
                          .Select(l => l.Trim())
                          .Where(l => l.Length > 0);

@@ -1,12 +1,15 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using System;
+using System.Text.Json.Serialization;
 
 namespace PDFComparison.Models;
 
 public partial class DocumentPair : ObservableObject
 {
-    public string MatchKey { get; }
-    public string SourcePath { get; }
-    public string? TargetPath { get; }
+    // Added "set" to allow restoration from the save file (JSON deserialization)
+    public string MatchKey { get; set; } = string.Empty;
+    public string SourcePath { get; set; } = string.Empty;
+    public string? TargetPath { get; set; }
 
     [ObservableProperty]
     private CompareStatus _status = CompareStatus.Pending;
@@ -14,18 +17,29 @@ public partial class DocumentPair : ObservableObject
     [ObservableProperty]
     private string _errorMessage = string.Empty;
 
-    // Propriété pour stocker le nombre d'erreurs/différences
-    // Permet de trier les documents pour afficher ceux avec le plus d'erreurs en premier
+    // Property to store the number of errors/differences
+    // Allows sorting documents to display those with the most errors first
     [ObservableProperty]
     private int _diffCount;
 
-    // NOUVEAU : Chemin du rapport PDF généré (côte à côte)
+    // NEW: Path of the generated PDF report (side-by-side)
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasReport))]
     private string _reportPath = string.Empty;
 
-    // NOUVEAU : Booléen automatique pour activer/désactiver le bouton "Ouvrir PDF"
+    // NEW: End date and time of processing (Completed Time)
+    [ObservableProperty]
+    private DateTime? _completedTime;
+
+    // NEW: Automatic boolean to enable/disable the "Open PDF" button
+    // [JsonIgnore] prevents saving this property in the file because it is calculated dynamically
+    [JsonIgnore]
     public bool HasReport => !string.IsNullOrEmpty(ReportPath);
+
+    // NEW: Empty constructor required by the JSON deserializer
+    public DocumentPair()
+    {
+    }
 
     public DocumentPair(string matchKey, string sourcePath, string? targetPath)
     {
@@ -36,8 +50,8 @@ public partial class DocumentPair : ObservableObject
         if (string.IsNullOrEmpty(TargetPath))
         {
             Status = CompareStatus.MissingInTarget;
-            ErrorMessage = "Fichier cible manquant";
-            DiffCount = -1; // -1 pour s'assurer de les placer à la fin lors d'un tri décroissant
+            ErrorMessage = "Missing target file";
+            DiffCount = -1; // -1 to ensure they are placed at the end during a descending sort
         }
     }
 }

@@ -84,7 +84,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="140"/>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="110"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -104,7 +104,11 @@
 
                 <TextBlock Grid.Row="4" Text="Reports Directory:" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#374151"/>
                 <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding OutputDirectory, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="True" />
-                <Button Grid.Row="4" Grid.Column="2" Content="Browse..." Command="{Binding BrowseOutputCommand}" Style="{StaticResource ModernSecondaryButton}" Margin="10,0,0,0"/>
+
+                <StackPanel Grid.Row="4" Grid.Column="2" Orientation="Horizontal" Margin="10,0,0,0">
+                    <Button Content="Open" Command="{Binding OpenOutputDirectoryCommand}" Style="{StaticResource ModernSecondaryButton}" Margin="0,0,8,0" Padding="15,6"/>
+                    <Button Content="Share" Command="{Binding ShareViaOutlookCommand}" Style="{StaticResource ModernPrimaryButton}" Background="#10B981" Padding="15,6"/>
+                </StackPanel>
             </Grid>
         </Border>
 
@@ -172,15 +176,35 @@
                     </Style>
                 </DataGrid.Resources>
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Document Key" Binding="{Binding MatchKey}" Width="130"/>
-                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="150" FontWeight="SemiBold"/>
-                    <DataGridTextColumn Header="Source File" Binding="{Binding SourcePath}" Width="350"/>
-                    <DataGridTextColumn Header="Details / Errors" Binding="{Binding ErrorMessage}" Width="*"/>
+                    <DataGridTextColumn Header="Ref No" Binding="{Binding MatchKey}" Width="80" FontWeight="Bold"/>
 
-                    <DataGridTemplateColumn Header="Action" Width="120">
+                    <DataGridTextColumn Header="Source File" Binding="{Binding SourcePath}" Width="220">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="ToolTip" Value="{Binding SourcePath}"/>
+                                <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
+                    <DataGridTextColumn Header="Completed Time" Binding="{Binding CompletedTime, StringFormat=\{0:HH:mm:ss\}}" Width="105" Foreground="#6B7280"/>
+
+                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100" FontWeight="SemiBold"/>
+                    <DataGridTextColumn Header="Details (Diff)" Binding="{Binding ErrorMessage}" Width="180"/>
+
+                    <DataGridTextColumn Header="Report Path" Binding="{Binding ReportPath}" Width="180" Foreground="#6B7280">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="ToolTip" Value="{Binding ReportPath}"/>
+                                <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+
+                    <DataGridTemplateColumn Header="Action" Width="130">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <Button Content="Ouvrir PDF"
+                                <Button Content="Open Report"
                                         Command="{Binding DataContext.OpenReportCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                         CommandParameter="{Binding}"
                                         Visibility="{Binding HasReport, Converter={StaticResource BooleanToVisibilityConverter}, FallbackValue=Hidden}"
