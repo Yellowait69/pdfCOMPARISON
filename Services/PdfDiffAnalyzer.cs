@@ -90,39 +90,14 @@ public class PdfDiffAnalyzer
             }
             else if ((oldWordDiff.Type is ChangeType.Modified || newWordDiff.Type is ChangeType.Modified) && oldWordInfo is not null && newWordInfo is not null)
             {
-                // OPTIMISATION : Les chaînes en C# implémentent IEnumerable<char>.
-                // Inutile d'appeler .ToCharArray() qui alloue un nouveau tableau en mémoire pour chaque mot modifié.
-                var charDiff = diffBuilder.BuildDiffModel(
-                    string.Join('\n', oldWordInfo.Text),
-                    string.Join('\n', newWordInfo.Text)
-                );
+                // CORRECTION : Encadrement complet des mots modifiés
+                // On ajoute toutes les lettres du mot source dans la liste jaune (orange)
+                result.Highlights.SourceYellow.AddRange(oldWordInfo.Letters.Select(l =>
+                    new LetterLoc(l.GlyphRectangle, oldWordInfo.PageNumber, (decimal)l.Location.Y, (decimal)l.PointSize)));
 
-                int oC = 0, nC = 0;
-                for (int j = 0; j < charDiff.NewText.Lines.Count; j++)
-                {
-                    var oChar = charDiff.OldText.Lines[j];
-                    var nChar = charDiff.NewText.Lines[j];
-
-                    if (oChar.Type is not ChangeType.Imaginary && oC < oldWordInfo.Letters.Count)
-                    {
-                        var let = oldWordInfo.Letters[oC];
-                        if (oChar.Type is ChangeType.Deleted)
-                            result.Highlights.SourceRed.Add(new LetterLoc(let.GlyphRectangle, oldWordInfo.PageNumber, (decimal)let.Location.Y, (decimal)let.PointSize));
-                        else if (oChar.Type is ChangeType.Modified)
-                            result.Highlights.SourceYellow.Add(new LetterLoc(let.GlyphRectangle, oldWordInfo.PageNumber, (decimal)let.Location.Y, (decimal)let.PointSize));
-                        oC++;
-                    }
-
-                    if (nChar.Type is not ChangeType.Imaginary && nC < newWordInfo.Letters.Count)
-                    {
-                        var let = newWordInfo.Letters[nC];
-                        if (nChar.Type is ChangeType.Inserted)
-                            result.Highlights.TargetRed.Add(new LetterLoc(let.GlyphRectangle, newWordInfo.PageNumber, (decimal)let.Location.Y, (decimal)let.PointSize));
-                        else if (nChar.Type is ChangeType.Modified)
-                            result.Highlights.TargetYellow.Add(new LetterLoc(let.GlyphRectangle, newWordInfo.PageNumber, (decimal)let.Location.Y, (decimal)let.PointSize));
-                        nC++;
-                    }
-                }
+                // On ajoute toutes les lettres du mot cible dans la liste jaune (orange)
+                result.Highlights.TargetYellow.AddRange(newWordInfo.Letters.Select(l =>
+                    new LetterLoc(l.GlyphRectangle, newWordInfo.PageNumber, (decimal)l.Location.Y, (decimal)l.PointSize)));
             }
         }
 
