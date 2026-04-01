@@ -236,7 +236,9 @@ public class PdfReportGenerator
         pie1.ExplodeFraction = 0.05;
 
         byte[] imgBytes1 = plt1.GetImageBytes(350, 250, ImageFormat.Png);
-        page.AddPng(imgBytes1, new PdfRectangle(startX, currentY - 250m, startX + 350m, currentY));
+
+        // CORRECTION : Cast explicite en (short) pour le constructeur de PdfRectangle
+        page.AddPng(imgBytes1, new PdfRectangle((short)startX, (short)(currentY - 250m), (short)(startX + 350m), (short)currentY));
 
         // Graphique 2
         var plt2 = new Plot();
@@ -252,7 +254,9 @@ public class PdfReportGenerator
         pie2.ExplodeFraction = 0.05;
 
         byte[] imgBytes2 = plt2.GetImageBytes(350, 250, ImageFormat.Png);
-        page.AddPng(imgBytes2, new PdfRectangle(startX + 380m, currentY - 250m, startX + 380m + 350m, currentY));
+
+        // CORRECTION : Cast explicite en (short) pour le constructeur de PdfRectangle
+        page.AddPng(imgBytes2, new PdfRectangle((short)(startX + 380m), (short)(currentY - 250m), (short)(startX + 380m + 350m), (short)currentY));
     }
 
     private void DrawStatBox(PdfPageBuilder page, decimal x, decimal y, string label, string value, PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold)
