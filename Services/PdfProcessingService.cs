@@ -31,6 +31,14 @@ public class DocumentDiffSummary
     public List<DiffSummaryBlock> Blocks { get; set; } = new();
 }
 
+// Classe pour stocker la position géométrique exacte de chaque mot
+public class PdfWordInfo
+{
+    public string Text { get; set; } = string.Empty;
+    public UglyToad.PdfPig.Core.PdfRectangle BoundingBox { get; set; }
+    public int PageNumber { get; set; }
+}
+
 public class PdfProcessingService
 {
     private static readonly Regex KeyRegex = new(@"(\d+)\.pdf$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -138,54 +146,45 @@ public class PdfProcessingService
         return sb.ToString();
     }
 
-    // NOUVEAU: Génère le rapport en PAYSAGE (Source à gauche, Target à droite) avec les types Decimal (m)
+    // Extraction des mots et de leurs coordonnées pour l'overlay
+    private List<PdfWordInfo> ExtractWords(string pdfPath)
+    {
+        var words = new List<PdfWordInfo>();
+        using (var doc = PdfDocument.Open(pdfPath, new ParsingOptions { ClipPaths = false }))
+        {
+            foreach (var page in doc.GetPages())
+            {
+                foreach (var word in page.GetWords())
+                {
+                    if (!string.IsNullOrWhiteSpace(word.Text))
+                    {
+                        words.Add(new PdfWordInfo { Text = word.Text, BoundingBox = word.BoundingBox, PageNumber = page.Number });
+                    }
+                }
+            }
+        }
+        return words;
+    }
+
     private async Task<(int DiffCount, DocumentDiffSummary Summary)> GenerateIndividualFullReportAsync(DocumentPair pair, string sourceText, string targetText, string reportPath)
     {
         return await Task.Run(() =>
         {
             Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
 
+            // 1. Synthèse globale (Comparaison textuelle pour générer les phrases du résumé)
             string cleanSource = NormalizePdfText(sourceText);
             string cleanTarget = NormalizePdfText(targetText);
-
-            var diffBuilder = new SideBySideDiffBuilder(new DiffPlex.Differ());
-            var diff = diffBuilder.BuildDiffModel(cleanSource, cleanTarget);
-
-            var builder = new PdfDocumentBuilder();
-            // Format A4 Paysage (Landscape): 842 x 595
-            PdfPageBuilder page = builder.AddPage(842, 595);
-            var (font, fontBold) = LoadFonts(builder);
-
-            // CORRECTION: Utilisation de decimal ("m") à la place de double
-            decimal margin = 30m;
-            decimal colWidth = 370m;
-            decimal leftColX = margin;
-            decimal rightColX = 842m / 2m + 10m;
-            decimal yPosition = 595m - margin;
-
-            string targetFileName = Path.GetFileName(pair.TargetPath!);
-
-            // En-tête
-            page.SetTextAndFillColor(0, 0, 0);
-            page.AddText($"RAPPORT DÉTAILLÉ - Document: {targetFileName} (Format Paysage)", 14m, new PdfPoint(margin, yPosition), fontBold);
-            yPosition -= 15m;
-            page.SetTextAndFillColor(100, 100, 100);
-            page.AddText("Légende : Fond Rouge = Ajout/Suppression | Fond Jaune = Modification exacte", 10m, new PdfPoint(margin, yPosition), font);
-            yPosition -= 25m;
-
-            // Titres des colonnes
-            page.SetTextAndFillColor(0, 50, 150);
-            page.AddText("DOCUMENT SOURCE (Original)", 12m, new PdfPoint(leftColX, yPosition), fontBold);
-            page.AddText("DOCUMENT CIBLE (Modifié)", 12m, new PdfPoint(rightColX, yPosition), fontBold);
-            yPosition -= 20m;
+            var diffBuilderLines = new SideBySideDiffBuilder(new DiffPlex.Differ());
+            var diffLines = diffBuilderLines.BuildDiffModel(cleanSource, cleanTarget);
 
             int differencesCount = 0;
-            var summary = new DocumentDiffSummary { DocumentName = targetFileName };
+            var summary = new DocumentDiffSummary { DocumentName = Path.GetFileName(pair.TargetPath!) };
 
-            for (int i = 0; i < diff.NewText.Lines.Count; i++)
+            for (int i = 0; i < diffLines.NewText.Lines.Count; i++)
             {
-                var newLine = diff.NewText.Lines[i];
-                var oldLine = diff.OldText.Lines[i];
+                var newLine = diffLines.NewText.Lines[i];
+                var oldLine = diffLines.OldText.Lines[i];
 
                 if (newLine.Type == ChangeType.Inserted || newLine.Type == ChangeType.Modified || oldLine.Type == ChangeType.Deleted)
                 {
@@ -193,55 +192,93 @@ public class PdfProcessingService
                     var block = new DiffSummaryBlock
                     {
                         Type = newLine.Type != ChangeType.Unchanged ? newLine.Type : oldLine.Type,
-                        ContextBefore = GetValidContextLine(diff.NewText.Lines, i, -1),
-                        ContextAfter = GetValidContextLine(diff.NewText.Lines, i, 1),
+                        ContextBefore = GetValidContextLine(diffLines.NewText.Lines, i, -1),
+                        ContextAfter = GetValidContextLine(diffLines.NewText.Lines, i, 1),
                     };
 
                     if (newLine.Type == ChangeType.Modified)
-                        block.DiffContent = $"Le texte initial \"{oldLine.Text}\" a été remplacé par \"{newLine.Text}\".";
+                        block.DiffContent = $"Texte modifié : \"{oldLine.Text}\" -> \"{newLine.Text}\"";
                     else if (newLine.Type == ChangeType.Inserted)
-                        block.DiffContent = $"Ajout : \"{newLine.Text}\".";
+                        block.DiffContent = $"Ajout : \"{newLine.Text}\"";
                     else if (oldLine.Type == ChangeType.Deleted)
-                        block.DiffContent = $"Suppression : \"{oldLine.Text}\".";
+                        block.DiffContent = $"Suppression : \"{oldLine.Text}\"";
 
                     summary.Blocks.Add(block);
                 }
+            }
 
-                if (newLine.Type == ChangeType.Imaginary && oldLine.Type == ChangeType.Imaginary) continue;
+            // 2. Traitement visuel mot par mot sur les PDFs originaux
+            var sourceWords = ExtractWords(pair.SourcePath);
+            var targetWords = ExtractWords(pair.TargetPath!);
 
-                // Pagination
-                if (yPosition < margin)
+            // Création d'un modèle de diff mot à mot
+            var diffBuilderWords = new SideBySideDiffBuilder(new DiffPlex.Differ());
+            var diffWords = diffBuilderWords.BuildDiffModel(
+                string.Join("\n", sourceWords.Select(w => w.Text)),
+                string.Join("\n", targetWords.Select(w => w.Text))
+            );
+
+            List<PdfWordInfo> sourceHighlightsRed = new();
+            List<PdfWordInfo> sourceHighlightsYellow = new();
+            List<PdfWordInfo> targetHighlightsRed = new();
+            List<PdfWordInfo> targetHighlightsYellow = new();
+
+            int sPointer = 0;
+            int tPointer = 0;
+
+            for (int i = 0; i < diffWords.NewText.Lines.Count; i++)
+            {
+                var oldWord = diffWords.OldText.Lines[i];
+                var newWord = diffWords.NewText.Lines[i];
+
+                if (oldWord.Type != ChangeType.Imaginary && sPointer < sourceWords.Count)
                 {
-                    page = builder.AddPage(842, 595);
-                    yPosition = 595m - margin;
-                    page.SetTextAndFillColor(0, 50, 150);
-                    page.AddText("DOCUMENT SOURCE (Suite)", 10m, new PdfPoint(leftColX, yPosition), fontBold);
-                    page.AddText("DOCUMENT CIBLE (Suite)", 10m, new PdfPoint(rightColX, yPosition), fontBold);
-                    yPosition -= 20m;
+                    if (oldWord.Type == ChangeType.Deleted) sourceHighlightsRed.Add(sourceWords[sPointer]);
+                    else if (oldWord.Type == ChangeType.Modified) sourceHighlightsYellow.Add(sourceWords[sPointer]);
+                    sPointer++;
                 }
 
-                // Affichage côte à côte
-                if (newLine.Type == ChangeType.Modified || oldLine.Type == ChangeType.Modified)
+                if (newWord.Type != ChangeType.Imaginary && tPointer < targetWords.Count)
                 {
-                    // MODIFICATION : On compare mot par mot pour surligner en jaune
-                    DrawLineWithWordDiff(page, oldLine.Text, newLine.Text, leftColX, rightColX, yPosition, font, colWidth);
+                    if (newWord.Type == ChangeType.Inserted) targetHighlightsRed.Add(targetWords[tPointer]);
+                    else if (newWord.Type == ChangeType.Modified) targetHighlightsYellow.Add(targetWords[tPointer]);
+                    tPointer++;
                 }
-                else
+            }
+
+            // 3. Construction du PDF alterné (Page 1 Source, Page 1 Target, etc.)
+            var builder = new PdfDocumentBuilder();
+            var (font, fontBold) = LoadFonts(builder);
+
+            using (var sourceDoc = PdfDocument.Open(pair.SourcePath))
+            using (var targetDoc = PdfDocument.Open(pair.TargetPath!))
+            {
+                int maxPages = Math.Max(sourceDoc.NumberOfPages, targetDoc.NumberOfPages);
+
+                for (int pageIndex = 1; pageIndex <= maxPages; pageIndex++)
                 {
-                    // LIGNE INCHANGÉE, AJOUTÉE OU SUPPRIMÉE (Rouge ou Noir)
-                    if (oldLine.Type != ChangeType.Imaginary)
+                    // Ajouter la page SOURCE si elle existe
+                    if (pageIndex <= sourceDoc.NumberOfPages)
                     {
-                        bool isDeleted = oldLine.Type == ChangeType.Deleted;
-                        DrawSimpleText(page, oldLine.Text ?? "", leftColX, yPosition, font, colWidth, isDeleted ? "Red" : "Black");
+                        var sPage = builder.AddPage(sourceDoc, pageIndex);
+                        DrawBoxHighlights(sPage, sourceHighlightsRed.Where(w => w.PageNumber == pageIndex), 220, 20, 20); // Rouge (Suppressions)
+                        DrawBoxHighlights(sPage, sourceHighlightsYellow.Where(w => w.PageNumber == pageIndex), 200, 150, 0); // Jaune (Modifications)
+
+                        // Tampon indicatif en haut de page
+                        DrawPageStamp(sPage, $"[ DOCUMENT SOURCE - Page {pageIndex} ]", fontBold);
                     }
-                    if (newLine.Type != ChangeType.Imaginary)
+
+                    // Ajouter la page CIBLE si elle existe
+                    if (pageIndex <= targetDoc.NumberOfPages)
                     {
-                        bool isInserted = newLine.Type == ChangeType.Inserted;
-                        DrawSimpleText(page, newLine.Text ?? "", rightColX, yPosition, font, colWidth, isInserted ? "Red" : "Black");
+                        var tPage = builder.AddPage(targetDoc, pageIndex);
+                        DrawBoxHighlights(tPage, targetHighlightsRed.Where(w => w.PageNumber == pageIndex), 220, 20, 20); // Rouge (Ajouts)
+                        DrawBoxHighlights(tPage, targetHighlightsYellow.Where(w => w.PageNumber == pageIndex), 200, 150, 0); // Jaune (Modifications)
+
+                        // Tampon indicatif en haut de page
+                        DrawPageStamp(tPage, $"[ DOCUMENT CIBLE (Modifié) - Page {pageIndex} ]", fontBold);
                     }
                 }
-
-                yPosition -= 14m; // Espacement de ligne
             }
 
             File.WriteAllBytes(reportPath, builder.Build());
@@ -249,80 +286,36 @@ public class PdfProcessingService
         });
     }
 
-    // CORRECTION: types decimal
-    private void DrawLineWithWordDiff(PdfPageBuilder page, string oldText, string newText, decimal leftX, decimal rightX, decimal y, PdfDocumentBuilder.AddedFont font, decimal maxWidth)
+    // Dessine un encadré de couleur (sans masquer le texte) autour des mots
+    private void DrawBoxHighlights(PdfPageBuilder pageBuilder, IEnumerable<PdfWordInfo> words, byte r, byte g, byte b)
     {
-        oldText ??= "";
-        newText ??= "";
+        if (!words.Any()) return;
 
-        // Comparaison mot par mot
-        var wordDiffBuilder = new SideBySideDiffBuilder(new DiffPlex.Differ());
-        var wordDiff = wordDiffBuilder.BuildDiffModel(oldText.Replace(" ", "\n"), newText.Replace(" ", "\n"));
+        pageBuilder.SetStrokeColor(r, g, b);
 
-        decimal currentLeftX = leftX;
-        decimal currentRightX = rightX;
-
-        for (int i = 0; i < wordDiff.OldText.Lines.Count; i++)
+        foreach (var word in words)
         {
-            var oldWord = wordDiff.OldText.Lines[i];
-            var newWord = wordDiff.NewText.Lines[i];
-
-            // Rendu à Gauche (Source)
-            if (oldWord.Type != ChangeType.Imaginary && oldWord.Text != null)
-            {
-                if (currentLeftX < leftX + maxWidth - 20m)
-                {
-                    string word = oldWord.Text + " ";
-                    decimal wWidth = word.Length * 5m; // Approximation de la largeur
-
-                    if (oldWord.Type == ChangeType.Deleted) DrawHighlightBox(page, currentLeftX, y, wWidth, 12m, 255, 200, 200); // Rouge clair
-                    if (oldWord.Type == ChangeType.Modified) DrawHighlightBox(page, currentLeftX, y, wWidth, 12m, 255, 255, 150); // Jaune clair
-
-                    page.SetTextAndFillColor(0, 0, 0);
-                    page.AddText(word, 10m, new PdfPoint(currentLeftX, y), font);
-                    currentLeftX += wWidth;
-                }
-            }
-
-            // Rendu à Droite (Cible)
-            if (newWord.Type != ChangeType.Imaginary && newWord.Text != null)
-            {
-                if (currentRightX < rightX + maxWidth - 20m)
-                {
-                    string word = newWord.Text + " ";
-                    decimal wWidth = word.Length * 5m;
-
-                    if (newWord.Type == ChangeType.Inserted) DrawHighlightBox(page, currentRightX, y, wWidth, 12m, 255, 200, 200); // Rouge clair
-                    if (newWord.Type == ChangeType.Modified) DrawHighlightBox(page, currentRightX, y, wWidth, 12m, 255, 255, 150); // Jaune clair
-
-                    page.SetTextAndFillColor(0, 0, 0);
-                    page.AddText(word, 10m, new PdfPoint(currentRightX, y), font);
-                    currentRightX += wWidth;
-                }
-            }
+            var rect = word.BoundingBox;
+            // Rectangle vide (stroke=true, fill=false), avec une petite marge
+            pageBuilder.DrawRectangle(new PdfPoint(rect.BottomLeft.X - 1.5m, rect.BottomLeft.Y - 1.5m), rect.Width + 3m, rect.Height + 3m, 1.5m, false);
         }
     }
 
-    // CORRECTION: types decimal
-    private void DrawSimpleText(PdfPageBuilder page, string text, decimal x, decimal y, PdfDocumentBuilder.AddedFont font, decimal maxWidth, string colorCode)
+    // Ajoute un tampon visuel en haut à gauche pour repérer Source/Cible
+    private void DrawPageStamp(PdfPageBuilder pageBuilder, string text, PdfDocumentBuilder.AddedFont fontBold)
     {
-        string display = text.Length > 70 ? text.Substring(0, 67) + "..." : text;
+        decimal rectHeight = 20m;
+        decimal rectWidth = 300m;
+        decimal yPosition = pageBuilder.PageSize.Height - 30m;
 
-        if (colorCode == "Red")
-        {
-            DrawHighlightBox(page, x, y, display.Length * 5m, 12m, 255, 200, 200);
-        }
+        // Si on est trop haut, on ajuste le tampon
+        if (yPosition < 0) yPosition = 10m;
 
-        page.SetTextAndFillColor(0, 0, 0);
-        page.AddText(display, 10m, new PdfPoint(x, y), font);
-    }
+        pageBuilder.SetTextAndFillColor(255, 255, 255);
+        pageBuilder.DrawRectangle(new PdfPoint(10m, yPosition), rectWidth, rectHeight, 0m, true); // Fond blanc opaque
 
-    // CORRECTION: Utilisation de "fill: true" de PdfPig et suppression de FillPath()
-    private void DrawHighlightBox(PdfPageBuilder page, decimal x, decimal y, decimal width, decimal height, byte r, byte g, byte b)
-    {
-        page.SetTextAndFillColor(r, g, b);
-        // Signature PdfPig: DrawRectangle(PdfPoint bottomL, decimal width, decimal height, decimal lineWidth, bool fill)
-        page.DrawRectangle(new PdfPoint(x, y - 2m), width, height, 0m, true);
+        pageBuilder.SetTextAndFillColor(0, 50, 150);
+        pageBuilder.AddText(text, 12m, new PdfPoint(15m, yPosition + 5m), fontBold);
     }
 
     private async Task GenerateGlobalSynthesisReportAsync(List<DocumentDiffSummary> summaries, string outputDiffDir)
@@ -333,7 +326,7 @@ public class PdfProcessingService
             Directory.CreateDirectory(outputDiffDir);
 
             var builder = new PdfDocumentBuilder();
-            PdfPageBuilder page = builder.AddPage(595, 842); // Portrait classique pour la synthèse
+            PdfPageBuilder page = builder.AddPage(595, 842); // Portrait
             var (font, fontBold) = LoadFonts(builder);
 
             decimal margin = 40m;
