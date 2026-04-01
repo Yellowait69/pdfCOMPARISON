@@ -10,6 +10,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 
@@ -26,8 +27,12 @@ public class AppSessionData
 
 public partial class MainViewModel : ObservableObject
 {
-    private readonly PdfProcessingService _processingService;
+    // Nouveaux services refactorisés
+    private readonly PdfFileService _fileService;
+    private readonly PdfComparisonOrchestrator _orchestrator;
+
     private readonly string _sessionFilePath; // Path of the save file
+    private CancellationTokenSource? _cancellationTokenSource; // Pour annuler le traitement
 
     [ObservableProperty] private string _sourceDirectory = string.Empty;
     [ObservableProperty] private string _targetDirectory = string.Empty;
@@ -48,7 +53,13 @@ public partial class MainViewModel : ObservableObject
 
     public MainViewModel()
     {
-        _processingService = new PdfProcessingService();
+        // Initialisation de la nouvelle architecture (Injection de dépendances manuelle)
+        _fileService = new PdfFileService();
+        _orchestrator = new PdfComparisonOrchestrator(
+            new PdfExtractionService(),
+            new PdfDiffAnalyzer(),
+            new PdfReportGenerator()
+        );
 
         // Save folder in "AppData/Roaming/PDFComparisonPro"
         string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -224,6 +235,17 @@ public partial class MainViewModel : ObservableObject
     }
     // ==========================================
 
+    // NOUVELLE COMMANDE : Permet d'annuler le traitement en cours
+    [RelayCommand]
+    private void CancelComparison()
+    {
+        if (IsProcessing && _cancellationTokenSource != null)
+        {
+            StatusMessage = "Cancelling processing...";
+            _cancellationTokenSource.Cancel();
+        }
+    }
+
     [RelayCommand]
     private async Task StartComparisonAsync()
     {
@@ -245,12 +267,15 @@ public partial class MainViewModel : ObservableObject
         Pairs.Clear();
         ProgressValue = 0;
 
+        // Initialisation du token d'annulation pour cette session de traitement
+        _cancellationTokenSource = new CancellationTokenSource();
+
         try
         {
             StatusMessage = "Analyzing and pairing files...";
 
-            // Delegate I/O folder scanning to a background thread
-            var matchedPairs = await Task.Run(() => _processingService.MatchFiles(SourceDirectory, TargetDirectory));
+            // Appel au nouveau PdfFileService pour le matching
+            var matchedPairs = await Task.Run(() => _fileService.MatchFiles(SourceDirectory, TargetDirectory), _cancellationTokenSource.Token);
 
             // Update the UI list
             foreach (var pair in matchedPairs)
@@ -274,38 +299,36 @@ public partial class MainViewModel : ObservableObject
             var progress = new Progress<int>(value =>
             {
                 ProgressValue = value;
-                // Clear update of the counter for the user
                 StatusMessage = $"Analyzing: document {value} of {ProgressMax}";
             });
 
-            // 3. Launch heavy asynchronous processing
-            await _processingService.ProcessPairsAsync(pairsToProcess, OutputDirectory, progress);
+            // 3. Appel au nouvel Orchestrateur en passant le jeton d'annulation
+            await _orchestrator.ProcessPairsAsync(pairsToProcess, OutputDirectory, progress, _cancellationTokenSource.Token);
 
             // ==========================================
             // AUTOMATIC SORTING OF RESULTS
             // ==========================================
             StatusMessage = "Sorting results...";
 
-            // Sort the list by descending number of differences (most modified at the top)
             var sortedPairs = Pairs.OrderByDescending(p => p.DiffCount).ToList();
 
-            // Update the GUI with the sorted list
             Pairs.Clear();
             foreach (var p in sortedPairs)
             {
                 Pairs.Add(p);
             }
-            // ==========================================
 
             StatusMessage = "Processing completed successfully!";
-
-            // Save the complete session once processing is finished
             SaveSession();
 
-            // Final summary
             int diffCount = pairsToProcess.Count(p => p.Status == CompareStatus.Different);
             MessageBox.Show($"Comparison completed!\n{diffCount} documents have differences out of {ProgressMax} compared.",
                             "Completed", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "Processing was cancelled by the user.";
+            MessageBox.Show("The comparison process was cancelled.", "Cancelled", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         catch (Exception ex)
         {
@@ -315,6 +338,8 @@ public partial class MainViewModel : ObservableObject
         finally
         {
             IsProcessing = false;
+            _cancellationTokenSource?.Dispose();
+            _cancellationTokenSource = null;
         }
     }
 }
