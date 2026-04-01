@@ -32,29 +32,33 @@ public class PdfDiffAnalyzer
             {
                 result.DifferencesCount++;
 
+                // CORRECTION CS8852 : Préparation des valeurs AVANT l'initialisation de l'objet
+                string oldTextToSet = string.Empty;
+                string newTextToSet = string.Empty;
+
+                if (newLine.Type is ChangeType.Modified)
+                {
+                    oldTextToSet = oldLine.Text;
+                    newTextToSet = newLine.Text;
+                }
+                else if (newLine.Type is ChangeType.Inserted)
+                {
+                    newTextToSet = newLine.Text;
+                }
+                else if (oldLine.Type is ChangeType.Deleted)
+                {
+                    oldTextToSet = oldLine.Text;
+                }
+
+                // Initialisation unique respectant les contraintes "init-only"
                 var block = new DiffSummaryBlock
                 {
                     Type = newLine.Type is not ChangeType.Unchanged ? newLine.Type : oldLine.Type,
                     ContextBefore = GetValidContextLine(diffLines.NewText.Lines, i, -1),
                     ContextAfter = GetValidContextLine(diffLines.NewText.Lines, i, 1),
+                    OldText = oldTextToSet,
+                    NewText = newTextToSet
                 };
-
-                // Simplification des affectations
-                if (newLine.Type is ChangeType.Modified)
-                {
-                    block.OldText = oldLine.Text;
-                    block.NewText = newLine.Text;
-                }
-                else if (newLine.Type is ChangeType.Inserted)
-                {
-                    block.OldText = string.Empty;
-                    block.NewText = newLine.Text;
-                }
-                else if (oldLine.Type is ChangeType.Deleted)
-                {
-                    block.OldText = oldLine.Text;
-                    block.NewText = string.Empty;
-                }
 
                 result.Summary.Blocks.Add(block);
             }
