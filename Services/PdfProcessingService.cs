@@ -31,12 +31,24 @@ public class DocumentDiffSummary
     public List<DiffSummaryBlock> Blocks { get; set; } = new();
 }
 
-// Classe pour stocker la position géométrique exacte de chaque mot
+// Stocke la liste complète des lettres pour autoriser un Diff au caractère près
 public class PdfWordInfo
 {
     public string Text { get; set; } = string.Empty;
-    public UglyToad.PdfPig.Core.PdfRectangle BoundingBox { get; set; }
+    public IReadOnlyList<Letter> Letters { get; set; } = new List<Letter>();
     public int PageNumber { get; set; }
+}
+
+// Stocke la géométrie d'une seule lettre à surligner
+public class LetterLoc
+{
+    public PdfRectangle BoundingBox { get; set; }
+    public int PageNumber { get; set; }
+    public LetterLoc(PdfRectangle bbox, int page)
+    {
+        BoundingBox = bbox;
+        PageNumber = page;
+    }
 }
 
 public class PdfProcessingService
@@ -146,7 +158,7 @@ public class PdfProcessingService
         return sb.ToString();
     }
 
-    // Extraction des mots et de leurs coordonnées pour l'overlay
+    // Extraction des mots et de leurs LETTRES pour la précision géométrique
     private List<PdfWordInfo> ExtractWords(string pdfPath)
     {
         var words = new List<PdfWordInfo>();
@@ -158,7 +170,11 @@ public class PdfProcessingService
                 {
                     if (!string.IsNullOrWhiteSpace(word.Text))
                     {
-                        words.Add(new PdfWordInfo { Text = word.Text, BoundingBox = word.BoundingBox, PageNumber = page.Number });
+                        words.Add(new PdfWordInfo {
+                            Text = word.Text,
+                            Letters = word.Letters, // Conserve les coordonnées exactes de chaque lettre !
+                            PageNumber = page.Number
+                        });
                     }
                 }
             }
@@ -207,46 +223,84 @@ public class PdfProcessingService
                 }
             }
 
-            // 2. Traitement visuel mot par mot sur les PDFs originaux
+            // 2. Traitement visuel MOT et CARACTÈRE sur les PDFs originaux
             var sourceWords = ExtractWords(pair.SourcePath);
             var targetWords = ExtractWords(pair.TargetPath!);
 
-            // Création d'un modèle de diff mot à mot
             var diffBuilderWords = new SideBySideDiffBuilder(new DiffPlex.Differ());
             var diffWords = diffBuilderWords.BuildDiffModel(
                 string.Join("\n", sourceWords.Select(w => w.Text)),
                 string.Join("\n", targetWords.Select(w => w.Text))
             );
 
-            List<PdfWordInfo> sourceHighlightsRed = new();
-            List<PdfWordInfo> sourceHighlightsYellow = new();
-            List<PdfWordInfo> targetHighlightsRed = new();
-            List<PdfWordInfo> targetHighlightsYellow = new();
+            List<LetterLoc> sourceHighlightsRed = new();
+            List<LetterLoc> sourceHighlightsYellow = new();
+            List<LetterLoc> targetHighlightsRed = new();
+            List<LetterLoc> targetHighlightsYellow = new();
 
             int sPointer = 0;
             int tPointer = 0;
 
             for (int i = 0; i < diffWords.NewText.Lines.Count; i++)
             {
-                var oldWord = diffWords.OldText.Lines[i];
-                var newWord = diffWords.NewText.Lines[i];
+                var oldWordDiff = diffWords.OldText.Lines[i];
+                var newWordDiff = diffWords.NewText.Lines[i];
 
-                if (oldWord.Type != ChangeType.Imaginary && sPointer < sourceWords.Count)
+                PdfWordInfo oldWordInfo = null;
+                PdfWordInfo newWordInfo = null;
+
+                if (oldWordDiff.Type != ChangeType.Imaginary && sPointer < sourceWords.Count)
+                    oldWordInfo = sourceWords[sPointer++];
+
+                if (newWordDiff.Type != ChangeType.Imaginary && tPointer < targetWords.Count)
+                    newWordInfo = targetWords[tPointer++];
+
+                // Suppression pure (mot complet)
+                if (oldWordDiff.Type == ChangeType.Deleted && oldWordInfo != null)
                 {
-                    if (oldWord.Type == ChangeType.Deleted) sourceHighlightsRed.Add(sourceWords[sPointer]);
-                    else if (oldWord.Type == ChangeType.Modified) sourceHighlightsYellow.Add(sourceWords[sPointer]);
-                    sPointer++;
+                    sourceHighlightsRed.AddRange(oldWordInfo.Letters.Select(l => new LetterLoc(l.GlyphRectangle, oldWordInfo.PageNumber)));
                 }
-
-                if (newWord.Type != ChangeType.Imaginary && tPointer < targetWords.Count)
+                // Ajout pur (mot complet)
+                else if (newWordDiff.Type == ChangeType.Inserted && newWordInfo != null)
                 {
-                    if (newWord.Type == ChangeType.Inserted) targetHighlightsRed.Add(targetWords[tPointer]);
-                    else if (newWord.Type == ChangeType.Modified) targetHighlightsYellow.Add(targetWords[tPointer]);
-                    tPointer++;
+                    targetHighlightsRed.AddRange(newWordInfo.Letters.Select(l => new LetterLoc(l.GlyphRectangle, newWordInfo.PageNumber)));
+                }
+                // Modification de mot : DIFF AU CARACTÈRE pour détecter les ajouts partiels à la fin du mot
+                else if ((oldWordDiff.Type == ChangeType.Modified || newWordDiff.Type == ChangeType.Modified) && oldWordInfo != null && newWordInfo != null)
+                {
+                    var charDiff = diffBuilderWords.BuildDiffModel(
+                        string.Join("\n", oldWordInfo.Text.ToCharArray()),
+                        string.Join("\n", newWordInfo.Text.ToCharArray())
+                    );
+
+                    int oC = 0, nC = 0;
+                    for (int j = 0; j < charDiff.NewText.Lines.Count; j++)
+                    {
+                        var oChar = charDiff.OldText.Lines[j];
+                        var nChar = charDiff.NewText.Lines[j];
+
+                        if (oChar.Type != ChangeType.Imaginary && oC < oldWordInfo.Letters.Count)
+                        {
+                            if (oChar.Type == ChangeType.Deleted)
+                                sourceHighlightsRed.Add(new LetterLoc(oldWordInfo.Letters[oC].GlyphRectangle, oldWordInfo.PageNumber));
+                            else if (oChar.Type == ChangeType.Modified)
+                                sourceHighlightsYellow.Add(new LetterLoc(oldWordInfo.Letters[oC].GlyphRectangle, oldWordInfo.PageNumber));
+                            oC++;
+                        }
+
+                        if (nChar.Type != ChangeType.Imaginary && nC < newWordInfo.Letters.Count)
+                        {
+                            if (nChar.Type == ChangeType.Inserted)
+                                targetHighlightsRed.Add(new LetterLoc(newWordInfo.Letters[nC].GlyphRectangle, newWordInfo.PageNumber)); // Les nouveautés partielles passent au ROUGE !
+                            else if (nChar.Type == ChangeType.Modified)
+                                targetHighlightsYellow.Add(new LetterLoc(newWordInfo.Letters[nC].GlyphRectangle, newWordInfo.PageNumber));
+                            nC++;
+                        }
+                    }
                 }
             }
 
-            // 3. Construction du PDF alterné (Page 1 Source, Page 1 Target, etc.)
+            // 3. Construction du PDF alterné avec le vrai effet fluo (Page 1 Source, Page 1 Target, etc.)
             var builder = new PdfDocumentBuilder();
             var (font, fontBold) = LoadFonts(builder);
 
@@ -261,8 +315,8 @@ public class PdfProcessingService
                     if (pageIndex <= sourceDoc.NumberOfPages)
                     {
                         var sPage = builder.AddPage(sourceDoc, pageIndex);
-                        DrawBoxHighlights(sPage, sourceHighlightsRed.Where(w => w.PageNumber == pageIndex), 220, 20, 20); // Rouge (Suppressions)
-                        DrawBoxHighlights(sPage, sourceHighlightsYellow.Where(w => w.PageNumber == pageIndex), 200, 150, 0); // Jaune (Modifications)
+                        DrawFluoHighlights(sPage, sourceHighlightsRed.Where(w => w.PageNumber == pageIndex), 255, 120, 120); // Rouge fluo (Suppressions)
+                        DrawFluoHighlights(sPage, sourceHighlightsYellow.Where(w => w.PageNumber == pageIndex), 255, 240, 0); // Jaune fluo (Modifications)
 
                         // Tampon indicatif en haut de page
                         DrawPageStamp(sPage, $"[ DOCUMENT SOURCE - Page {pageIndex} ]", fontBold);
@@ -272,8 +326,8 @@ public class PdfProcessingService
                     if (pageIndex <= targetDoc.NumberOfPages)
                     {
                         var tPage = builder.AddPage(targetDoc, pageIndex);
-                        DrawBoxHighlights(tPage, targetHighlightsRed.Where(w => w.PageNumber == pageIndex), 220, 20, 20); // Rouge (Ajouts)
-                        DrawBoxHighlights(tPage, targetHighlightsYellow.Where(w => w.PageNumber == pageIndex), 200, 150, 0); // Jaune (Modifications)
+                        DrawFluoHighlights(tPage, targetHighlightsRed.Where(w => w.PageNumber == pageIndex), 255, 120, 120); // Rouge fluo (Ajouts)
+                        DrawFluoHighlights(tPage, targetHighlightsYellow.Where(w => w.PageNumber == pageIndex), 255, 240, 0); // Jaune fluo (Modifications)
 
                         // Tampon indicatif en haut de page
                         DrawPageStamp(tPage, $"[ DOCUMENT CIBLE (Modifié) - Page {pageIndex} ]", fontBold);
@@ -286,23 +340,25 @@ public class PdfProcessingService
         });
     }
 
-    // Dessine un encadré de couleur (sans masquer le texte) autour des mots
-    private void DrawBoxHighlights(PdfPageBuilder pageBuilder, IEnumerable<PdfWordInfo> words, byte r, byte g, byte b)
+    // Le vrai effet surligneur (Fluo) qui laisse le texte lisible !
+    private void DrawFluoHighlights(PdfPageBuilder pageBuilder, IEnumerable<LetterLoc> letters, byte r, byte g, byte b)
     {
-        if (!words.Any()) return;
+        if (!letters.Any()) return;
 
-        pageBuilder.SetStrokeColor(r, g, b);
+        pageBuilder.SetTextAndFillColor(r, g, b);
 
-        foreach (var word in words)
+        foreach (var l in letters)
         {
-            var rect = word.BoundingBox;
-            // Rectangle vide (stroke=true, fill=false), avec cast explicite en (decimal)
-            pageBuilder.DrawRectangle(
-                new PdfPoint((decimal)rect.BottomLeft.X - 1.5m, (decimal)rect.BottomLeft.Y - 1.5m),
-                (decimal)rect.Width + 3m,
-                (decimal)rect.Height + 3m,
-                1.5m,
-                false);
+            var rect = l.BoundingBox;
+            // On dessine un rectangle rempli mais uniquement sur les 45% inférieurs de la lettre.
+            // Cela agit comme un trait de stabilo : la couleur attire l'œil mais n'occulte pas la partie supérieure du texte noir.
+            decimal width = (decimal)rect.Width + 0.6m; // Légère extension pour lier les lettres adjacentes
+            decimal height = (decimal)rect.Height * 0.45m;
+            decimal x = (decimal)rect.BottomLeft.X - 0.3m;
+            decimal y = (decimal)rect.BottomLeft.Y - 1m;
+
+            // Dessin du fond coloré opaque (fill = true)
+            pageBuilder.DrawRectangle(new PdfPoint(x, y), width, height, 0m, true);
         }
     }
 
@@ -311,7 +367,6 @@ public class PdfProcessingService
     {
         decimal rectHeight = 20m;
         decimal rectWidth = 300m;
-        // Cast explicite en (decimal)
         decimal yPosition = (decimal)pageBuilder.PageSize.Height - 30m;
 
         // Si on est trop haut, on ajuste le tampon
