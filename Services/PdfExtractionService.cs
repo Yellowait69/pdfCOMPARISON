@@ -16,8 +16,8 @@ public partial class PdfExtractionService
     private static partial Regex WhitespaceRegex();
 
     // NOUVEAU : Regex pour nettoyer le texte brut des filigranes lors de l'extraction textuelle
-    // On enlève les \b pour attraper les morceaux de filigrane cachés dans le texte (ex: CIMEN, MEN, TEST)
-    [GeneratedRegex(@"(?i)(specimen|cimen|speci|men|test|Q000|D000|P000|A000)")]
+    // On enlève les \b pour attraper les morceaux de filigrane cachés dans le texte (ex: CIMEN, MEN, TEST, TOTEIN)
+    [GeneratedRegex(@"(?i)(specimen|cimen|speci|men|test|totein|Q000|D000|P000|A000)")]
     private static partial Regex WatermarkTextRegex();
 
     public string ExtractTextFast(string pdfPath)
@@ -74,10 +74,9 @@ public partial class PdfExtractionService
     // MÉTHODE D'IDENTIFICATION DES FILIGRANES
     private bool IsWatermark(Word word)
     {
-        // 1. FILTRAGE PAR LA TAILLE (Texte "très grand")
-        // Les textes normaux dépassent rarement 16-20pt. Les filigranes font souvent > 40pt.
-        // Abaissé à 30.0 (double) au lieu de 35.0 pour capturer plus sûrement les gros filigranes
-        if (word.Letters.Count > 0 && word.Letters.Max(l => l.PointSize) > 30.0)
+        // 1. FILTRAGE STRICT PAR LA TAILLE (On abaisse à 18.0)
+        // Toute police supérieure à 18.0 points est ignorée d'office.
+        if (word.Letters.Count > 0 && word.Letters.Max(l => l.PointSize) > 18.0)
         {
             return true;
         }
@@ -85,12 +84,13 @@ public partial class PdfExtractionService
         // 2. FILTRAGE PAR LE TEXTE EXACT (Mots entiers et fragments)
         string text = word.Text.ToUpperInvariant().Trim();
 
-        // On intercepte les mots partiels créés par le découpage du PDF (ex: "SPE" "CIMEN")
+        // On intercepte les mots partiels créés par le découpage du PDF
         if (text.Contains("SPECIMEN") ||
             text.Contains("CIMEN") ||
             text.Contains("SPECI") ||
             text == "MEN" ||
             text == "TEST" ||
+            text == "TOTEIN" ||
             text == "Q000" ||
             text == "D000" ||
             text == "P000" ||
