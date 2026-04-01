@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using PDFComparison.Models;
 using UglyToad.PdfPig;
+using UglyToad.PdfPig.Content; // Ajout nécessaire pour manipuler l'objet 'Word'
 
 namespace PDFComparison.Services;
 
@@ -14,17 +15,27 @@ public partial class PdfExtractionService
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();
 
+    // NOUVEAU : Regex pour nettoyer le texte brut des filigranes lors de l'extraction textuelle
+    // (?i) rend la regex insensible à la casse. \b assure qu'on match le mot entier.
+    [GeneratedRegex(@"(?i)\b(specimen|Q000|D000|P000|A000)\b")]
+    private static partial Regex WatermarkTextRegex();
+
     public string ExtractTextFast(string pdfPath)
     {
-        // On peut éventuellement définir une capacité initiale au StringBuilder si on sait
-        // que les PDF sont gros, pour éviter les redimensionnements internes.
         var sb = new StringBuilder();
         var options = new ParsingOptions { ClipPaths = false };
 
         using var document = PdfDocument.Open(pdfPath, options);
         foreach (var page in document.GetPages())
         {
-            sb.AppendLine(page.Text);
+            // On récupère le texte brut de la page
+            string rawText = page.Text;
+
+            // ON DÉTRUIT LE FILIGRANE DU TEXTE BRUT :
+            // Cela empêchera les mots "SPECIMEN" d'apparaître dans le rapport de synthèse écrit
+            string cleanText = WatermarkTextRegex().Replace(rawText, "");
+
+            sb.AppendLine(cleanText);
         }
 
         return sb.ToString();
@@ -39,19 +50,51 @@ public partial class PdfExtractionService
         {
             foreach (var word in page.GetWords())
             {
-                if (!string.IsNullOrWhiteSpace(word.Text))
+                if (string.IsNullOrWhiteSpace(word.Text))
+                    continue;
+
+                // ==========================================
+                // BOUCLIER ANTI-FILIGRANE : On ignore ce mot s'il s'agit d'un filigrane
+                // ==========================================
+                if (IsWatermark(word))
+                    continue;
+
+                words.Add(new PdfWordInfo
                 {
-                    words.Add(new PdfWordInfo
-                    {
-                        Text = word.Text,
-                        Letters = word.Letters,
-                        PageNumber = page.Number
-                    });
-                }
+                    Text = word.Text,
+                    Letters = word.Letters,
+                    PageNumber = page.Number
+                });
             }
         }
 
         return words;
+    }
+
+    // MÉTHODE D'IDENTIFICATION DES FILIGRANES
+    private bool IsWatermark(Word word)
+    {
+        // 1. FILTRAGE PAR LA TAILLE (Texte "très grand")
+        // Les textes normaux dépassent rarement 16-20pt. Les filigranes font souvent > 40pt.
+        // Si la taille max des lettres du mot est > 35, c'est un filigrane à coup sûr.
+        if (word.Letters.Count > 0 && word.Letters.Max(l => l.PointSize) > 35m)
+        {
+            return true;
+        }
+
+        // 2. FILTRAGE PAR LE TEXTE EXACT
+        string text = word.Text.ToUpperInvariant().Trim();
+
+        if (text.Contains("SPECIMEN") ||
+            text == "Q000" ||
+            text == "D000" ||
+            text == "P000" ||
+            text == "A000")
+        {
+            return true;
+        }
+
+        return false;
     }
 
     public string NormalizePdfText(string input)
@@ -71,9 +114,8 @@ public partial class PdfExtractionService
             .Replace("•", "\n• ")
             .Replace(" o ", "\n o ");
 
-        // OPTIMISATION MAJEURE ICI :
-        // L'utilisation combinée de RemoveEmptyEntries et TrimEntries (apparu dans .NET 5)
-        // remplace totalement ton LINQ (.Select(l => l.Trim()).Where(l => l.Length > 0)).
+        // OPTIMISATION MAJEURE :
+        // L'utilisation combinée de RemoveEmptyEntries et TrimEntries remplace totalement LINQ.
         // C'est beaucoup plus rapide et ça évite de créer plusieurs tableaux intermédiaires en mémoire.
         var lines = flatText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 

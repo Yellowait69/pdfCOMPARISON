@@ -5,6 +5,7 @@ using DiffPlex;
 using DiffPlex.DiffBuilder;
 using DiffPlex.DiffBuilder.Model;
 using PDFComparison.Models;
+using UglyToad.PdfPig.Content; // Ajout obligatoire pour manipuler les lettres (Glyphes)
 
 namespace PDFComparison.Services;
 
@@ -12,7 +13,6 @@ public class PdfDiffAnalyzer
 {
     public DiffAnalysisResult AnalyzeDifferences(DocumentPair pair, string cleanSource, string cleanTarget, IReadOnlyList<PdfWordInfo> sourceWords, IReadOnlyList<PdfWordInfo> targetWords)
     {
-        // On extrait la langue de la clé (ex: "NL_44980_36" -> "NL")
         string lang = pair.MatchKey.Contains('_') ? pair.MatchKey.Split('_')[0].ToUpper() : "ND";
 
         var result = new DiffAnalysisResult
@@ -26,10 +26,9 @@ public class PdfDiffAnalyzer
 
         var diffBuilder = new SideBySideDiffBuilder(new Differ());
 
-        // CORRECTION : On nettoie le texte global pour le résumé textuel ligne par ligne
+        // 1. Analyse Ligne par Ligne (Pour le résumé global textuel)
         var diffLines = diffBuilder.BuildDiffModel(CleanLineForDiff(cleanSource), CleanLineForDiff(cleanTarget));
 
-        // 1. Analyse Ligne par Ligne (Pour le résumé global)
         for (int i = 0; i < diffLines.NewText.Lines.Count; i++)
         {
             var newLine = diffLines.NewText.Lines[i];
@@ -69,39 +68,44 @@ public class PdfDiffAnalyzer
             }
         }
 
-        // 2. Analyse Mot par Mot (Pour le surlignage visuel)
-        // CORRECTION : Nettoyage extrême appliqué à chaque mot extrait pour éviter les faux positifs
-        var diffWords = diffBuilder.BuildDiffModel(
-            string.Join('\n', sourceWords.Select(w => CleanWordForDiff(w.Text))),
-            string.Join('\n', targetWords.Select(w => CleanWordForDiff(w.Text)))
+        // 2. Analyse GLYPHE par GLYPHE (Pour le surlignage visuel PDF)
+        // C'est l'arme absolue contre les faux positifs liés aux espaces et au découpage des mots
+
+        // On aplatit les listes de mots pour n'obtenir qu'une suite ininterrompue de lettres
+        var sourceItems = sourceWords.SelectMany(w => w.Letters.Select(l => (Letter: l, Page: w.PageNumber))).ToList();
+        var targetItems = targetWords.SelectMany(w => w.Letters.Select(l => (Letter: l, Page: w.PageNumber))).ToList();
+
+        // On compare lettre par lettre (en les nettoyant avec CleanGlyph)
+        var diffGlyphs = diffBuilder.BuildDiffModel(
+            string.Join('\n', sourceItems.Select(x => CleanGlyph(x.Letter.Value))),
+            string.Join('\n', targetItems.Select(x => CleanGlyph(x.Letter.Value)))
         );
 
         int sPointer = 0, tPointer = 0;
 
-        for (int i = 0; i < diffWords.NewText.Lines.Count; i++)
+        for (int i = 0; i < diffGlyphs.NewText.Lines.Count; i++)
         {
-            var oldWordDiff = diffWords.OldText.Lines[i];
-            var newWordDiff = diffWords.NewText.Lines[i];
+            var oldDiff = diffGlyphs.OldText.Lines[i];
+            var newDiff = diffGlyphs.NewText.Lines[i];
 
-            PdfWordInfo? oldWordInfo = (oldWordDiff.Type is not ChangeType.Imaginary && sPointer < sourceWords.Count) ? sourceWords[sPointer++] : null;
-            PdfWordInfo? newWordInfo = (newWordDiff.Type is not ChangeType.Imaginary && tPointer < targetWords.Count) ? targetWords[tPointer++] : null;
+            bool hasS = oldDiff.Type != ChangeType.Imaginary && sPointer < sourceItems.Count;
+            bool hasT = newDiff.Type != ChangeType.Imaginary && tPointer < targetItems.Count;
 
-            if (oldWordDiff.Type is ChangeType.Deleted && oldWordInfo is not null)
+            var sVal = hasS ? sourceItems[sPointer++] : default;
+            var tVal = hasT ? targetItems[tPointer++] : default;
+
+            if (oldDiff.Type == ChangeType.Deleted && hasS)
             {
-                result.Highlights.SourceRed.AddRange(oldWordInfo.Letters.Select(l => new LetterLoc(l.GlyphRectangle, oldWordInfo.PageNumber, (decimal)l.Location.Y, (decimal)l.PointSize)));
+                result.Highlights.SourceRed.Add(new LetterLoc(sVal.Letter.GlyphRectangle, sVal.Page, (decimal)sVal.Letter.Location.Y, (decimal)sVal.Letter.PointSize));
             }
-            else if (newWordDiff.Type is ChangeType.Inserted && newWordInfo is not null)
+            else if (newDiff.Type == ChangeType.Inserted && hasT)
             {
-                result.Highlights.TargetRed.AddRange(newWordInfo.Letters.Select(l => new LetterLoc(l.GlyphRectangle, newWordInfo.PageNumber, (decimal)l.Location.Y, (decimal)l.PointSize)));
+                result.Highlights.TargetRed.Add(new LetterLoc(tVal.Letter.GlyphRectangle, tVal.Page, (decimal)tVal.Letter.Location.Y, (decimal)tVal.Letter.PointSize));
             }
-            else if ((oldWordDiff.Type is ChangeType.Modified || newWordDiff.Type is ChangeType.Modified) && oldWordInfo is not null && newWordInfo is not null)
+            else if (oldDiff.Type == ChangeType.Modified || newDiff.Type == ChangeType.Modified)
             {
-                // Encadrement complet des mots modifiés
-                result.Highlights.SourceYellow.AddRange(oldWordInfo.Letters.Select(l =>
-                    new LetterLoc(l.GlyphRectangle, oldWordInfo.PageNumber, (decimal)l.Location.Y, (decimal)l.PointSize)));
-
-                result.Highlights.TargetYellow.AddRange(newWordInfo.Letters.Select(l =>
-                    new LetterLoc(l.GlyphRectangle, newWordInfo.PageNumber, (decimal)l.Location.Y, (decimal)l.PointSize)));
+                if (hasS) result.Highlights.SourceYellow.Add(new LetterLoc(sVal.Letter.GlyphRectangle, sVal.Page, (decimal)sVal.Letter.Location.Y, (decimal)sVal.Letter.PointSize));
+                if (hasT) result.Highlights.TargetYellow.Add(new LetterLoc(tVal.Letter.GlyphRectangle, tVal.Page, (decimal)tVal.Letter.Location.Y, (decimal)tVal.Letter.PointSize));
             }
         }
 
@@ -130,56 +134,38 @@ public class PdfDiffAnalyzer
     {
         if (string.IsNullOrWhiteSpace(input)) return string.Empty;
 
-        // Applique les mêmes règles de normalisation typographique mais conserve les espaces normaux
         return input
-            .Replace("\u00A0", " ")  // Transforme les espaces insécables en espaces normaux
-            .Replace("\u00AD", "")   // Supprime les soft hyphens
-            .Replace("–", "-").Replace("—", "-").Replace("−", "-") // Normalisation des tirets
-            .Replace("’", "'").Replace("‘", "'").Replace("´", "'").Replace("`", "'") // Apostrophes
-            .Replace("“", "\"").Replace("”", "\"").Replace("«", "\"").Replace("»", "\"") // Guillemets
+            .Replace("\u00A0", " ")
+            .Replace("\u00AD", "")
+            .Replace("–", "-").Replace("—", "-").Replace("−", "-")
+            .Replace("’", "'").Replace("‘", "'").Replace("´", "'").Replace("`", "'")
+            .Replace("“", "\"").Replace("”", "\"").Replace("«", "\"").Replace("»", "\"")
             .Normalize(System.Text.NormalizationForm.FormKC);
     }
 
-    private string CleanWordForDiff(string input)
+    // Nettoyage au niveau de la lettre individuelle (Glyphe)
+    private string CleanGlyph(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return string.Empty;
 
         var cleaned = input
-            // 1. Élimination totale des espaces invisibles et caractères de contrôle PDF
             .Replace("\u00A0", "")   // Espace insécable (NBSP)
             .Replace("\u200B", "")   // Zero-width space
             .Replace("\u200C", "")   // Zero-width non-joiner
             .Replace("\u200D", "")   // Zero-width joiner
             .Replace("\uFEFF", "")   // Byte Order Mark
-            .Replace("\u00AD", "")   // Soft hyphen (Tiret conditionnel utilisé dans les blocs justifiés)
+            .Replace("\u00AD", "")   // Soft hyphen (Tiret conditionnel invisible)
             .Replace("\r", "")
             .Replace("\n", "")
             .Replace("\t", "")
-            .Replace(" ", "")        // Élimine les espaces piégés dans un seul mot extrait
-
-            // 2. Normalisation des tirets
-            .Replace("–", "-")
-            .Replace("—", "-")
-            .Replace("−", "-")
-
-            // 3. Normalisation des guillemets et apostrophes
-            .Replace("’", "'")
-            .Replace("‘", "'")
-            .Replace("´", "'")
-            .Replace("`", "'")
-            .Replace("“", "\"")
-            .Replace("”", "\"")
-            .Replace("«", "\"")
-            .Replace("»", "\"")
-
-            // 4. Normalisation Unicode (Sépare les ligatures comme "ﬁ" en "fi")
-            .Normalize(System.Text.NormalizationForm.FormKC)
-
-            // 5. Casse (Ignore les différences Majuscule / Minuscule)
+            .Replace(" ", "")        // Élimine les espaces classiques piégés dans les glyphes
+            .Replace("–", "-").Replace("—", "-").Replace("−", "-")
+            .Replace("’", "'").Replace("‘", "'").Replace("´", "'").Replace("`", "'")
+            .Replace("“", "\"").Replace("”", "\"").Replace("«", "\"").Replace("»", "\"")
+            .Normalize(System.Text.NormalizationForm.FormKC) // Sépare les ligatures (ex: ﬁ devient f + i)
             .ToLowerInvariant()
             .Trim();
 
-        // 6. Sécurité finale : Retire tout autre caractère de contrôle ASCII caché
         return new string(cleaned.Where(c => !char.IsControl(c)).ToArray());
     }
 }
