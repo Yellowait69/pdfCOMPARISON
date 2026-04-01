@@ -160,11 +160,19 @@
                         <Setter Property="BorderThickness" Value="0,0,0,1"/>
                         <Setter Property="BorderBrush" Value="#E5E7EB"/>
                     </Style>
+
+                    <Style TargetType="DataGridRow">
+                        <Style.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" Value="#EFF6FF"/> <Setter Property="Foreground" Value="#111827"/> </Trigger>
+                        </Style.Triggers>
+                    </Style>
+
                     <Style TargetType="DataGridCell">
                         <Setter Property="Padding" Value="15,0"/>
                         <Setter Property="VerticalAlignment" Value="Center"/>
                         <Setter Property="BorderThickness" Value="0"/>
-                        <Setter Property="Template">
+                        <Setter Property="Foreground" Value="#374151"/> <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="DataGridCell">
                                     <Border Padding="{TemplateBinding Padding}" Background="Transparent">
