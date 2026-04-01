@@ -79,7 +79,6 @@ public class PdfReportGenerator
         // Mots sensibles pour l'audit juridique/financier
         var criticalRegex = new Regex(@"(?i)\b(prix|pénalité|pénalités|résiliation|ttc|ht|garantie|article|euro|taxe|montant|facture)\b");
 
-        // NOUVEAU : Dictionnaires pour stocker les statistiques par langue
         var languageFileCounts = new Dictionary<string, int>();
         var languageDiffCounts = new Dictionary<string, int>();
 
@@ -93,9 +92,7 @@ public class PdfReportGenerator
                 languageDiffCounts[lang] = 0;
             }
 
-            // On compte le nombre de fichiers impactés par langue
             languageFileCounts[lang]++;
-            // On compte le nombre TOTAL de différences trouvées par langue
             languageDiffCounts[lang] += doc.Blocks.Count;
 
             foreach (var block in doc.Blocks)
@@ -107,18 +104,15 @@ public class PdfReportGenerator
                 string oldTxt = block.OldText ?? "";
                 string newTxt = block.NewText ?? "";
 
-                // Calcul du Bilan de Mots
                 totalOldWords += oldTxt.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
                 totalNewWords += newTxt.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
 
                 string txtToAnalyze = block.Type == ChangeType.Deleted ? oldTxt : newTxt;
 
-                // Typage des données
                 if (dateRegex.IsMatch(txtToAnalyze)) typeDates++;
                 else if (numRegex.IsMatch(txtToAnalyze)) typeNumbers++;
                 else typeWords++;
 
-                // Détection de termes critiques
                 criticalAlerts += criticalRegex.Matches(oldTxt).Count;
                 criticalAlerts += criticalRegex.Matches(newTxt).Count;
             }
@@ -127,7 +121,6 @@ public class PdfReportGenerator
         int totalChanges = totalInserts + totalDeletes + totalModifies;
         int wordBalance = totalNewWords - totalOldWords;
 
-        // Récupération du Top 3 des fichiers les plus modifiés
         var topModifiedFiles = summaries
             .OrderByDescending(s => s.Blocks.Count)
             .Take(3)
@@ -140,12 +133,11 @@ public class PdfReportGenerator
         decimal margin = 40m;
         decimal yPosition = 595m - margin;
 
-        // Dessin du Dashboard avec les nouveaux paramètres
         DrawDashboardWithScottPlot(page, margin, yPosition,
             totalChanges, totalInserts, totalDeletes, totalModifies,
             typeDates, typeNumbers, typeWords, summaries.Count,
             wordBalance, criticalAlerts, topModifiedFiles,
-            languageFileCounts, languageDiffCounts, // NOUVEAUX PARAMÈTRES
+            languageFileCounts, languageDiffCounts,
             font, fontBold);
 
         // ==========================================
@@ -226,7 +218,15 @@ public class PdfReportGenerator
             yPosition -= 20m;
         }
 
-        File.WriteAllBytes(reportPath, builder.Build());
+        // Ajout d'un bloc Try-Catch de sécurité
+        try
+        {
+            File.WriteAllBytes(reportPath, builder.Build());
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"Erreur critique lors de la construction du fichier {Path.GetFileName(reportPath)}. {ex.Message}");
+        }
     }
 
     // ==========================================
@@ -237,12 +237,11 @@ public class PdfReportGenerator
         int totalChanges, int inserts, int deletes, int modifies,
         int dates, int numbers, int words, int totalFiles,
         int wordBalance, int criticalAlerts, List<DocumentDiffSummary> topFiles,
-        Dictionary<string, int> languageFileCounts, Dictionary<string, int> languageDiffCounts, // NOUVEAUX PARAMÈTRES
+        Dictionary<string, int> languageFileCounts, Dictionary<string, int> languageDiffCounts,
         PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold)
     {
         decimal currentY = startY;
 
-        // EN-TÊTE ET MÉTADONNÉES
         page.SetTextAndFillColor(0, 50, 150);
         page.AddText("RAPPORT DE SYNTHÈSE GLOBALE", 18m, new PdfPoint((double)startX, (double)currentY), fontBold);
 
@@ -251,12 +250,11 @@ public class PdfReportGenerator
 
         currentY -= 50m;
 
-        // CARTES DE KPI (4 Boîtes alignées)
         string balanceText = wordBalance > 0 ? $"+ {wordBalance} mots" : $"{wordBalance} mots";
         DrawStatBox(page, startX, currentY, "Fichiers impactés", totalFiles.ToString(), font, fontBold, 0, 50, 150);
         DrawStatBox(page, startX + 155m, currentY, "Total changements", totalChanges.ToString(), font, fontBold, 0, 50, 150);
-        DrawStatBox(page, startX + 310m, currentY, "Bilan net (Volume)", balanceText, font, fontBold, wordBalance < 0 ? (byte)220 : (byte)16, wordBalance < 0 ? (byte)20 : (byte)185, wordBalance < 0 ? (byte)20 : (byte)129); // Rouge si perte, Vert si gain
-        DrawStatBox(page, startX + 465m, currentY, "Mots Sensibles", criticalAlerts.ToString(), font, fontBold, criticalAlerts > 0 ? (byte)255 : (byte)0, criticalAlerts > 0 ? (byte)140 : (byte)50, criticalAlerts > 0 ? (byte)0 : (byte)150); // Orange si alertes
+        DrawStatBox(page, startX + 310m, currentY, "Bilan net (Volume)", balanceText, font, fontBold, wordBalance < 0 ? (byte)220 : (byte)16, wordBalance < 0 ? (byte)20 : (byte)185, wordBalance < 0 ? (byte)20 : (byte)129);
+        DrawStatBox(page, startX + 465m, currentY, "Mots Sensibles", criticalAlerts.ToString(), font, fontBold, criticalAlerts > 0 ? (byte)255 : (byte)0, criticalAlerts > 0 ? (byte)140 : (byte)50, criticalAlerts > 0 ? (byte)0 : (byte)150);
 
         currentY -= 60m;
 
@@ -267,11 +265,9 @@ public class PdfReportGenerator
             return;
         }
 
-        // TOP 3 DES FICHIERS ET STATS PAR LANGUE
         page.SetTextAndFillColor(0, 0, 0);
         page.AddText("Top 3 des fichiers les plus modifiés :", 12m, new PdfPoint((double)startX, (double)currentY), fontBold);
 
-        // NOUVEAU : Titre pour les statistiques textuelles par langue
         page.AddText("Volume de différences par Langue :", 12m, new PdfPoint((double)(startX + 400m), (double)currentY), fontBold);
 
         decimal listY = currentY - 20m;
@@ -284,7 +280,6 @@ public class PdfReportGenerator
             listY -= 15m;
         }
 
-        // NOUVEAU : Affichage textuel des diffs par langue
         decimal langY = currentY - 20m;
         foreach (var kvp in languageDiffCounts.OrderByDescending(x => x.Value).Take(4))
         {
@@ -297,15 +292,13 @@ public class PdfReportGenerator
 
         currentY -= 75m;
 
-        // TITRES DES 3 GRAPHIQUES
         page.SetTextAndFillColor(0, 0, 0);
         page.AddText("Répartition par type d'action :", 11m, new PdfPoint((double)startX, (double)currentY), fontBold);
         page.AddText("Nature des données impactées :", 11m, new PdfPoint((double)(startX + 260m), (double)currentY), fontBold);
-        // NOUVEAU TITRE GRAPHIQUE 3
         page.AddText("Documents modifiés par Langue :", 11m, new PdfPoint((double)(startX + 520m), (double)currentY), fontBold);
         currentY -= 10m;
 
-        // GRAPHIQUE 1 : ACTIONS
+        // GRAPHIQUE 1 : ACTIONS (CORRECTION)
         var plt1 = new Plot();
         plt1.HideGrid();
         plt1.HideAxesAndGrid();
@@ -313,15 +306,21 @@ public class PdfReportGenerator
         if (inserts > 0) slices1.Add(new PieSlice { Value = inserts, Label = $"{inserts} Ajouts", FillColor = ScottPlot.Color.FromHex("#10B981") });
         if (deletes > 0) slices1.Add(new PieSlice { Value = deletes, Label = $"{deletes} Supp.", FillColor = ScottPlot.Color.FromHex("#EF4444") });
         if (modifies > 0) slices1.Add(new PieSlice { Value = modifies, Label = $"{modifies} Modif.", FillColor = ScottPlot.Color.FromHex("#F59E0B") });
-        if (slices1.Count > 0) {
+
+        if (slices1.Count > 0)
+        {
             var pie1 = plt1.Add.Pie(slices1);
             pie1.ExplodeFraction = 0.05;
+            byte[] imgBytes1 = plt1.GetImageBytes(240, 200, ImageFormat.Png);
+            page.AddPng(imgBytes1, new PdfRectangle((short)startX, (short)(currentY - 200m), (short)(startX + 240m), (short)currentY));
         }
-        // Tailles réduites (240px) pour faire de la place au 3e graphique
-        byte[] imgBytes1 = plt1.GetImageBytes(240, 200, ImageFormat.Png);
-        page.AddPng(imgBytes1, new PdfRectangle((short)startX, (short)(currentY - 200m), (short)(startX + 240m), (short)currentY));
+        else
+        {
+            page.SetTextAndFillColor(150, 150, 150);
+            page.AddText("(Aucune donnée)", 10m, new PdfPoint((double)(startX + 60m), (double)(currentY - 100m)), font);
+        }
 
-        // GRAPHIQUE 2 : NATURE DES DONNÉES
+        // GRAPHIQUE 2 : NATURE DES DONNÉES (CORRECTION)
         var plt2 = new Plot();
         plt2.HideGrid();
         plt2.HideAxesAndGrid();
@@ -329,14 +328,21 @@ public class PdfReportGenerator
         if (words > 0) slices2.Add(new PieSlice { Value = words, Label = $"{words} Textes", FillColor = ScottPlot.Color.FromHex("#3B82F6") });
         if (numbers > 0) slices2.Add(new PieSlice { Value = numbers, Label = $"{numbers} Nombres", FillColor = ScottPlot.Color.FromHex("#8B5CF6") });
         if (dates > 0) slices2.Add(new PieSlice { Value = dates, Label = $"{dates} Dates", FillColor = ScottPlot.Color.FromHex("#14B8A6") });
-        if (slices2.Count > 0) {
+
+        if (slices2.Count > 0)
+        {
             var pie2 = plt2.Add.Pie(slices2);
             pie2.ExplodeFraction = 0.05;
+            byte[] imgBytes2 = plt2.GetImageBytes(240, 200, ImageFormat.Png);
+            page.AddPng(imgBytes2, new PdfRectangle((short)(startX + 260m), (short)(currentY - 200m), (short)(startX + 260m + 240m), (short)currentY));
         }
-        byte[] imgBytes2 = plt2.GetImageBytes(240, 200, ImageFormat.Png);
-        page.AddPng(imgBytes2, new PdfRectangle((short)(startX + 260m), (short)(currentY - 200m), (short)(startX + 260m + 240m), (short)currentY));
+        else
+        {
+            page.SetTextAndFillColor(150, 150, 150);
+            page.AddText("(Aucune donnée)", 10m, new PdfPoint((double)(startX + 320m), (double)(currentY - 100m)), font);
+        }
 
-        // NOUVEAU - GRAPHIQUE 3 : LANGUES
+        // GRAPHIQUE 3 : LANGUES (CORRECTION)
         var plt3 = new Plot();
         plt3.HideGrid();
         plt3.HideAxesAndGrid();
@@ -348,13 +354,19 @@ public class PdfReportGenerator
             slices3.Add(new PieSlice { Value = kvp.Value, Label = $"{kvp.Key} ({kvp.Value})", FillColor = ScottPlot.Color.FromHex(colors[cIdx % colors.Length]) });
             cIdx++;
         }
+
         if (slices3.Count > 0)
         {
             var pie3 = plt3.Add.Pie(slices3);
             pie3.ExplodeFraction = 0.05;
+            byte[] imgBytes3 = plt3.GetImageBytes(240, 200, ImageFormat.Png);
+            page.AddPng(imgBytes3, new PdfRectangle((short)(startX + 520m), (short)(currentY - 200m), (short)(startX + 520m + 240m), (short)currentY));
         }
-        byte[] imgBytes3 = plt3.GetImageBytes(240, 200, ImageFormat.Png);
-        page.AddPng(imgBytes3, new PdfRectangle((short)(startX + 520m), (short)(currentY - 200m), (short)(startX + 520m + 240m), (short)currentY));
+        else
+        {
+            page.SetTextAndFillColor(150, 150, 150);
+            page.AddText("(Aucune donnée)", 10m, new PdfPoint((double)(startX + 580m), (double)(currentY - 100m)), font);
+        }
     }
 
     private void DrawStatBox(PdfPageBuilder page, decimal x, decimal y, string label, string value, PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold, byte rValue, byte gValue, byte bValue)
@@ -363,7 +375,7 @@ public class PdfReportGenerator
         page.DrawRectangle(new PdfPoint((double)x, (double)(y - 25m)), 140m, 45m, 0m, true);
         page.SetTextAndFillColor(100, 100, 100);
         page.AddText(label, 9m, new PdfPoint((double)(x + 10m), (double)(y + 2m)), font);
-        page.SetTextAndFillColor(rValue, gValue, bValue); // Couleur dynamique de la valeur
+        page.SetTextAndFillColor(rValue, gValue, bValue);
         page.AddText(value, 18m, new PdfPoint((double)(x + 10m), (double)(y - 18m)), fontBold);
     }
 
@@ -395,17 +407,17 @@ public class PdfReportGenerator
             if (oLine.Type != ChangeType.Imaginary)
             {
                 if (oLine.Type == ChangeType.Deleted || oLine.Type == ChangeType.Modified)
-                    leftChunks.Add((oLine.Text.Replace("\n", ""), 200, 0, 0, true)); // Rouge et Gras
+                    leftChunks.Add((oLine.Text.Replace("\n", ""), 200, 0, 0, true));
                 else
-                    leftChunks.Add((oLine.Text.Replace("\n", ""), 100, 100, 100, false)); // Gris
+                    leftChunks.Add((oLine.Text.Replace("\n", ""), 100, 100, 100, false));
             }
 
             if (nLine.Type != ChangeType.Imaginary)
             {
                 if (nLine.Type == ChangeType.Inserted || nLine.Type == ChangeType.Modified)
-                    rightChunks.Add((nLine.Text.Replace("\n", ""), 0, 150, 0, true)); // Vert et Gras
+                    rightChunks.Add((nLine.Text.Replace("\n", ""), 0, 150, 0, true));
                 else
-                    rightChunks.Add((nLine.Text.Replace("\n", ""), 100, 100, 100, false)); // Gris
+                    rightChunks.Add((nLine.Text.Replace("\n", ""), 100, 100, 100, false));
             }
         }
 
