@@ -28,11 +28,10 @@ public class PdfDiffAnalyzer
         var diffBuilder = new SideBySideDiffBuilder(new Differ());
 
         // ====================================================================
-        // 1. Analyse Ligne par Ligne (Pour le résumé global textuel du Dashboard)
+        // 1. Analyse Ligne par Ligne (Pour le résumé textuel du Dashboard)
         // ====================================================================
         var diffLines = diffBuilder.BuildDiffModel(CleanLineForDiff(cleanSource), CleanLineForDiff(cleanTarget));
 
-        // -- DÉTECTION GLOBALE DE DÉPLACEMENT POUR LE RÉSUMÉ TEXTUEL --
         var sumDel = new Dictionary<string, int>();
         var sumIns = new Dictionary<string, int>();
 
@@ -62,7 +61,6 @@ public class PdfDiffAnalyzer
             var newLine = diffLines.NewText.Lines[i];
             var oldLine = diffLines.OldText.Lines[i];
 
-            // Si la ligne a simplement été déplacée (ex: changement de page), on l'ignore.
             if (oldLine.Type == ChangeType.Deleted)
             {
                 string txt = oldLine.Text.Trim();
@@ -117,8 +115,8 @@ public class PdfDiffAnalyzer
         }
 
         // ====================================================================
-        // 2. CORRECTION DÉFINITIVE: Algorithme Hybride + Détection de Déplacement
-        // Pour les surlignages visuels exacts sur le PDF
+        // 2. CORRECTION DÉFINITIVE: Algorithme Hybride + Panier Global LCS
+        // Blindage contre les sauts de pages et décalages d'en-têtes
         // ====================================================================
         var sourceLinesList = GroupIntoLines(sourceWords);
         var targetLinesList = GroupIntoLines(targetWords);
@@ -128,90 +126,30 @@ public class PdfDiffAnalyzer
 
         var diffLinesModel = diffBuilder.BuildDiffModel(sourceDiffText, targetDiffText);
 
-        // -- DÉTECTION GLOBALE DE DÉPLACEMENT POUR LES COULEURS VISUELLES --
-        var visDel = new Dictionary<string, int>();
-        var visIns = new Dictionary<string, int>();
-
-        for (int i = 0; i < diffLinesModel.NewText.Lines.Count; i++)
-        {
-            if (diffLinesModel.OldText.Lines[i].Type == ChangeType.Deleted)
-            {
-                string t = diffLinesModel.OldText.Lines[i].Text.Trim();
-                if (t.Length > 0) visDel[t] = visDel.GetValueOrDefault(t) + 1;
-            }
-            if (diffLinesModel.NewText.Lines[i].Type == ChangeType.Inserted)
-            {
-                string t = diffLinesModel.NewText.Lines[i].Text.Trim();
-                if (t.Length > 0) visIns[t] = visIns.GetValueOrDefault(t) + 1;
-            }
-        }
-
-        var visSkipDel = new Dictionary<string, int>();
-        var visSkipIns = new Dictionary<string, int>();
-        foreach(var kvp in visDel)
-        {
-            if (visIns.TryGetValue(kvp.Key, out int insC))
-            {
-                int moves = Math.Min(kvp.Value, insC);
-                visSkipDel[kvp.Key] = moves;
-                visSkipIns[kvp.Key] = moves;
-            }
-        }
-
         var currentDeletes = new List<List<(string CleanText, List<LetterLoc> Letters)>>();
         var currentInserts = new List<List<(string CleanText, List<LetterLoc> Letters)>>();
+
+        // Paniers pour collecter tous les mots potentiellement modifiés
+        var globalDeletes = new List<(string CleanText, List<LetterLoc> Letters)>();
+        var globalInserts = new List<(string CleanText, List<LetterLoc> Letters)>();
 
         int sLineIdx = 0;
         int tLineIdx = 0;
 
         void FlushBlocks()
         {
-            var actualDeletes = new List<List<(string CleanText, List<LetterLoc> Letters)>>();
-            var actualInserts = new List<List<(string CleanText, List<LetterLoc> Letters)>>();
-
-            // Filtrage des lignes qui ont juste été déplacées (elles ne seront ni rouges, ni vertes)
-            foreach (var l in currentDeletes)
+            if (currentDeletes.Count > 0 && currentInserts.Count == 0)
             {
-                string text = string.Join(" ", l.Select(w => w.CleanText)).Trim();
-                if (visSkipDel.TryGetValue(text, out int moves) && moves > 0)
-                {
-                    visSkipDel[text] = moves - 1;
-                }
-                else
-                {
-                    actualDeletes.Add(l);
-                }
+                foreach (var l in currentDeletes) globalDeletes.AddRange(l);
             }
-
-            foreach (var l in currentInserts)
+            else if (currentInserts.Count > 0 && currentDeletes.Count == 0)
             {
-                string text = string.Join(" ", l.Select(w => w.CleanText)).Trim();
-                if (visSkipIns.TryGetValue(text, out int moves) && moves > 0)
-                {
-                    visSkipIns[text] = moves - 1;
-                }
-                else
-                {
-                    actualInserts.Add(l);
-                }
+                foreach (var l in currentInserts) globalInserts.AddRange(l);
             }
-
-            // Dessin des vraies différences
-            if (actualDeletes.Count > 0 && actualInserts.Count == 0)
+            else if (currentDeletes.Count > 0 && currentInserts.Count > 0)
             {
-                foreach (var l in actualDeletes)
-                    foreach (var w in l) result.Highlights.SourceRed.AddRange(w.Letters);
-            }
-            else if (actualInserts.Count > 0 && actualDeletes.Count == 0)
-            {
-                foreach (var l in actualInserts)
-                    foreach (var w in l) result.Highlights.TargetRed.AddRange(w.Letters);
-            }
-            else if (actualDeletes.Count > 0 || actualInserts.Count > 0)
-            {
-                // Différence subtile : on zoome mot par mot pour colorier le mot modifié
-                var sWords = actualDeletes.SelectMany(l => l).ToList();
-                var tWords = actualInserts.SelectMany(l => l).ToList();
+                var sWords = currentDeletes.SelectMany(l => l).ToList();
+                var tWords = currentInserts.SelectMany(l => l).ToList();
 
                 string sText = string.Join('\n', sWords.Select(w => w.CleanText));
                 string tText = string.Join('\n', tWords.Select(w => w.CleanText));
@@ -233,13 +171,13 @@ public class PdfDiffAnalyzer
 
                     if (oldWord.Type == ChangeType.Deleted && hasSW)
                     {
-                        result.Highlights.SourceRed.AddRange(swVal.Letters);
+                        globalDeletes.Add(swVal);
                     }
                     else if (newWord.Type == ChangeType.Inserted && hasTW)
                     {
-                        result.Highlights.TargetRed.AddRange(twVal.Letters);
+                        globalInserts.Add(twVal);
                     }
-                    else if ((oldWord.Type == ChangeType.Modified || newWord.Type == ChangeType.Modified))
+                    else if (oldWord.Type == ChangeType.Modified || newWord.Type == ChangeType.Modified)
                     {
                         if (hasSW) result.Highlights.SourceYellow.AddRange(swVal.Letters);
                         if (hasTW) result.Highlights.TargetYellow.AddRange(twVal.Letters);
@@ -285,6 +223,74 @@ public class PdfDiffAnalyzer
         }
         FlushBlocks();
 
+        // --- 3. PASSE FINALE : DÉTECTION GLOBALE DES DÉPLACEMENTS ---
+        if (globalDeletes.Count > 0 && globalInserts.Count > 0)
+        {
+            var moveDiff = diffBuilder.BuildDiffModel(
+                string.Join('\n', globalDeletes.Select(w => w.CleanText)),
+                string.Join('\n', globalInserts.Select(w => w.CleanText))
+            );
+
+            int gdIdx = 0, giIdx = 0;
+            var currentUnchangedDeletes = new List<(string CleanText, List<LetterLoc> Letters)>();
+            var currentUnchangedInserts = new List<(string CleanText, List<LetterLoc> Letters)>();
+
+            void FlushUnchanged()
+            {
+                // SEUIL DE BLINDAGE : 3 mots consécutifs identiques = Texte déplacé (on ignore)
+                if (currentUnchangedDeletes.Count >= 3)
+                {
+                    // On ne fait rien : le texte est considéré comme inchangé mais déplacé
+                }
+                else
+                {
+                    // Trop court : ce sont de vraies différences ou des coïncidences (ex: "le", "de")
+                    foreach (var w in currentUnchangedDeletes) result.Highlights.SourceRed.AddRange(w.Letters);
+                    foreach (var w in currentUnchangedInserts) result.Highlights.TargetRed.AddRange(w.Letters);
+                }
+                currentUnchangedDeletes.Clear();
+                currentUnchangedInserts.Clear();
+            }
+
+            for (int i = 0; i < moveDiff.NewText.Lines.Count; i++)
+            {
+                var oldMove = moveDiff.OldText.Lines[i];
+                var newMove = moveDiff.NewText.Lines[i];
+
+                bool hasOld = oldMove.Type != ChangeType.Imaginary && gdIdx < globalDeletes.Count;
+                bool hasNew = newMove.Type != ChangeType.Imaginary && giIdx < globalInserts.Count;
+
+                var oldVal = hasOld ? globalDeletes[gdIdx++] : default;
+                var newVal = hasNew ? globalInserts[giIdx++] : default;
+
+                if (oldMove.Type == ChangeType.Unchanged && newMove.Type == ChangeType.Unchanged)
+                {
+                    if (hasOld) currentUnchangedDeletes.Add(oldVal);
+                    if (hasNew) currentUnchangedInserts.Add(newVal);
+                }
+                else
+                {
+                    FlushUnchanged();
+
+                    if (oldMove.Type == ChangeType.Deleted && hasOld)
+                        result.Highlights.SourceRed.AddRange(oldVal.Letters);
+                    else if (newMove.Type == ChangeType.Inserted && hasNew)
+                        result.Highlights.TargetRed.AddRange(newVal.Letters);
+                    else if (oldMove.Type == ChangeType.Modified || newMove.Type == ChangeType.Modified)
+                    {
+                        if (hasOld) result.Highlights.SourceRed.AddRange(oldVal.Letters);
+                        if (hasNew) result.Highlights.TargetRed.AddRange(newVal.Letters);
+                    }
+                }
+            }
+            FlushUnchanged();
+        }
+        else
+        {
+            foreach (var w in globalDeletes) result.Highlights.SourceRed.AddRange(w.Letters);
+            foreach (var w in globalInserts) result.Highlights.TargetRed.AddRange(w.Letters);
+        }
+
         return result;
     }
 
@@ -301,10 +307,6 @@ public class PdfDiffAnalyzer
         }
         return string.Empty;
     }
-
-    // ==============================================================
-    // PIPELINE DE GROUPEMENT PAR LIGNE SPATIALE
-    // ==============================================================
 
     private List<List<(string CleanText, List<LetterLoc> Letters)>> GroupIntoLines(IReadOnlyList<PdfWordInfo> words)
     {
@@ -323,7 +325,6 @@ public class PdfDiffAnalyzer
 
                 var loc = new LetterLoc(letter.GlyphRectangle, word.PageNumber, (decimal)letter.Location.Y, (decimal)letter.PointSize);
 
-                // Filtre anti "fake bold"
                 if (locs.Count > 0)
                 {
                     var last = locs.Last();
@@ -363,7 +364,6 @@ public class PdfDiffAnalyzer
                 currentLine.Add(word);
             }
 
-            // Tri final cohérent : De haut en bas, puis de gauche à droite
             foreach (var line in lines.OrderByDescending(l => l.First().Letters.First().BaselineY))
             {
                 linesList.Add(line.OrderBy(w => w.Letters.First().BoundingBox.BottomLeft.X).ToList());
@@ -401,7 +401,6 @@ public class PdfDiffAnalyzer
             .Replace("\n", "")
             .Replace("\t", "")
             .Replace(" ", "")
-            // Remplacement direct de la virgule par un point pour pallier les erreurs de l'extraction interne du PDF
             .Replace(",", ".")
             .Replace("–", "-").Replace("—", "-").Replace("−", "-")
             .Replace("’", "'").Replace("‘", "'").Replace("´", "'").Replace("`", "'")
