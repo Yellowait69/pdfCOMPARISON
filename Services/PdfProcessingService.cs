@@ -345,7 +345,8 @@ public class PdfProcessingService
         return string.Empty;
     }
 
-    private (PdfFont Font, PdfFont FontBold) LoadFonts(PdfDocumentBuilder builder)
+    // MODIFICATION ICI: Changement de type de retour (PdfFont -> PdfDocumentBuilder.AddedFont)
+    private (PdfDocumentBuilder.AddedFont Font, PdfDocumentBuilder.AddedFont FontBold) LoadFonts(PdfDocumentBuilder builder)
     {
         string fontsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
         string arialPath = Path.Combine(fontsFolder, "arial.ttf");
