@@ -15,9 +15,9 @@ public partial class PdfExtractionService
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();
 
-    // Regex pour nettoyer le texte brut des filigranes lors de l'extraction textuelle
-    // (?i) rend la regex insensible à la casse. \b assure qu'on match le mot entier.
-    [GeneratedRegex(@"(?i)\b(specimen|Q000|D000|P000|A000)\b")]
+    // NOUVEAU : Regex pour nettoyer le texte brut des filigranes lors de l'extraction textuelle
+    // On enlève les \b pour attraper les morceaux de filigrane cachés dans le texte (ex: CIMEN)
+    [GeneratedRegex(@"(?i)(specimen|cimen|speci|Q000|D000|P000|A000)")]
     private static partial Regex WatermarkTextRegex();
 
     public string ExtractTextFast(string pdfPath)
@@ -32,7 +32,7 @@ public partial class PdfExtractionService
             string rawText = page.Text;
 
             // ON DÉTRUIT LE FILIGRANE DU TEXTE BRUT :
-            // Cela empêchera les mots "SPECIMEN" d'apparaître dans le rapport de synthèse écrit
+            // Cela empêchera les mots "SPECIMEN" (et ses fragments) d'apparaître dans le rapport de synthèse écrit
             string cleanText = WatermarkTextRegex().Replace(rawText, "");
 
             sb.AppendLine(cleanText);
@@ -76,16 +76,19 @@ public partial class PdfExtractionService
     {
         // 1. FILTRAGE PAR LA TAILLE (Texte "très grand")
         // Les textes normaux dépassent rarement 16-20pt. Les filigranes font souvent > 40pt.
-        // CORRECTION : Utilisation de 35.0 (double) au lieu de 35m (decimal) pour éviter l'erreur CS0019
+        // Utilisation de 35.0 (double) au lieu de 35m (decimal) pour éviter l'erreur CS0019
         if (word.Letters.Count > 0 && word.Letters.Max(l => l.PointSize) > 35.0)
         {
             return true;
         }
 
-        // 2. FILTRAGE PAR LE TEXTE EXACT
+        // 2. FILTRAGE PAR LE TEXTE EXACT (Mots entiers et fragments)
         string text = word.Text.ToUpperInvariant().Trim();
 
+        // On intercepte les mots partiels créés par le découpage du PDF (ex: "SPE" "CIMEN")
         if (text.Contains("SPECIMEN") ||
+            text.Contains("CIMEN") ||
+            text.Contains("SPECI") ||
             text == "Q000" ||
             text == "D000" ||
             text == "P000" ||

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -5,7 +6,7 @@ using DiffPlex;
 using DiffPlex.DiffBuilder;
 using DiffPlex.DiffBuilder.Model;
 using PDFComparison.Models;
-using UglyToad.PdfPig.Content; // Ajout obligatoire pour manipuler les lettres (Glyphes)
+using UglyToad.PdfPig.Content; // Ajout nécessaire pour manipuler les lettres
 
 namespace PDFComparison.Services;
 
@@ -69,16 +70,14 @@ public class PdfDiffAnalyzer
         }
 
         // 2. Analyse GLYPHE par GLYPHE (Pour le surlignage visuel PDF)
-        // C'est l'arme absolue contre les faux positifs liés aux espaces et au découpage des mots
+        // On aplatit, nettoie, dédoublonne et trie toutes les lettres.
+        var sourceItems = FlattenAndClean(sourceWords);
+        var targetItems = FlattenAndClean(targetWords);
 
-        // On aplatit les listes de mots pour n'obtenir qu'une suite ininterrompue de lettres
-        var sourceItems = sourceWords.SelectMany(w => w.Letters.Select(l => (Letter: l, Page: w.PageNumber))).ToList();
-        var targetItems = targetWords.SelectMany(w => w.Letters.Select(l => (Letter: l, Page: w.PageNumber))).ToList();
-
-        // On compare lettre par lettre (en les nettoyant avec CleanGlyph)
+        // On donne à DiffPlex une chaîne où chaque caractère parfaitement propre est sur une ligne
         var diffGlyphs = diffBuilder.BuildDiffModel(
-            string.Join('\n', sourceItems.Select(x => CleanGlyph(x.Letter.Value))),
-            string.Join('\n', targetItems.Select(x => CleanGlyph(x.Letter.Value)))
+            string.Join('\n', sourceItems.Select(x => x.Char)),
+            string.Join('\n', targetItems.Select(x => x.Char))
         );
 
         int sPointer = 0, tPointer = 0;
@@ -88,6 +87,7 @@ public class PdfDiffAnalyzer
             var oldDiff = diffGlyphs.OldText.Lines[i];
             var newDiff = diffGlyphs.NewText.Lines[i];
 
+            // Pointers sécurisés : on vérifie que DiffPlex ne pointe pas vers des données imaginaires
             bool hasS = oldDiff.Type != ChangeType.Imaginary && sPointer < sourceItems.Count;
             bool hasT = newDiff.Type != ChangeType.Imaginary && tPointer < targetItems.Count;
 
@@ -96,16 +96,16 @@ public class PdfDiffAnalyzer
 
             if (oldDiff.Type == ChangeType.Deleted && hasS)
             {
-                result.Highlights.SourceRed.Add(new LetterLoc(sVal.Letter.GlyphRectangle, sVal.Page, (decimal)sVal.Letter.Location.Y, (decimal)sVal.Letter.PointSize));
+                result.Highlights.SourceRed.Add(sVal.Loc);
             }
             else if (newDiff.Type == ChangeType.Inserted && hasT)
             {
-                result.Highlights.TargetRed.Add(new LetterLoc(tVal.Letter.GlyphRectangle, tVal.Page, (decimal)tVal.Letter.Location.Y, (decimal)tVal.Letter.PointSize));
+                result.Highlights.TargetRed.Add(tVal.Loc);
             }
-            else if (oldDiff.Type == ChangeType.Modified || newDiff.Type == ChangeType.Modified)
+            else if ((oldDiff.Type == ChangeType.Modified || newDiff.Type == ChangeType.Modified))
             {
-                if (hasS) result.Highlights.SourceYellow.Add(new LetterLoc(sVal.Letter.GlyphRectangle, sVal.Page, (decimal)sVal.Letter.Location.Y, (decimal)sVal.Letter.PointSize));
-                if (hasT) result.Highlights.TargetYellow.Add(new LetterLoc(tVal.Letter.GlyphRectangle, tVal.Page, (decimal)tVal.Letter.Location.Y, (decimal)tVal.Letter.PointSize));
+                if (hasS) result.Highlights.SourceYellow.Add(sVal.Loc);
+                if (hasT) result.Highlights.TargetYellow.Add(tVal.Loc);
             }
         }
 
@@ -127,8 +127,51 @@ public class PdfDiffAnalyzer
     }
 
     // ==============================================================
-    // FILTRES ANTI FAUX-POSITIFS (PDF QUIRKS)
+    // PIPELINE DE NETTOYAGE ET SYNCHRONISATION ABSOLUE
     // ==============================================================
+
+    private List<(string Char, LetterLoc Loc)> FlattenAndClean(IReadOnlyList<PdfWordInfo> words)
+    {
+        var list = new List<(string Char, LetterLoc Loc)>();
+
+        foreach (var word in words)
+        {
+            foreach (var letter in word.Letters)
+            {
+                string cleaned = CleanGlyph(letter.Value);
+                if (string.IsNullOrEmpty(cleaned)) continue;
+
+                var loc = new LetterLoc(letter.GlyphRectangle, word.PageNumber, (decimal)letter.Location.Y, (decimal)letter.PointSize);
+
+                foreach (char c in cleaned)
+                {
+                    // 1. FILTRE ANTI "FAKE BOLD" (Ombre portée invisible)
+                    // Si le PDF a imprimé la même lettre au même endroit pour faire un effet de gras, on l'ignore.
+                    if (list.Count > 0)
+                    {
+                        var last = list.Last();
+                        if (last.Char == c.ToString() &&
+                            last.Loc.PageNumber == loc.PageNumber &&
+                            Math.Abs(last.Loc.BaselineY - loc.BaselineY) < 1.0m &&
+                            Math.Abs((decimal)last.Loc.BoundingBox.BottomLeft.X - (decimal)loc.BoundingBox.BottomLeft.X) < 1.0m)
+                        {
+                            continue; // On rejette ce doublon fantôme
+                        }
+                    }
+
+                    list.Add((c.ToString(), loc));
+                }
+            }
+        }
+
+        // 2. TRI VISUEL STRICT (Empêche l'ordre interne du PDF de fausser la comparaison)
+        // On force la lecture de Haut en Bas, et de Gauche à Droite, sans tenir compte du code interne du PDF.
+        return list
+            .OrderBy(x => x.Loc.PageNumber)
+            .ThenByDescending(x => Math.Round(x.Loc.BaselineY / 5.0m) * 5.0m) // Tolérance de 5 points pour aligner les textes sur la même ligne
+            .ThenBy(x => x.Loc.BoundingBox.BottomLeft.X)
+            .ToList();
+    }
 
     private string CleanLineForDiff(string input)
     {
@@ -143,29 +186,29 @@ public class PdfDiffAnalyzer
             .Normalize(System.Text.NormalizationForm.FormKC);
     }
 
-    // Nettoyage au niveau de la lettre individuelle (Glyphe)
     private string CleanGlyph(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return string.Empty;
 
         var cleaned = input
-            .Replace("\u00A0", "")   // Espace insécable (NBSP)
-            .Replace("\u200B", "")   // Zero-width space
-            .Replace("\u200C", "")   // Zero-width non-joiner
-            .Replace("\u200D", "")   // Zero-width joiner
-            .Replace("\uFEFF", "")   // Byte Order Mark
-            .Replace("\u00AD", "")   // Soft hyphen (Tiret conditionnel invisible)
+            .Replace("\u00A0", "")
+            .Replace("\u200B", "")
+            .Replace("\u200C", "")
+            .Replace("\u200D", "")
+            .Replace("\uFEFF", "")
+            .Replace("\u00AD", "")
             .Replace("\r", "")
             .Replace("\n", "")
             .Replace("\t", "")
-            .Replace(" ", "")        // Élimine les espaces classiques piégés dans les glyphes
+            .Replace(" ", "")
             .Replace("–", "-").Replace("—", "-").Replace("−", "-")
             .Replace("’", "'").Replace("‘", "'").Replace("´", "'").Replace("`", "'")
             .Replace("“", "\"").Replace("”", "\"").Replace("«", "\"").Replace("»", "\"")
-            .Normalize(System.Text.NormalizationForm.FormKC) // Sépare les ligatures (ex: ﬁ devient f + i)
+            .Normalize(System.Text.NormalizationForm.FormKC) // Découpe proprement les ligatures (ex: ﬁ -> f + i)
             .ToLowerInvariant()
             .Trim();
 
-        return new string(cleaned.Where(c => !char.IsControl(c)).ToArray());
+        // On détruit tout ce qui est espace résiduel ou caractère de contrôle invisible
+        return new string(cleaned.Where(c => !char.IsControl(c) && !char.IsWhiteSpace(c)).ToArray());
     }
 }
