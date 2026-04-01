@@ -403,20 +403,19 @@ public class PdfProcessingService
             decimal strokeWidth = seg.fontSize * 0.08m;
             if (strokeWidth < 0.75m) strokeWidth = 0.75m; // Minimum visible
 
-            pageBuilder.SetLineWidth(strokeWidth);
             decimal width = seg.maxX - seg.minX;
 
             if (style == MarkupStyle.Strikethrough)
             {
                 // Barre horizontale au milieu de la hauteur de la lettre
                 decimal y = seg.baselineY + (seg.fontSize * 0.3m);
-                pageBuilder.DrawLine(new PdfPoint(seg.minX, y), new PdfPoint(seg.maxX, y));
+                pageBuilder.DrawLine(new PdfPoint(seg.minX, y), new PdfPoint(seg.maxX, y), strokeWidth);
             }
             else if (style == MarkupStyle.Underline)
             {
                 // Ligne juste en dessous de la ligne de base
                 decimal y = seg.baselineY - (seg.fontSize * 0.12m);
-                pageBuilder.DrawLine(new PdfPoint(seg.minX, y), new PdfPoint(seg.maxX, y));
+                pageBuilder.DrawLine(new PdfPoint(seg.minX, y), new PdfPoint(seg.maxX, y), strokeWidth);
             }
             else if (style == MarkupStyle.Box)
             {
