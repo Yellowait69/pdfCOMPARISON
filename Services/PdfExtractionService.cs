@@ -15,7 +15,7 @@ public partial class PdfExtractionService
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();
 
-    // NOUVEAU : Regex pour nettoyer le texte brut des filigranes lors de l'extraction textuelle
+    // Regex pour nettoyer le texte brut des filigranes lors de l'extraction textuelle
     // (?i) rend la regex insensible à la casse. \b assure qu'on match le mot entier.
     [GeneratedRegex(@"(?i)\b(specimen|Q000|D000|P000|A000)\b")]
     private static partial Regex WatermarkTextRegex();
@@ -76,8 +76,8 @@ public partial class PdfExtractionService
     {
         // 1. FILTRAGE PAR LA TAILLE (Texte "très grand")
         // Les textes normaux dépassent rarement 16-20pt. Les filigranes font souvent > 40pt.
-        // Si la taille max des lettres du mot est > 35, c'est un filigrane à coup sûr.
-        if (word.Letters.Count > 0 && word.Letters.Max(l => l.PointSize) > 35m)
+        // CORRECTION : Utilisation de 35.0 (double) au lieu de 35m (decimal) pour éviter l'erreur CS0019
+        if (word.Letters.Count > 0 && word.Letters.Max(l => l.PointSize) > 35.0)
         {
             return true;
         }
