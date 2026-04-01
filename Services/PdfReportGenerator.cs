@@ -298,7 +298,7 @@ public class PdfReportGenerator
         page.AddText("Documents modifiés par Langue :", 11m, new PdfPoint((double)(startX + 520m), (double)currentY), fontBold);
         currentY -= 10m;
 
-        // GRAPHIQUE 1 : ACTIONS (CORRECTION)
+        // GRAPHIQUE 1 : ACTIONS
         var plt1 = new Plot();
         plt1.HideGrid();
         plt1.HideAxesAndGrid();
@@ -320,7 +320,7 @@ public class PdfReportGenerator
             page.AddText("(Aucune donnée)", 10m, new PdfPoint((double)(startX + 60m), (double)(currentY - 100m)), font);
         }
 
-        // GRAPHIQUE 2 : NATURE DES DONNÉES (CORRECTION)
+        // GRAPHIQUE 2 : NATURE DES DONNÉES
         var plt2 = new Plot();
         plt2.HideGrid();
         plt2.HideAxesAndGrid();
@@ -342,7 +342,7 @@ public class PdfReportGenerator
             page.AddText("(Aucune donnée)", 10m, new PdfPoint((double)(startX + 320m), (double)(currentY - 100m)), font);
         }
 
-        // GRAPHIQUE 3 : LANGUES (CORRECTION)
+        // GRAPHIQUE 3 : LANGUES
         var plt3 = new Plot();
         plt3.HideGrid();
         plt3.HideAxesAndGrid();
@@ -478,24 +478,41 @@ public class PdfReportGenerator
     }
 
     // ==========================================
-    // MÉTHODES CONSERVÉES
+    // MÉTHODE CORRIGÉE (MISE À JOUR)
     // ==========================================
 
     private void DrawDiffMarkup(PdfPageBuilder pageBuilder, IEnumerable<LetterLoc> letters, byte r, byte g, byte b, MarkupStyle style)
     {
-        var sorted = letters.OrderByDescending(l => l.BaselineY).ThenBy(l => l.BoundingBox.BottomLeft.X).ToList();
-        if (sorted.Count is 0) return;
+        // 1. Appliquer la même tolérance d'alignement (5 points) que dans l'analyseur pour garder les lignes unies
+        var sorted = letters
+            .OrderByDescending(l => Math.Round(l.BaselineY / 5.0m) * 5.0m)
+            .ThenBy(l => l.BoundingBox.BottomLeft.X)
+            .ToList();
+
+        if (sorted.Count == 0) return;
 
         var segments = new List<(decimal minX, decimal maxX, decimal baselineY, decimal fontSize)>();
         var first = sorted[0];
-        decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X, cMaxX = (decimal)first.BoundingBox.TopRight.X, cBaseline = first.BaselineY, cFontSize = first.FontSize;
+        decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X;
+        decimal cMaxX = (decimal)first.BoundingBox.TopRight.X;
+        decimal cBaseline = first.BaselineY;
+        decimal cFontSize = first.FontSize;
 
         for (int i = 1; i < sorted.Count; i++)
         {
             var loc = sorted[i];
-            decimal x = (decimal)loc.BoundingBox.BottomLeft.X, y = loc.BaselineY;
+            decimal x = (decimal)loc.BoundingBox.BottomLeft.X;
+            decimal y = loc.BaselineY;
 
-            if (Math.Abs(y - cBaseline) < 3m && (x - cMaxX) < 15m)
+            // 2. Vérifier si on est sur la même ligne visuelle (tolérance de 5 points)
+            bool isSameLine = Math.Abs(Math.Round(y / 5.0m) * 5.0m - Math.Round(cBaseline / 5.0m) * 5.0m) < 1m;
+
+            // 3. Remplacer la valeur fixe (15m) par une valeur dynamique basée sur la taille de la police
+            // Cela empêche de scinder les encadrés en deux pour les textes écrits en grand
+            decimal maxGap = Math.Max(15m, cFontSize * 1.5m);
+
+            // Permettre un léger chevauchement arrière (x >= cMinX - 5m) pour les polices bizarres
+            if (isSameLine && (x - cMaxX) < maxGap && x >= cMinX - 5m)
             {
                 cMaxX = Math.Max(cMaxX, (decimal)loc.BoundingBox.TopRight.X);
                 cFontSize = Math.Max(cFontSize, loc.FontSize);
@@ -503,7 +520,10 @@ public class PdfReportGenerator
             else
             {
                 segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
-                cMinX = x; cMaxX = (decimal)loc.BoundingBox.TopRight.X; cBaseline = y; cFontSize = loc.FontSize;
+                cMinX = x;
+                cMaxX = (decimal)loc.BoundingBox.TopRight.X;
+                cBaseline = y;
+                cFontSize = loc.FontSize;
             }
         }
         segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
@@ -524,7 +544,9 @@ public class PdfReportGenerator
                     pageBuilder.DrawLine(new PdfPoint((double)seg.minX, (double)(seg.baselineY - (seg.fontSize * 0.12m))), new PdfPoint((double)seg.maxX, (double)(seg.baselineY - (seg.fontSize * 0.12m))), strokeWidth);
                     break;
                 case MarkupStyle.Box:
-                    pageBuilder.DrawRectangle(new PdfPoint((double)(seg.minX - 1m), (double)(seg.baselineY - (seg.fontSize * 0.15m))), width + 2m, seg.fontSize * 0.9m, strokeWidth, false);
+                    // Ajout d'un padding pour un rendu visuel beaucoup plus propre autour du texte
+                    decimal paddingX = seg.fontSize * 0.1m;
+                    pageBuilder.DrawRectangle(new PdfPoint((double)(seg.minX - paddingX), (double)(seg.baselineY - (seg.fontSize * 0.15m))), width + (paddingX * 2), seg.fontSize * 0.9m, strokeWidth, false);
                     break;
             }
         }

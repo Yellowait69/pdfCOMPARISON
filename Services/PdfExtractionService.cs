@@ -16,8 +16,8 @@ public partial class PdfExtractionService
     private static partial Regex WhitespaceRegex();
 
     // NOUVEAU : Regex pour nettoyer le texte brut des filigranes lors de l'extraction textuelle
-    // On enlève les \b pour attraper les morceaux de filigrane cachés dans le texte (ex: CIMEN)
-    [GeneratedRegex(@"(?i)(specimen|cimen|speci|Q000|D000|P000|A000)")]
+    // On enlève les \b pour attraper les morceaux de filigrane cachés dans le texte (ex: CIMEN, MEN, TEST)
+    [GeneratedRegex(@"(?i)(specimen|cimen|speci|men|test|Q000|D000|P000|A000)")]
     private static partial Regex WatermarkTextRegex();
 
     public string ExtractTextFast(string pdfPath)
@@ -76,8 +76,8 @@ public partial class PdfExtractionService
     {
         // 1. FILTRAGE PAR LA TAILLE (Texte "très grand")
         // Les textes normaux dépassent rarement 16-20pt. Les filigranes font souvent > 40pt.
-        // Utilisation de 35.0 (double) au lieu de 35m (decimal) pour éviter l'erreur CS0019
-        if (word.Letters.Count > 0 && word.Letters.Max(l => l.PointSize) > 35.0)
+        // Abaissé à 30.0 (double) au lieu de 35.0 pour capturer plus sûrement les gros filigranes
+        if (word.Letters.Count > 0 && word.Letters.Max(l => l.PointSize) > 30.0)
         {
             return true;
         }
@@ -89,6 +89,8 @@ public partial class PdfExtractionService
         if (text.Contains("SPECIMEN") ||
             text.Contains("CIMEN") ||
             text.Contains("SPECI") ||
+            text == "MEN" ||
+            text == "TEST" ||
             text == "Q000" ||
             text == "D000" ||
             text == "P000" ||
