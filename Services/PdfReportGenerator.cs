@@ -74,7 +74,8 @@ public class PdfReportGenerator
         int criticalAlerts = 0;
 
         var numRegex = new Regex(@"^\s*[\d.,%€$£]+\s*$");
-        var dateRegex = new Regex(@"\b\d{1,4}[-/]\d{1,2}[-/]\d{1,4}\b");
+        // CORRECTION : Prise en compte des points dans le format des dates pour que le Dashboard soit précis
+        var dateRegex = new Regex(@"\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}\b");
 
         // Mots sensibles pour l'audit juridique/financier
         var criticalRegex = new Regex(@"(?i)\b(prix|pénalité|pénalités|résiliation|ttc|ht|garantie|article|euro|taxe|montant|facture)\b");
