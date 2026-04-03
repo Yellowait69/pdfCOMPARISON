@@ -9,12 +9,14 @@ namespace PDFComparison.Services;
 
 public interface ITextDiffSummaryService
 {
-    (int DifferencesCount, List<DiffSummaryBlock> Blocks, DiffPaneModel DiffLinesModel) BuildTextSummary(string cleanSource, string cleanTarget);
+    // CORRECTION : Remplacement de DiffPaneModel par SideBySideDiffModel
+    (int DifferencesCount, List<DiffSummaryBlock> Blocks, SideBySideDiffModel DiffLinesModel) BuildTextSummary(string cleanSource, string cleanTarget);
 }
 
 public class TextDiffSummaryService : ITextDiffSummaryService
 {
-    public (int DifferencesCount, List<DiffSummaryBlock> Blocks, DiffPaneModel DiffLinesModel) BuildTextSummary(string cleanSource, string cleanTarget)
+    // CORRECTION : Remplacement de DiffPaneModel par SideBySideDiffModel
+    public (int DifferencesCount, List<DiffSummaryBlock> Blocks, SideBySideDiffModel DiffLinesModel) BuildTextSummary(string cleanSource, string cleanTarget)
     {
         var diffBuilder = new SideBySideDiffBuilder(new Differ());
 
@@ -112,7 +114,7 @@ public class TextDiffSummaryService : ITextDiffSummaryService
             }
         }
 
-        return (diffCount, blocks, diffLines);
+        return (diffCount, blocks, diffLines); // retourne bien le SideBySideDiffModel maintenant
     }
 
     private string GetValidContextLine(List<DiffPiece> lines, int currentIndex, int direction)

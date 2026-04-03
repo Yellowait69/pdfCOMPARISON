@@ -93,5 +93,8 @@ public class DiffAnalysisResult
     public int DifferencesCount { get; set; }
 
     public DocumentDiffSummary Summary { get; init; } = new();
-    public VisualHighlights Highlights { get; init; } = new();
+
+    // CORRECTION ICI : Remplacement de "init" par "set" pour permettre
+    // l'assignation de l'objet Highlights après la création de DiffAnalysisResult
+    public VisualHighlights Highlights { get; set; } = new();
 }

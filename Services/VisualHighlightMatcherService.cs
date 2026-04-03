@@ -7,8 +7,9 @@ namespace PDFComparison.Services;
 
 public interface IVisualHighlightMatcherService
 {
+    // CORRECTION : Remplacement de DiffPaneModel par SideBySideDiffModel
     VisualHighlights GenerateHighlights(
-        DiffPaneModel diffLinesModel,
+        SideBySideDiffModel diffLinesModel,
         List<List<(string CleanText, List<LetterLoc> Letters)>> sourceLinesList,
         List<List<(string CleanText, List<LetterLoc> Letters)>> targetLinesList);
 }
@@ -22,8 +23,9 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         _semanticService = semanticService ?? throw new ArgumentNullException(nameof(semanticService));
     }
 
+    // CORRECTION : Remplacement de DiffPaneModel par SideBySideDiffModel
     public VisualHighlights GenerateHighlights(
-        DiffPaneModel diffLinesModel,
+        SideBySideDiffModel diffLinesModel,
         List<List<(string CleanText, List<LetterLoc> Letters)>> sourceLinesList,
         List<List<(string CleanText, List<LetterLoc> Letters)>> targetLinesList)
     {
