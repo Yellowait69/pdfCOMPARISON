@@ -296,7 +296,7 @@
                                 <Button Command="{Binding DataContext.OpenReportCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                         CommandParameter="{Binding}"
                                         Visibility="{Binding HasReport, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                        Padding="12,6" Background="#2563EB" Foreground="White" BorderThickness="0" CornerRadius="6" Cursor="Hand">
+                                        Padding="12,6" Background="#2563EB" Foreground="White" BorderThickness="0" Cursor="Hand">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="&#xE8A7;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0" VerticalAlignment="Center" FontSize="12"/>
                                         <TextBlock Text="View Report" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center"/>
@@ -306,7 +306,7 @@
                                             <Setter Property="Template">
                                                 <Setter.Value>
                                                     <ControlTemplate TargetType="Button">
-                                                        <Border x:Name="BtnBorder" Background="{TemplateBinding Background}" CornerRadius="{TemplateBinding CornerRadius}" Padding="{TemplateBinding Padding}">
+                                                        <Border x:Name="BtnBorder" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
                                                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                                         </Border>
                                                         <ControlTemplate.Triggers>
