@@ -166,9 +166,12 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
                         string nextClean = words[i + 1].Text.TrimEnd(',');
                         if (nextClean.Equals(targetNameParts[1], StringComparison.OrdinalIgnoreCase))
                         {
-                            // Le nom complet a été trouvé, peu importe l'espacement initial !
-                            words[i] = new PdfWordInfo { Text = NameIgnoreMask, Letters = words[i].Letters, PageNumber = words[i].PageNumber };
-                            words[i + 1] = new PdfWordInfo { Text = string.Empty, Letters = words[i + 1].Letters, PageNumber = words[i + 1].PageNumber };
+                            // CORRECTION : Fusion des lettres des deux mots pour ne pas perdre l'emplacement physique du 2eme mot
+                            var combinedLetters = new List<LetterLoc>(words[i].Letters);
+                            combinedLetters.AddRange(words[i + 1].Letters);
+
+                            words[i] = new PdfWordInfo { Text = NameIgnoreMask, Letters = combinedLetters, PageNumber = words[i].PageNumber };
+                            words[i + 1] = new PdfWordInfo { Text = string.Empty, Letters = new List<LetterLoc>(), PageNumber = words[i + 1].PageNumber };
                             i++;
                         }
                     }
