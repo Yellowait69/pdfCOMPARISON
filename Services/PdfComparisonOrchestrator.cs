@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows;
 using PDFComparison.Models;
 
 namespace PDFComparison.Services;
@@ -13,17 +14,20 @@ public class PdfComparisonOrchestrator
 {
     private readonly PdfExtractionService _extractionService;
     private readonly PdfDiffAnalyzer _diffAnalyzer;
-    private readonly PdfReportGenerator _reportGenerator;
+    private readonly IIndividualReportGenerator _individualReportGenerator;
+    private readonly IGlobalSynthesisReportGenerator _globalReportGenerator;
 
-    // Injection de dépendances sécurisée
+    // Injection de dépendances sécurisée et alignée avec la nouvelle architecture
     public PdfComparisonOrchestrator(
         PdfExtractionService extractionService,
         PdfDiffAnalyzer diffAnalyzer,
-        PdfReportGenerator reportGenerator)
+        IIndividualReportGenerator individualReportGenerator,
+        IGlobalSynthesisReportGenerator globalReportGenerator)
     {
         _extractionService = extractionService ?? throw new ArgumentNullException(nameof(extractionService));
         _diffAnalyzer = diffAnalyzer ?? throw new ArgumentNullException(nameof(diffAnalyzer));
-        _reportGenerator = reportGenerator ?? throw new ArgumentNullException(nameof(reportGenerator));
+        _individualReportGenerator = individualReportGenerator ?? throw new ArgumentNullException(nameof(individualReportGenerator));
+        _globalReportGenerator = globalReportGenerator ?? throw new ArgumentNullException(nameof(globalReportGenerator));
     }
 
     public async Task ProcessPairsAsync(IEnumerable<DocumentPair> validPairs, string outputDiffDir, IProgress<int> progress, CancellationToken cancellationToken = default)
@@ -33,10 +37,11 @@ public class PdfComparisonOrchestrator
         int completed = 0;
         var allSummaries = new ConcurrentBag<DocumentDiffSummary>();
 
-        // Limitation du parallélisme au nombre de cœurs logiques pour éviter de surcharger le disque (I/O Bound)
+        // AMÉLIORATION : Limitation stricte du parallélisme pour éviter le OutOfMemoryException (OOM)
+        // La manipulation de PDF et la génération d'images sont très gourmandes en RAM.
         var parallelOptions = new ParallelOptions
         {
-            MaxDegreeOfParallelism = Environment.ProcessorCount,
+            MaxDegreeOfParallelism = Math.Max(1, Math.Min(Environment.ProcessorCount, 4)),
             CancellationToken = cancellationToken
         };
 
@@ -49,36 +54,37 @@ public class PdfComparisonOrchestrator
                 var sourceText = _extractionService.ExtractTextFast(pair.SourcePath);
                 var targetText = _extractionService.ExtractTextFast(pair.TargetPath!);
 
-                // Vérification rapide avant de lancer l'artillerie lourde (DiffPlex + Surbriallance)
-                if (string.Equals(sourceText, targetText, StringComparison.Ordinal))
+                // AMÉLIORATION : Détection des PDF scannés (sans texte / OCR requis)
+                // Évite de marquer deux documents scannés comme "Identiques" car ils retournent tous les deux une chaîne vide.
+                if (string.IsNullOrWhiteSpace(sourceText) && string.IsNullOrWhiteSpace(targetText))
                 {
-                    pair.Status = CompareStatus.Identical;
-                    pair.ErrorMessage = "Identical (No differences)";
-                    pair.DiffCount = 0;
+                    UpdatePairStatus(pair, CompareStatus.Error, "Unreadable files (Scanned/OCR required)", -1);
+                }
+                else if (string.Equals(sourceText, targetText, StringComparison.Ordinal))
+                {
+                    UpdatePairStatus(pair, CompareStatus.Identical, "Identical (No differences)", 0);
                 }
                 else
                 {
                     ProcessSinglePair(pair, sourceText, targetText, outputDiffDir, allSummaries, ct);
                 }
 
-                pair.CompletedTime = DateTime.Now;
+                if (Application.Current != null)
+                {
+                    Application.Current.Dispatcher.Invoke(() => pair.CompletedTime = DateTime.Now);
+                }
             }
             catch (OperationCanceledException)
             {
-                pair.Status = CompareStatus.Pending;
-                pair.ErrorMessage = "Cancelled by user";
+                UpdatePairStatus(pair, CompareStatus.Pending, "Cancelled by user", pair.DiffCount);
             }
             catch (IOException ex) // Capture spécifiquement les erreurs de fichiers (ex: fichier ouvert)
             {
-                pair.Status = CompareStatus.Error;
-                pair.ErrorMessage = $"File access error (is it open?): {ex.Message}";
-                pair.DiffCount = -1;
+                UpdatePairStatus(pair, CompareStatus.Error, $"File access error (is it open?): {ex.Message}", -1);
             }
             catch (Exception ex)
             {
-                pair.Status = CompareStatus.Error;
-                pair.ErrorMessage = $"Error: {ex.Message}";
-                pair.DiffCount = -1;
+                UpdatePairStatus(pair, CompareStatus.Error, $"Error: {ex.Message}", -1);
             }
             finally
             {
@@ -89,14 +95,14 @@ public class PdfComparisonOrchestrator
             return ValueTask.CompletedTask;
         });
 
-        // Génération du rapport de synthèse global (Synchrone mais exécuté en tâche de fond pour ne pas figer l'UI)
+        // Génération du rapport de synthèse global en tâche de fond pour ne pas figer l'UI
         if (!allSummaries.IsEmpty)
         {
             await Task.Run(() =>
             {
                 try
                 {
-                    _reportGenerator.GenerateGlobalSynthesisReport(allSummaries.ToList(), outputDiffDir);
+                    _globalReportGenerator.GenerateGlobalSynthesisReport(allSummaries.ToList(), outputDiffDir);
                 }
                 catch (Exception ex)
                 {
@@ -125,10 +131,7 @@ public class PdfComparisonOrchestrator
 
         ct.ThrowIfCancellationRequested();
 
-        // 1. Appel au nouveau PdfDiffAnalyzer (refactorisé et allégé)
         var diffResult = _diffAnalyzer.AnalyzeDifferences(pair, cleanSource, cleanTarget, sourceWords, targetWords);
-
-        pair.DiffCount = diffResult.DifferencesCount;
 
         if (diffResult.DifferencesCount > 0)
         {
@@ -136,24 +139,21 @@ public class PdfComparisonOrchestrator
 
             ct.ThrowIfCancellationRequested();
 
-            // 2. Génération du rendu avec gestion des verrous système (File Lock)
             try
             {
-                _reportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, reportPath, diffResult.Highlights);
+                _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, reportPath, diffResult.Highlights);
 
-                pair.ReportPath = reportPath;
-                pair.Status = CompareStatus.Different;
-                pair.ErrorMessage = $"{diffResult.DifferencesCount} difference(s) detected";
+                SetReportPath(pair, reportPath);
+                UpdatePairStatus(pair, CompareStatus.Different, $"{diffResult.DifferencesCount} difference(s) detected", diffResult.DifferencesCount);
             }
             catch (IOException)
             {
                 // Si le fichier est verrouillé (ex: ouvert par l'utilisateur), on tente de créer une version horodatée
                 string fallbackPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{pair.MatchKey}_{DateTime.Now:HHmmss}.pdf");
-                _reportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, fallbackPath, diffResult.Highlights);
+                _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, fallbackPath, diffResult.Highlights);
 
-                pair.ReportPath = fallbackPath;
-                pair.Status = CompareStatus.Different;
-                pair.ErrorMessage = $"{diffResult.DifferencesCount} difference(s) (Saved as new version)";
+                SetReportPath(pair, fallbackPath);
+                UpdatePairStatus(pair, CompareStatus.Different, $"{diffResult.DifferencesCount} difference(s) (Saved as new version)", diffResult.DifferencesCount);
             }
 
             summariesBag.Add(diffResult.Summary);
@@ -161,8 +161,43 @@ public class PdfComparisonOrchestrator
         else
         {
             // Élimination des "Faux Positifs" détectés par le moteur sémantique
-            pair.Status = CompareStatus.Identical;
-            pair.ErrorMessage = "False positives ignored";
+            UpdatePairStatus(pair, CompareStatus.Identical, "False positives ignored", 0);
+        }
+    }
+
+    // ==========================================
+    // MÉTHODES UTILITAIRES (Thread-Safety WPF)
+    // ==========================================
+
+    private void UpdatePairStatus(DocumentPair pair, CompareStatus status, string errorMessage, int diffCount)
+    {
+        if (Application.Current != null && Application.Current.Dispatcher != null)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                pair.Status = status;
+                pair.ErrorMessage = errorMessage;
+                if (diffCount != pair.DiffCount) pair.DiffCount = diffCount;
+            });
+        }
+        else
+        {
+            // Fallback (ex: pendant les tests unitaires où Application.Current est null)
+            pair.Status = status;
+            pair.ErrorMessage = errorMessage;
+            pair.DiffCount = diffCount;
+        }
+    }
+
+    private void SetReportPath(DocumentPair pair, string reportPath)
+    {
+        if (Application.Current != null && Application.Current.Dispatcher != null)
+        {
+            Application.Current.Dispatcher.Invoke(() => pair.ReportPath = reportPath);
+        }
+        else
+        {
+            pair.ReportPath = reportPath;
         }
     }
 }

@@ -81,11 +81,20 @@ public partial class MainViewModel : ObservableObject
             visualMatcherService
         );
 
-        // 3. Orchestrateur principal
+        // 3. NOUVEAU : Services de génération de rapports découpés
+        var drawingService = new PdfDrawingService();
+        var chartService = new PdfChartService();
+        var inlineDiffService = new InlineDiffService();
+
+        var individualReportGen = new IndividualReportGenerator(drawingService);
+        var globalReportGen = new GlobalSynthesisReportGenerator(drawingService, chartService, inlineDiffService);
+
+        // 4. Orchestrateur principal mis à jour
         _orchestrator = new PdfComparisonOrchestrator(
             extractionService,
             diffAnalyzer,
-            new PdfReportGenerator()
+            individualReportGen,
+            globalReportGen
         );
         // ==============================================================
 
@@ -118,7 +127,12 @@ public partial class MainViewModel : ObservableObject
             };
 
             string json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_sessionFilePath, json);
+
+            // AMÉLIORATION : Sauvegarde atomique
+            // On écrit dans un fichier temporaire puis on le déplace pour éviter toute corruption en cas de crash
+            string tempPath = _sessionFilePath + ".tmp";
+            File.WriteAllText(tempPath, json);
+            File.Move(tempPath, _sessionFilePath, overwrite: true);
         }
         catch (Exception ex)
         {
@@ -263,7 +277,6 @@ public partial class MainViewModel : ObservableObject
     }
     // ==========================================
 
-    // NOUVELLE COMMANDE : Permet d'annuler le traitement en cours
     [RelayCommand]
     private void CancelComparison()
     {
