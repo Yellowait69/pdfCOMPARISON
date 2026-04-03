@@ -7,7 +7,6 @@ namespace PDFComparison.Services;
 
 public interface IVisualHighlightMatcherService
 {
-    // CORRECTION : Remplacement de DiffPaneModel par SideBySideDiffModel
     VisualHighlights GenerateHighlights(
         SideBySideDiffModel diffLinesModel,
         List<List<(string CleanText, List<LetterLoc> Letters)>> sourceLinesList,
@@ -23,7 +22,6 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         _semanticService = semanticService ?? throw new ArgumentNullException(nameof(semanticService));
     }
 
-    // CORRECTION : Remplacement de DiffPaneModel par SideBySideDiffModel
     public VisualHighlights GenerateHighlights(
         SideBySideDiffModel diffLinesModel,
         List<List<(string CleanText, List<LetterLoc> Letters)>> sourceLinesList,
@@ -42,7 +40,7 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         var globalInserts = new List<(string CleanText, List<LetterLoc> Letters)>(estimatedDiffs);
 
         int sLineIdx = 0, tLineIdx = 0;
-        int diffLinesCount = diffLinesModel.NewText.Lines.Count; // Mise en cache
+        int diffLinesCount = diffLinesModel.NewText.Lines.Count;
 
         // 1. Collecte des mots modifiés
         for (int i = 0; i < diffLinesCount; i++)
@@ -67,13 +65,14 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
             }
         }
 
-        int deletesCount = globalDeletes.Count; // Mise en cache
-        int insertsCount = globalInserts.Count; // Mise en cache
+        int deletesCount = globalDeletes.Count;
+        int insertsCount = globalInserts.Count;
 
         bool[] matchedOld = new bool[deletesCount];
         bool[] matchedNew = new bool[insertsCount];
 
         // --- ÉTAPE A : N-Gram Matcher (Blocs déplacés) ---
+        // Les séquences de mots (phrases de 2 mots ou plus) ont le droit d'être déplacées librement dans le document.
         const int minSequenceLength = 2;
         for (int i = 0; i <= deletesCount - minSequenceLength; i++)
         {
@@ -86,7 +85,7 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
                 if (matchedNew[j]) continue;
 
                 int len = 0;
-                // Vérification rapide avec string.Equals pour les performances (Ordinal par défaut)
+                // Vérification rapide avec string.Equals pour les performances
                 while (i + len < deletesCount && j + len < insertsCount &&
                        !matchedOld[i + len] && !matchedNew[j + len] &&
                        string.Equals(globalDeletes[i + len].CleanText, globalInserts[j + len].CleanText))
@@ -121,7 +120,7 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
                     matchedOld[i + k] = true;
                     matchedNew[bestJ + k] = true;
                 }
-                i += maxLen - 1; // Sauter les éléments qu'on vient de valider
+                i += maxLen - 1;
             }
         }
 
@@ -131,7 +130,6 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
             if (matchedOld[i]) continue;
 
             string oldWord = globalDeletes[i].CleanText;
-            bool isVolatile = _semanticService.IsVolatile(oldWord);
 
             for (int j = 0; j < insertsCount; j++)
             {
@@ -139,7 +137,9 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
 
                 if (string.Equals(oldWord, globalInserts[j].CleanText))
                 {
-                    if (isVolatile && !IsLocallyClose(globalDeletes[i].Letters, globalInserts[j].Letters))
+                    // RÈGLE STRICTE : Si c'est un mot isolé, il DOIT être au même endroit (X, Y et Page).
+                    // Sinon, c'est considéré comme une suppression et un ajout indépendant.
+                    if (!IsLocallyClose(globalDeletes[i].Letters, globalInserts[j].Letters))
                         continue;
 
                     matchedOld[i] = true;
@@ -155,7 +155,6 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
             if (matchedOld[i]) continue;
 
             string oldWord = globalDeletes[i].CleanText;
-            bool isVolatile = _semanticService.IsVolatile(oldWord);
 
             for (int j = 0; j < insertsCount; j++)
             {
@@ -163,7 +162,9 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
 
                 if (_semanticService.AreConceptuallySimilar(oldWord, globalInserts[j].CleanText))
                 {
-                    if (isVolatile && !IsLocallyClose(globalDeletes[i].Letters, globalInserts[j].Letters))
+                    // RÈGLE STRICTE : Une modification sémantique d'un mot isolé
+                    // n'est valable que si on est au même endroit sur la page.
+                    if (!IsLocallyClose(globalDeletes[i].Letters, globalInserts[j].Letters))
                         continue;
 
                     matchedOld[i] = true;
@@ -175,7 +176,8 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
             }
         }
 
-        // --- ÉTAPE D : Reliquat absolu (Rouge) ---
+        // --- ÉTAPE D : Reliquat absolu (Rouge et Vert) ---
+        // Tous les mots isolés qui ont "voyagé" trop loin atterrissent ici et sont correctement mis en Diff absolu.
         for (int i = 0; i < deletesCount; i++)
         {
             if (!matchedOld[i])
@@ -192,11 +194,11 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
     }
 
     // L'attribut MethodImplOptions.AggressiveInlining force le compilateur à intégrer cette méthode
-    // directement dans l'appelant (Étapes B et C), ce qui évite le coût d'un saut de fonction en mémoire.
+    // directement dans l'appelant, ce qui évite le coût d'un saut de fonction en mémoire.
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private bool IsLocallyClose(List<LetterLoc> oldLocList, List<LetterLoc> newLocList)
     {
-        // CORRECTION ICI : Ajout du test sur l'axe X pour éviter les faux-positifs du "gruyère"
+        // VÉRIFICATION COMPLÈTE : Même page, Axe Y < 100 pts de différence, Axe X < 50 pts de différence.
         return oldLocList.Count > 0 && newLocList.Count > 0 &&
                oldLocList[0].PageNumber == newLocList[0].PageNumber &&
                Math.Abs(oldLocList[0].BaselineY - newLocList[0].BaselineY) < 100.0m &&
