@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using PDFComparison.Models;
 using UglyToad.PdfPig;
-using UglyToad.PdfPig.Content; // Requis pour accéder à la classe Word (Nécessaire pour analyser la couleur)
+using UglyToad.PdfPig.Content;
 
 namespace PDFComparison.Services;
 
@@ -13,7 +13,6 @@ public class PdfExtractionService
     private readonly IPdfIntelligentMaskingService _intelligentMasking;
     private readonly IPdfTextNormalizerService _textNormalizer;
 
-    // OPTIMISATION : Sécurisation de l'injection de dépendances
     public PdfExtractionService(
         IPdfWatermarkFilterService watermarkFilter,
         IPdfIntelligentMaskingService intelligentMasking,
@@ -33,17 +32,14 @@ public class PdfExtractionService
 
         foreach (var page in document.GetPages())
         {
-            // Reconstruction du texte ligne par ligne pour exclure les mots invisibles
-            // tout en préservant les retours à la ligne
             var currentLine = new StringBuilder();
             double lastY = -1;
 
             foreach (var word in page.GetWords())
             {
-                // FILTRE CRITIQUE : Ignorer les mots blancs ou invisibles
+                // FILTRE CRITIQUE : Ignorer les mots invisibles (Artefacts OCR)
                 if (IsHiddenOrWhiteWord(word)) continue;
 
-                // Si la différence de hauteur Y est > 5 points, c'est une nouvelle ligne
                 if (lastY != -1 && Math.Abs(word.BoundingBox.BottomLeft.Y - lastY) > 5.0)
                 {
                     sb.AppendLine(_watermarkFilter.CleanRawText(currentLine.ToString().TrimEnd()));
@@ -54,7 +50,6 @@ public class PdfExtractionService
                 lastY = word.BoundingBox.BottomLeft.Y;
             }
 
-            // Ajouter la dernière ligne de la page
             if (currentLine.Length > 0)
             {
                 sb.AppendLine(_watermarkFilter.CleanRawText(currentLine.ToString().TrimEnd()));
@@ -69,18 +64,13 @@ public class PdfExtractionService
         if (string.IsNullOrWhiteSpace(pdfPath)) throw new ArgumentException("PDF path cannot be empty.", nameof(pdfPath));
 
         var words = new List<PdfWordInfo>();
-
-        // OPTIMISATION : Comparaison ordinale beaucoup plus rapide
         var headerDatesToIgnore = new HashSet<string>(StringComparer.Ordinal);
 
         using var doc = PdfDocument.Open(pdfPath, new ParsingOptions { ClipPaths = false });
 
-        // =========================================================================
-        // OPTIMISATION CRITIQUE : "Single Pass" (Une seule boucle pour tout faire)
-        // =========================================================================
         foreach (var page in doc.GetPages())
         {
-            double headerThresholdY = page.Height - 50.0; // En-tête dynamique
+            double headerThresholdY = page.Height - 50.0;
             double footerThresholdY = 40.0;
             double leftMarginThresholdX = 50.0;
 
@@ -88,28 +78,22 @@ public class PdfExtractionService
             {
                 if (string.IsNullOrWhiteSpace(word.Text)) continue;
 
-                // FILTRE CRITIQUE : Ignorer totalement les mots blancs ou invisibles
+                // FILTRE CRITIQUE : Ignorer les mots invisibles (Artefacts OCR)
                 if (IsHiddenOrWhiteWord(word)) continue;
 
-                // 1. GESTION DE L'EN-TÊTE
                 if (word.BoundingBox.BottomLeft.Y > headerThresholdY)
                 {
                     if (_intelligentMasking.IsDate(word.Text))
                     {
                         headerDatesToIgnore.Add(word.Text);
                     }
-                    // Le mot est dans l'en-tête, on l'ignore pour la comparaison métier
                     continue;
                 }
 
-                // 2. GESTION DU PIED DE PAGE ET DE LA MARGE GAUCHE
                 if (word.BoundingBox.BottomLeft.Y < footerThresholdY) continue;
                 if (word.BoundingBox.BottomLeft.X < leftMarginThresholdX) continue;
-
-                // 3. FILTRAGE ANTI-FILIGRANE (Effectué après le tri spatial pour gagner du temps)
                 if (_watermarkFilter.IsWatermark(word)) continue;
 
-                // 4. SAUVEGARDE DU MOT VALIDE
                 words.Add(new PdfWordInfo
                 {
                     Text = word.Text,
@@ -119,48 +103,50 @@ public class PdfExtractionService
             }
         }
 
-        // ==========================================
-        // MASQUAGE INTELLIGENT
-        // ==========================================
         _intelligentMasking.MaskRepeatingWordElements(words, headerDatesToIgnore);
 
         return words;
     }
 
-    // =========================================================================
-    // NOUVELLE MÉTHODE : Détecte les artefacts OCR (texte invisible) ou blanc
-    // =========================================================================
     private bool IsHiddenOrWhiteWord(Word word)
     {
         if (word.Letters.Count == 0) return false;
 
-        // Optimisation : vérifier la première lettre est suffisant pour déduire l'état du mot entier
         var firstLetter = word.Letters[0];
 
-        // 1. Mode de rendu invisible (Fréquent pour les calques de texte OCR cachés)
-        // L'enum TextRenderingMode.NeitherFillNorStroke correspond généralement à la valeur 3.
+        // =========================================================================
+        // 1. APPROCHE RÉTROCOMPATIBLE (Anciennes versions de PdfPig)
+        // Permet de compiler sans erreur CS1061.
+        // Les artefacts OCR cachés sont très souvent réduits à une taille microscopique.
+        // =========================================================================
+        if (firstLetter.PointSize <= 1.0 || firstLetter.GlyphRectangle.Width <= 0.1)
+        {
+            return true;
+        }
+
+        // =========================================================================
+        // 2. APPROCHE AVANCÉE (Couleurs et Rendu)
+        // [!] À DÉCOMMENTER uniquement si vous mettez à jour votre package NuGet
+        //     UglyToad.PdfPig vers la version 0.1.8 ou supérieure.
+        // =========================================================================
+        /*
+        // Mode rendu invisible (TextRenderingMode = 3)
         if ((int)firstLetter.TextRenderingMode == 3)
         {
             return true;
         }
 
-        // 2. Texte écrit en blanc pur (Police blanche sur fond blanc)
-        // On vérifie la représentation textuelle de la couleur pour être résilient
-        // face aux différents espaces colorimétriques de la librairie (RGB, CMYK, Gray).
+        // Textes écrits en blanc sur fond blanc
         var colorStr = firstLetter.FillColor?.ToString() ?? string.Empty;
-
-        if (colorStr.Contains("(1, 1, 1)") ||       // Blanc en espace RGB
-            colorStr.Contains("Gray: 1") ||         // Blanc en espace Niveaux de gris
-            colorStr.Contains("(0, 0, 0, 0)"))      // Blanc en espace CMYK
+        if (colorStr.Contains("(1, 1, 1)") || colorStr.Contains("Gray: 1") || colorStr.Contains("(0, 0, 0, 0)"))
         {
             return true;
         }
+        */
 
         return false;
     }
 
-    // Proxy vers le service de normalisation pour la rétrocompatibilité
-    // avec l'Orchestrateur Principal de l'application
     public string NormalizePdfText(string input)
     {
         return _textNormalizer.NormalizePdfText(input);
