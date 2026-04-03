@@ -150,8 +150,16 @@ public class PdfDrawingService : IPdfDrawingService
     public void DrawPageStamp(PdfPageBuilder pageBuilder, string text, PdfDocumentBuilder.AddedFont fontBold)
     {
         decimal yPosition = Math.Max((decimal)pageBuilder.PageSize.Height - 30m, 10m);
+
+        // CORRECTION : On réinitialise explicitement la couleur de contour (Stroke) en Blanc
+        // pour empêcher que la couleur d'une différence (Rouge, Vert, Orange) ne "fuite" sur ce cadre.
+        pageBuilder.SetStrokeColor(255, 255, 255);
         pageBuilder.SetTextAndFillColor(255, 255, 255);
+
+        // On dessine le fond blanc pour masquer le texte du PDF en dessous, sans aucune bordure visible
         pageBuilder.DrawRectangle(new PdfPoint(10.0, (double)yPosition), 300m, 20m, 0m, true);
+
+        // On écrit le texte en Bleu standard
         pageBuilder.SetTextAndFillColor(0, 50, 150);
         pageBuilder.AddText(text, 12m, new PdfPoint(15.0, (double)(yPosition + 5m)), fontBold);
     }
