@@ -136,11 +136,11 @@ public class PdfDrawingService : IPdfDrawingService
                         false);   // false = pas de remplissage, le texte en dessous reste 100% visible !
 
                     // 2. Barre verticale épaisse dans la marge gauche pour attirer l'œil
-                    decimal marginX = 15m; // Positionnée tout à gauche de la page
+                    decimal marginX = 10m; // Positionnée tout à gauche de la page
                     pageBuilder.DrawLine(
                         new PdfPoint((double)marginX, (double)boxY),
                         new PdfPoint((double)marginX, (double)(boxY + boxHeight)),
-                        10.0m      // Trait très épais et visible
+                        15.0m      // Trait très épais et visible
                     );
                     break;
             }
