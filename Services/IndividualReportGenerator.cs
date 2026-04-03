@@ -17,10 +17,10 @@ public class IndividualReportGenerator : IIndividualReportGenerator
 {
     private readonly IPdfDrawingService _drawingService;
 
-    // Définition des couleurs pour la maintenabilité (Supprime les Magic Numbers)
-    private static readonly (byte R, byte G, byte B) ColorRedSource = (220, 20, 20);
-    private static readonly (byte R, byte G, byte B) ColorYellow = (255, 140, 0);
-    private static readonly (byte R, byte G, byte B) ColorGreenTarget = (20, 180, 20);
+    // NOUVELLES COULEURS : Des teintes vives mais adaptées au surlignage
+    private static readonly (byte R, byte G, byte B) ColorRedSource = (255, 99, 71);    // Rouge Tomate (Suppressions)
+    private static readonly (byte R, byte G, byte B) ColorOrange = (255, 165, 0);       // Orange (Modifications)
+    private static readonly (byte R, byte G, byte B) ColorGreenTarget = (50, 205, 50);  // Vert Lime (Ajouts)
 
     public IndividualReportGenerator(IPdfDrawingService drawingService)
     {
@@ -69,10 +69,10 @@ public class IndividualReportGenerator : IIndividualReportGenerator
                 var sPage = builder.AddPage(sourceDoc, pageIndex);
 
                 if (sourceRedDict.TryGetValue(pageIndex, out var sRed))
-                    _drawingService.DrawDiffMarkup(sPage, sRed, ColorRedSource.R, ColorRedSource.G, ColorRedSource.B, MarkupStyle.Strikethrough);
+                    _drawingService.DrawDiffMarkup(sPage, sRed, ColorRedSource.R, ColorRedSource.G, ColorRedSource.B, MarkupStyle.Highlight);
 
                 if (sourceYellowDict.TryGetValue(pageIndex, out var sYellow))
-                    _drawingService.DrawDiffMarkup(sPage, sYellow, ColorYellow.R, ColorYellow.G, ColorYellow.B, MarkupStyle.Box);
+                    _drawingService.DrawDiffMarkup(sPage, sYellow, ColorOrange.R, ColorOrange.G, ColorOrange.B, MarkupStyle.Highlight);
 
                 _drawingService.DrawPageStamp(sPage, $"[ DOCUMENT SOURCE - Page {pageIndex} ]", fontBold);
             }
@@ -83,10 +83,10 @@ public class IndividualReportGenerator : IIndividualReportGenerator
                 var tPage = builder.AddPage(targetDoc, pageIndex);
 
                 if (targetRedDict.TryGetValue(pageIndex, out var tRed))
-                    _drawingService.DrawDiffMarkup(tPage, tRed, ColorGreenTarget.R, ColorGreenTarget.G, ColorGreenTarget.B, MarkupStyle.Underline);
+                    _drawingService.DrawDiffMarkup(tPage, tRed, ColorGreenTarget.R, ColorGreenTarget.G, ColorGreenTarget.B, MarkupStyle.Highlight);
 
                 if (targetYellowDict.TryGetValue(pageIndex, out var tYellow))
-                    _drawingService.DrawDiffMarkup(tPage, tYellow, ColorYellow.R, ColorYellow.G, ColorYellow.B, MarkupStyle.Box);
+                    _drawingService.DrawDiffMarkup(tPage, tYellow, ColorOrange.R, ColorOrange.G, ColorOrange.B, MarkupStyle.Highlight);
 
                 _drawingService.DrawPageStamp(tPage, $"[ DOCUMENT CIBLE (Modifié) - Page {pageIndex} ]", fontBold);
             }

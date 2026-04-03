@@ -13,7 +13,8 @@ public enum MarkupStyle
 {
     Strikethrough, // Pour le texte supprimé (barré)
     Underline,     // Pour le texte ajouté (souligné)
-    Box            // Pour le texte modifié (encadré)
+    Box,           // Pour le texte modifié (encadré)
+    Highlight      // NOUVEAU : Pour le texte avec le style "Éditeur de code"
 }
 
 /// <summary>
