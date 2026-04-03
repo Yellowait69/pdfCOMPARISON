@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using PDFComparison.Models;
 using UglyToad.PdfPig;
+using UglyToad.PdfPig.Content; // Requis pour accéder à la classe Word (Nécessaire pour analyser la couleur)
 
 namespace PDFComparison.Services;
 
@@ -32,8 +33,32 @@ public class PdfExtractionService
 
         foreach (var page in document.GetPages())
         {
-            string cleanText = _watermarkFilter.CleanRawText(page.Text);
-            sb.AppendLine(cleanText);
+            // Reconstruction du texte ligne par ligne pour exclure les mots invisibles
+            // tout en préservant les retours à la ligne
+            var currentLine = new StringBuilder();
+            double lastY = -1;
+
+            foreach (var word in page.GetWords())
+            {
+                // FILTRE CRITIQUE : Ignorer les mots blancs ou invisibles
+                if (IsHiddenOrWhiteWord(word)) continue;
+
+                // Si la différence de hauteur Y est > 5 points, c'est une nouvelle ligne
+                if (lastY != -1 && Math.Abs(word.BoundingBox.BottomLeft.Y - lastY) > 5.0)
+                {
+                    sb.AppendLine(_watermarkFilter.CleanRawText(currentLine.ToString().TrimEnd()));
+                    currentLine.Clear();
+                }
+
+                currentLine.Append(word.Text).Append(' ');
+                lastY = word.BoundingBox.BottomLeft.Y;
+            }
+
+            // Ajouter la dernière ligne de la page
+            if (currentLine.Length > 0)
+            {
+                sb.AppendLine(_watermarkFilter.CleanRawText(currentLine.ToString().TrimEnd()));
+            }
         }
 
         return _intelligentMasking.MaskRepeatingTextElements(sb.ToString());
@@ -52,7 +77,6 @@ public class PdfExtractionService
 
         // =========================================================================
         // OPTIMISATION CRITIQUE : "Single Pass" (Une seule boucle pour tout faire)
-        // Réduit par 2 le temps de parcours du document par rapport à l'ancien code.
         // =========================================================================
         foreach (var page in doc.GetPages())
         {
@@ -63,6 +87,9 @@ public class PdfExtractionService
             foreach (var word in page.GetWords())
             {
                 if (string.IsNullOrWhiteSpace(word.Text)) continue;
+
+                // FILTRE CRITIQUE : Ignorer totalement les mots blancs ou invisibles
+                if (IsHiddenOrWhiteWord(word)) continue;
 
                 // 1. GESTION DE L'EN-TÊTE
                 if (word.BoundingBox.BottomLeft.Y > headerThresholdY)
@@ -98,6 +125,38 @@ public class PdfExtractionService
         _intelligentMasking.MaskRepeatingWordElements(words, headerDatesToIgnore);
 
         return words;
+    }
+
+    // =========================================================================
+    // NOUVELLE MÉTHODE : Détecte les artefacts OCR (texte invisible) ou blanc
+    // =========================================================================
+    private bool IsHiddenOrWhiteWord(Word word)
+    {
+        if (word.Letters.Count == 0) return false;
+
+        // Optimisation : vérifier la première lettre est suffisant pour déduire l'état du mot entier
+        var firstLetter = word.Letters[0];
+
+        // 1. Mode de rendu invisible (Fréquent pour les calques de texte OCR cachés)
+        // L'enum TextRenderingMode.NeitherFillNorStroke correspond généralement à la valeur 3.
+        if ((int)firstLetter.TextRenderingMode == 3)
+        {
+            return true;
+        }
+
+        // 2. Texte écrit en blanc pur (Police blanche sur fond blanc)
+        // On vérifie la représentation textuelle de la couleur pour être résilient
+        // face aux différents espaces colorimétriques de la librairie (RGB, CMYK, Gray).
+        var colorStr = firstLetter.FillColor?.ToString() ?? string.Empty;
+
+        if (colorStr.Contains("(1, 1, 1)") ||       // Blanc en espace RGB
+            colorStr.Contains("Gray: 1") ||         // Blanc en espace Niveaux de gris
+            colorStr.Contains("(0, 0, 0, 0)"))      // Blanc en espace CMYK
+        {
+            return true;
+        }
+
+        return false;
     }
 
     // Proxy vers le service de normalisation pour la rétrocompatibilité

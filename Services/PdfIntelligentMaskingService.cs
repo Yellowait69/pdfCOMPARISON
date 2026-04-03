@@ -21,8 +21,13 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
     [GeneratedRegex(@"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b")]
     private static partial Regex DateRegex();
 
-    [GeneratedRegex(@"\b[A-ZÀ-Ÿ]{2,}(?:[\s\-']+[A-ZÀ-Ÿ]{2,})+\b")]
-    private static partial Regex UppercaseSeqRegex();
+    // REGEX TEXTE : Cherche 1 ou 2 mots entièrement en majuscules (autorise les tirets), suivis d'une virgule.
+    [GeneratedRegex(@"\b([\p{Lu}-]{2,}(?:\s+[\p{Lu}-]{2,})?)\s*,")]
+    private static partial Regex DynamicTextNameRegex();
+
+    // REGEX MOTS (PdfPig) : Identifie un mot unique en majuscules, avec une virgule collée optionnelle.
+    [GeneratedRegex(@"^([\p{Lu}-]{2,})(,?)$")]
+    private static partial Regex UpperWordRegex();
 
     public bool IsDate(string text) => DateRegex().IsMatch(text);
 
@@ -30,7 +35,6 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
     {
         if (string.IsNullOrWhiteSpace(text)) return text;
 
-        // OPTIMISATION : Comptage manuel beaucoup plus léger que .Cast<Match>().GroupBy().ToDictionary()
         var dateCounts = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (Match m in DateRegex().Matches(text))
         {
@@ -38,57 +42,28 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
             dateCounts[m.Value] = count + 1;
         }
 
-        var nameCounts = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (Match m in UppercaseSeqRegex().Matches(text))
-        {
-            nameCounts.TryGetValue(m.Value, out int count);
-            nameCounts[m.Value] = count + 1;
-        }
-
-        // OPTIMISATION : Remplacements In-Place avec un StringBuilder
-        // au lieu d'assigner une nouvelle string à chaque itération (text = text.Replace...)
         var sb = new StringBuilder(text);
 
+        // 1. Masquage des dates
         foreach (var kvp in dateCounts)
         {
             if (kvp.Value >= 2) sb.Replace(kvp.Key, DateIgnoreMask);
         }
 
-        foreach (var kvp in nameCounts)
+        // --- DÉTECTION ET MASQUAGE DYNAMIQUE DU PREMIER NOM ---
+        Match nameMatch = DynamicTextNameRegex().Match(sb.ToString());
+        if (nameMatch.Success)
         {
-            if (kvp.Value >= 2) sb.Replace(kvp.Key, NameIgnoreMask);
+            // nameMatch.Groups[1] contient le nom sans la virgule (ex: "QARROLI LOCCAROLINE" ou "SOUSFORMAT")
+            string targetName = nameMatch.Groups[1].Value;
+
+            // On remplace toutes ses occurrences exactes dans le texte
+            string pattern = $@"\b{Regex.Escape(targetName)}\b";
+            string replacedText = Regex.Replace(sb.ToString(), pattern, NameIgnoreMask);
+            sb.Clear();
+            sb.Append(replacedText);
         }
 
-        return sb.ToString();
-    }
-
-    private bool IsUppercaseWord(string text)
-    {
-        if (string.Equals(text, DateIgnoreMask, StringComparison.Ordinal) ||
-            string.Equals(text, NameIgnoreMask, StringComparison.Ordinal))
-            return false;
-
-        int letterCount = 0;
-        foreach (char c in text)
-        {
-            if (char.IsLetter(c))
-            {
-                if (char.IsLower(c)) return false;
-                letterCount++;
-            }
-        }
-        return letterCount >= 2;
-    }
-
-    // OPTIMISATION : Évite la création d'un array via LINQ `.Where(char.IsLetter).ToArray()`
-    private string GetOnlyLetters(string text)
-    {
-        if (string.IsNullOrEmpty(text)) return string.Empty;
-        var sb = new StringBuilder(text.Length);
-        foreach (char c in text)
-        {
-            if (char.IsLetter(c)) sb.Append(c);
-        }
         return sb.ToString();
     }
 
@@ -107,39 +82,7 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
             }
         }
 
-        var uppercaseSequences = new Dictionary<string, int>(StringComparer.Ordinal);
-        var currentSequenceIndices = new List<int>(10);
-
-        // OPTIMISATION : Un seul StringBuilder recyclé pour créer les clés de dictionnaire
-        var seqKeyBuilder = new StringBuilder();
-
-        for (int i = 0; i <= words.Count; i++)
-        {
-            bool isUpper = i < words.Count && IsUppercaseWord(words[i].Text);
-            if (isUpper)
-            {
-                currentSequenceIndices.Add(i);
-            }
-            else
-            {
-                if (currentSequenceIndices.Count >= 2)
-                {
-                    seqKeyBuilder.Clear();
-                    for (int j = 0; j < currentSequenceIndices.Count; j++)
-                    {
-                        if (j > 0) seqKeyBuilder.Append(' ');
-                        seqKeyBuilder.Append(GetOnlyLetters(words[currentSequenceIndices[j]].Text));
-                    }
-
-                    string seqKey = seqKeyBuilder.ToString();
-                    uppercaseSequences.TryGetValue(seqKey, out int count);
-                    uppercaseSequences[seqKey] = count + 1;
-                }
-                currentSequenceIndices.Clear();
-            }
-        }
-
-        // Remplacement des dates
+        // --- 1. REMPLACEMENT DES DATES ---
         for (int i = 0; i < words.Count; i++)
         {
             var match = DateRegex().Match(words[i].Text);
@@ -149,46 +92,92 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
             }
         }
 
-        // Remplacement des séquences de noms
-        currentSequenceIndices.Clear();
-        for (int i = 0; i <= words.Count; i++)
+        // --- 2. DÉTECTION DU PREMIER NOM (La cible unique) ---
+        string[] targetNameParts = Array.Empty<string>();
+
+        for (int i = 0; i < words.Count; i++)
         {
-            bool isUpper = i < words.Count && IsUppercaseWord(words[i].Text);
-            if (isUpper)
+            var match1 = UpperWordRegex().Match(words[i].Text);
+            if (match1.Success)
             {
-                currentSequenceIndices.Add(i);
-            }
-            else
-            {
-                if (currentSequenceIndices.Count >= 2)
+                string word1 = match1.Groups[1].Value;
+                bool hasComma1 = match1.Groups[2].Value == ",";
+
+                // Cas 1 : Le 1er mot contient la virgule attachée (ex: "QARROLI,")
+                if (hasComma1)
                 {
-                    seqKeyBuilder.Clear();
-                    for (int j = 0; j < currentSequenceIndices.Count; j++)
+                    targetNameParts = new[] { word1 };
+                    break;
+                }
+
+                if (i + 1 < words.Count)
+                {
+                    // Cas 2 : Le 1er mot est suivi d'une virgule détachée (ex: "QARROLI" ",")
+                    if (words[i + 1].Text == ",")
                     {
-                        if (j > 0) seqKeyBuilder.Append(' ');
-                        seqKeyBuilder.Append(GetOnlyLetters(words[currentSequenceIndices[j]].Text));
+                        targetNameParts = new[] { word1 };
+                        break;
                     }
 
-                    string seqKey = seqKeyBuilder.ToString();
-                    if (uppercaseSequences.TryGetValue(seqKey, out int count) && count >= 2)
+                    // Regarder le 2eme mot
+                    var match2 = UpperWordRegex().Match(words[i + 1].Text);
+                    if (match2.Success)
                     {
-                        for (int j = 0; j < currentSequenceIndices.Count; j++)
+                        string word2 = match2.Groups[1].Value;
+                        bool hasComma2 = match2.Groups[2].Value == ",";
+
+                        // Cas 3 : Les 2 mots, le 2eme a la virgule attachée (ex: "QARROLI" "LOCCAROLINE,")
+                        if (hasComma2)
                         {
-                            int wordIdx = currentSequenceIndices[j];
-                            words[wordIdx] = new PdfWordInfo
-                            {
-                                Text = j == 0 ? NameIgnoreMask : string.Empty,
-                                Letters = words[wordIdx].Letters,
-                                PageNumber = words[wordIdx].PageNumber
-                            };
+                            targetNameParts = new[] { word1, word2 };
+                            break;
+                        }
+
+                        // Cas 4 : Les 2 mots, suivis d'une virgule détachée (ex: "QARROLI" "LOCCAROLINE" ",")
+                        if (i + 2 < words.Count && words[i + 2].Text == ",")
+                        {
+                            targetNameParts = new[] { word1, word2 };
+                            break;
                         }
                     }
                 }
-                currentSequenceIndices.Clear();
             }
         }
 
-        // List.RemoveAll est hautement optimisé en C#, c'est la bonne méthode à conserver
+        // --- 3. MASQUAGE DU NOM CIBLE DANS TOUT LE DOCUMENT ---
+        // Une fois trouvé, on parcourt tout le document et on masque CHAQUE apparition de ce nom (avec ou sans virgule)
+        if (targetNameParts.Length > 0)
+        {
+            for (int i = 0; i < words.Count; i++)
+            {
+                // TrimEnd(',') permet de neutraliser la virgule pour que "QARROLI," et "QARROLI" matchent.
+                string currentClean = words[i].Text.TrimEnd(',');
+
+                if (targetNameParts.Length == 1)
+                {
+                    if (currentClean.Equals(targetNameParts[0], StringComparison.OrdinalIgnoreCase))
+                    {
+                        words[i] = new PdfWordInfo { Text = NameIgnoreMask, Letters = words[i].Letters, PageNumber = words[i].PageNumber };
+                    }
+                }
+                else if (targetNameParts.Length == 2)
+                {
+                    if (currentClean.Equals(targetNameParts[0], StringComparison.OrdinalIgnoreCase) && i + 1 < words.Count)
+                    {
+                        string nextClean = words[i + 1].Text.TrimEnd(',');
+                        if (nextClean.Equals(targetNameParts[1], StringComparison.OrdinalIgnoreCase))
+                        {
+                            words[i] = new PdfWordInfo { Text = NameIgnoreMask, Letters = words[i].Letters, PageNumber = words[i].PageNumber };
+                            // On vide le deuxième mot
+                            words[i + 1] = new PdfWordInfo { Text = string.Empty, Letters = words[i + 1].Letters, PageNumber = words[i + 1].PageNumber };
+                            i++; // On avance l'index pour ne pas revérifier le 2eme mot
+                        }
+                    }
+                }
+            }
+        }
+
+        // Nettoyage final pour purger les mots que nous avons vidés (string.Empty)
         words.RemoveAll(w => string.IsNullOrEmpty(w.Text));
     }
 }
