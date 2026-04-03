@@ -117,6 +117,32 @@ public class PdfDrawingService : IPdfDrawingService
                     decimal paddingX = seg.fontSize * 0.1m;
                     pageBuilder.DrawRectangle(new PdfPoint((double)(seg.minX - paddingX), (double)(seg.baselineY - (seg.fontSize * 0.15m))), width + (paddingX * 2), seg.fontSize * 0.9m, strokeWidth, false);
                     break;
+                case MarkupStyle.Highlight:
+                    // STYLE "ÉDITEUR DE CODE MODERNE" (ex: GitHub, VS Code)
+
+                    // Calcul des dimensions de la boîte de contour
+                    decimal padding = seg.fontSize * 0.15m;
+                    decimal boxX = seg.minX - padding;
+                    decimal boxY = seg.baselineY - (seg.fontSize * 0.2m);
+                    decimal boxWidth = (seg.maxX - seg.minX) + (padding * 2);
+                    decimal boxHeight = seg.fontSize * 1.1m;
+
+                    // 1. Encadrement net autour du mot
+                    pageBuilder.DrawRectangle(
+                        new PdfPoint((double)boxX, (double)boxY),
+                        boxWidth,
+                        boxHeight,
+                        1.2m,     // Épaisseur du trait fin et élégant
+                        false);   // false = pas de remplissage, le texte en dessous reste 100% visible !
+
+                    // 2. Barre verticale épaisse dans la marge gauche pour attirer l'œil
+                    decimal marginX = 15m; // Positionnée tout à gauche de la page
+                    pageBuilder.DrawLine(
+                        new PdfPoint((double)marginX, (double)boxY),
+                        new PdfPoint((double)marginX, (double)(boxY + boxHeight)),
+                        4.0m      // Trait très épais et visible
+                    );
+                    break;
             }
         }
     }
