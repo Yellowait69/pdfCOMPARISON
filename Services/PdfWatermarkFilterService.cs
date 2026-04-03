@@ -13,28 +13,27 @@ public interface IPdfWatermarkFilterService
 
 public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
 {
-    // Ajout de "ecimien" à la Regex
     [GeneratedRegex(@"(?i)(specimen|cimen|speci|men|test|totein|ecimien|Q000|D000|P000|A000)")]
     private static partial Regex WatermarkTextRegex();
 
     [GeneratedRegex(@"\[\s*DOCUMENT\s+(SOURCE|CIBLE).*?\]", RegexOptions.IgnoreCase)]
     private static partial Regex StampRegex();
 
-    // OPTIMISATION : Ajout de (?i) pour rendre EUR insensible à la casse nativement
     [GeneratedRegex(@"(?i)^[\d.,/\-\s€$£]+(?:EUR)?$")]
     private static partial Regex ProtectedDataRegex();
 
-    // OPTIMISATION : Ajout de (?i) pour la casse
     [GeneratedRegex(@"(?i)^(Q|D|P|A)0{1,3}$")]
     private static partial Regex WatermarkCodeRegex();
 
-    // OPTIMISATION : Remplacement de la condition à rallonge par un HashSet O(1) insensible à la casse
+    // NOUVEAU : Détecte les ancres de signature électronique (ex: #S01_ENDEBNP# ou #S02_CLDEEBW#)
+    [GeneratedRegex(@"#[A-Z0-9_]+#", RegexOptions.IgnoreCase)]
+    private static partial Regex SignatureAnchorRegex();
+
     private static readonly HashSet<string> SafeShortWords = new(StringComparer.OrdinalIgnoreCase)
     {
         "EN", "S", "P", "E", "C", "I", "M", "N", "Q", "D", "MEN", "SP", "SPE", "SPEC"
     };
 
-    // CORRECTION ICI : Ajout de "ECIMIEN" à la liste des fragments
     private static readonly string[] WatermarkFragments =
     {
         "SPECIMEN", "SPECIME", "SPECIM", "PECIMEN", "ECIMEN", "CIMEN", "SPECI", "IMEN", "TOTEIN", "TEST", "ECIMIEN"
@@ -44,7 +43,9 @@ public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
     {
         if (string.IsNullOrWhiteSpace(rawText)) return string.Empty;
 
-        string textWithoutWatermark = WatermarkTextRegex().Replace(rawText, "");
+        // NOUVEAU : Supprimer totalement les ancres de signature du texte brut
+        string textWithoutAnchors = SignatureAnchorRegex().Replace(rawText, "");
+        string textWithoutWatermark = WatermarkTextRegex().Replace(textWithoutAnchors, "");
         return StampRegex().Replace(textWithoutWatermark, "");
     }
 
@@ -54,6 +55,9 @@ public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
 
         string text = word.Text.Trim();
         if (string.IsNullOrEmpty(text)) return false;
+
+        // NOUVEAU : Si c'est une balise de signature, on l'ignore directement (elle ne sera pas comparée)
+        if (SignatureAnchorRegex().IsMatch(text)) return true;
 
         // 1. Les données protégées (Nombres, devises) ne sont jamais des filigranes
         if (ProtectedDataRegex().IsMatch(text)) return false;

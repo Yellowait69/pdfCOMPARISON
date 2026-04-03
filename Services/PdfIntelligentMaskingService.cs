@@ -21,11 +21,11 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
     [GeneratedRegex(@"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b")]
     private static partial Regex DateRegex();
 
-    // REGEX TEXTE : Cherche 1 ou 2 mots entièrement en majuscules (autorise les tirets), suivis d'une virgule.
+    // REGEX TEXTE : Cherche 1 ou 2 mots en majuscules (autorise les tirets), OBLIGATOIREMENT suivis d'une virgule.
     [GeneratedRegex(@"\b([\p{Lu}-]{2,}(?:\s+[\p{Lu}-]{2,})?)\s*,")]
     private static partial Regex DynamicTextNameRegex();
 
-    // REGEX MOTS (PdfPig) : Identifie un mot unique en majuscules, avec une virgule collée optionnelle.
+    // REGEX MOTS (PdfPig) : Identifie un mot en majuscules (au moins 2 lettres), avec une virgule optionnelle collée.
     [GeneratedRegex(@"^([\p{Lu}-]{2,})(,?)$")]
     private static partial Regex UpperWordRegex();
 
@@ -44,21 +44,23 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
 
         var sb = new StringBuilder(text);
 
-        // 1. Masquage des dates
         foreach (var kvp in dateCounts)
         {
             if (kvp.Value >= 2) sb.Replace(kvp.Key, DateIgnoreMask);
         }
 
-        // --- DÉTECTION ET MASQUAGE DYNAMIQUE DU PREMIER NOM ---
+        // --- DÉTECTION STRICTE (Avec Virgule) ---
         Match nameMatch = DynamicTextNameRegex().Match(sb.ToString());
         if (nameMatch.Success)
         {
-            // nameMatch.Groups[1] contient le nom sans la virgule (ex: "QARROLI LOCCAROLINE" ou "SOUSFORMAT")
+            // Le groupe 1 contient le nom (ex: "QARROLI LOCCAROLINE" ou "QARROLI") SANS la virgule
             string targetName = nameMatch.Groups[1].Value;
 
-            // On remplace toutes ses occurrences exactes dans le texte
-            string pattern = $@"\b{Regex.Escape(targetName)}\b";
+            // --- REMPLACEMENT SOUPLE (Espaces variables, avec ou sans virgule) ---
+            // On sépare les mots ("SOUS" et "FORMAT") et on crée une Regex qui accepte \s+ (n'importe quel espacement)
+            string[] parts = targetName.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            string pattern = $@"\b{string.Join(@"\s+", Array.ConvertAll(parts, Regex.Escape))}\b";
+
             string replacedText = Regex.Replace(sb.ToString(), pattern, NameIgnoreMask);
             sb.Clear();
             sb.Append(replacedText);
@@ -82,7 +84,6 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
             }
         }
 
-        // --- 1. REMPLACEMENT DES DATES ---
         for (int i = 0; i < words.Count; i++)
         {
             var match = DateRegex().Match(words[i].Text);
@@ -92,7 +93,7 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
             }
         }
 
-        // --- 2. DÉTECTION DU PREMIER NOM (La cible unique) ---
+        // --- 1. DÉTECTION STRICTE DU PREMIER NOM (Doit comporter une virgule) ---
         string[] targetNameParts = Array.Empty<string>();
 
         for (int i = 0; i < words.Count; i++)
@@ -103,7 +104,7 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
                 string word1 = match1.Groups[1].Value;
                 bool hasComma1 = match1.Groups[2].Value == ",";
 
-                // Cas 1 : Le 1er mot contient la virgule attachée (ex: "QARROLI,")
+                // Cas 1 : 1 mot avec virgule collée (ex: "QARROLI,")
                 if (hasComma1)
                 {
                     targetNameParts = new[] { word1 };
@@ -112,28 +113,27 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
 
                 if (i + 1 < words.Count)
                 {
-                    // Cas 2 : Le 1er mot est suivi d'une virgule détachée (ex: "QARROLI" ",")
+                    // Cas 2 : 1 mot avec virgule détachée (ex: "QARROLI" ",")
                     if (words[i + 1].Text == ",")
                     {
                         targetNameParts = new[] { word1 };
                         break;
                     }
 
-                    // Regarder le 2eme mot
                     var match2 = UpperWordRegex().Match(words[i + 1].Text);
                     if (match2.Success)
                     {
                         string word2 = match2.Groups[1].Value;
                         bool hasComma2 = match2.Groups[2].Value == ",";
 
-                        // Cas 3 : Les 2 mots, le 2eme a la virgule attachée (ex: "QARROLI" "LOCCAROLINE,")
+                        // Cas 3 : 2 mots, le second a une virgule collée (ex: "QARROLI" "LOCCAROLINE,")
                         if (hasComma2)
                         {
                             targetNameParts = new[] { word1, word2 };
                             break;
                         }
 
-                        // Cas 4 : Les 2 mots, suivis d'une virgule détachée (ex: "QARROLI" "LOCCAROLINE" ",")
+                        // Cas 4 : 2 mots, suivis d'une virgule détachée (ex: "QARROLI" "LOCCAROLINE" ",")
                         if (i + 2 < words.Count && words[i + 2].Text == ",")
                         {
                             targetNameParts = new[] { word1, word2 };
@@ -144,13 +144,12 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
             }
         }
 
-        // --- 3. MASQUAGE DU NOM CIBLE DANS TOUT LE DOCUMENT ---
-        // Une fois trouvé, on parcourt tout le document et on masque CHAQUE apparition de ce nom (avec ou sans virgule)
+        // --- 2. MASQUAGE UNIVERSEL DANS TOUT LE DOCUMENT ---
         if (targetNameParts.Length > 0)
         {
             for (int i = 0; i < words.Count; i++)
             {
-                // TrimEnd(',') permet de neutraliser la virgule pour que "QARROLI," et "QARROLI" matchent.
+                // On retire la virgule pour comparer le mot pur
                 string currentClean = words[i].Text.TrimEnd(',');
 
                 if (targetNameParts.Length == 1)
@@ -167,17 +166,16 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
                         string nextClean = words[i + 1].Text.TrimEnd(',');
                         if (nextClean.Equals(targetNameParts[1], StringComparison.OrdinalIgnoreCase))
                         {
+                            // Le nom complet a été trouvé, peu importe l'espacement initial !
                             words[i] = new PdfWordInfo { Text = NameIgnoreMask, Letters = words[i].Letters, PageNumber = words[i].PageNumber };
-                            // On vide le deuxième mot
                             words[i + 1] = new PdfWordInfo { Text = string.Empty, Letters = words[i + 1].Letters, PageNumber = words[i + 1].PageNumber };
-                            i++; // On avance l'index pour ne pas revérifier le 2eme mot
+                            i++;
                         }
                     }
                 }
             }
         }
 
-        // Nettoyage final pour purger les mots que nous avons vidés (string.Empty)
         words.RemoveAll(w => string.IsNullOrEmpty(w.Text));
     }
 }
