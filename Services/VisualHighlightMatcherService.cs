@@ -196,8 +196,10 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private bool IsLocallyClose(List<LetterLoc> oldLocList, List<LetterLoc> newLocList)
     {
+        // CORRECTION ICI : Ajout du test sur l'axe X pour éviter les faux-positifs du "gruyère"
         return oldLocList.Count > 0 && newLocList.Count > 0 &&
                oldLocList[0].PageNumber == newLocList[0].PageNumber &&
-               Math.Abs(oldLocList[0].BaselineY - newLocList[0].BaselineY) < 100.0m;
+               Math.Abs(oldLocList[0].BaselineY - newLocList[0].BaselineY) < 100.0m &&
+               Math.Abs((decimal)oldLocList[0].BoundingBox.BottomLeft.X - (decimal)newLocList[0].BoundingBox.BottomLeft.X) < 50.0m;
     }
 }

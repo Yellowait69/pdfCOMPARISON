@@ -46,8 +46,9 @@ public partial class SemanticSimilarityService : ISemanticSimilarityService
 
     public bool IsVolatile(string text)
     {
-        // La recherche dans le HashSet est maintenant instantanée
-        return StopWords.Contains(text) || text.Length <= 4 || IsNumber(text) || IsDate(text);
+        // CORRECTION ICI : On retire IsDate(text).
+        // Une date ne doit pas être volatile car elle est très spécifique.
+        return StopWords.Contains(text) || text.Length <= 4 || IsNumber(text);
     }
 
     public bool AreConceptuallySimilar(string a, string b)
@@ -58,9 +59,13 @@ public partial class SemanticSimilarityService : ISemanticSimilarityService
 
         if (a.Length >= 4 && b.Length >= 4)
         {
-            // OPTIMISATION : Ignorer la casse de manière performante
-            if (b.Contains(a, StringComparison.OrdinalIgnoreCase) || a.Contains(b, StringComparison.OrdinalIgnoreCase))
+            // CORRECTION ICI : Remplacement de .Contains() par une Regex stricte avec \b
+            // Cela empêche un petit mot comme "elle" de s'associer à l'intérieur de "réelle".
+            if (Regex.IsMatch(b, $@"\b{Regex.Escape(a)}\b", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(a, $@"\b{Regex.Escape(b)}\b", RegexOptions.IgnoreCase))
+            {
                 return true;
+            }
         }
 
         if (a.Length >= 4 && b.Length >= 4 && Math.Abs(a.Length - b.Length) <= 2)

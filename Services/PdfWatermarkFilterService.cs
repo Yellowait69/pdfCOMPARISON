@@ -13,7 +13,8 @@ public interface IPdfWatermarkFilterService
 
 public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
 {
-    [GeneratedRegex(@"(?i)(specimen|cimen|speci|men|test|totein|Q000|D000|P000|A000)")]
+    // Ajout de "ecimien" à la Regex
+    [GeneratedRegex(@"(?i)(specimen|cimen|speci|men|test|totein|ecimien|Q000|D000|P000|A000)")]
     private static partial Regex WatermarkTextRegex();
 
     [GeneratedRegex(@"\[\s*DOCUMENT\s+(SOURCE|CIBLE).*?\]", RegexOptions.IgnoreCase)]
@@ -33,9 +34,10 @@ public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
         "EN", "S", "P", "E", "C", "I", "M", "N", "Q", "D", "MEN", "SP", "SPE", "SPEC"
     };
 
+    // CORRECTION ICI : Ajout de "ECIMIEN" à la liste des fragments
     private static readonly string[] WatermarkFragments =
     {
-        "SPECIMEN", "SPECIME", "SPECIM", "PECIMEN", "ECIMEN", "CIMEN", "SPECI", "IMEN", "TOTEIN", "TEST"
+        "SPECIMEN", "SPECIME", "SPECIM", "PECIMEN", "ECIMEN", "CIMEN", "SPECI", "IMEN", "TOTEIN", "TEST", "ECIMIEN"
     };
 
     public string CleanRawText(string rawText)
