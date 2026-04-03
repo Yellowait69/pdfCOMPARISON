@@ -132,7 +132,7 @@ public class PdfDrawingService : IPdfDrawingService
                         new PdfPoint((double)boxX, (double)boxY),
                         boxWidth,
                         boxHeight,
-                        1.2m,     // Épaisseur du trait fin et élégant
+                        3.0m,     // Épaisseur du trait fin et élégant
                         false);   // false = pas de remplissage, le texte en dessous reste 100% visible !
 
                     // 2. Barre verticale épaisse dans la marge gauche pour attirer l'œil
@@ -140,7 +140,7 @@ public class PdfDrawingService : IPdfDrawingService
                     pageBuilder.DrawLine(
                         new PdfPoint((double)marginX, (double)boxY),
                         new PdfPoint((double)marginX, (double)(boxY + boxHeight)),
-                        4.0m      // Trait très épais et visible
+                        10.0m      // Trait très épais et visible
                     );
                     break;
             }
