@@ -27,7 +27,6 @@ public class AppSessionData
 
 public partial class MainViewModel : ObservableObject
 {
-    // Nouveaux services refactorisés
     private readonly PdfFileService _fileService;
     private readonly PdfComparisonOrchestrator _orchestrator;
 
@@ -53,13 +52,42 @@ public partial class MainViewModel : ObservableObject
 
     public MainViewModel()
     {
-        // Initialisation de la nouvelle architecture (Injection de dépendances manuelle)
         _fileService = new PdfFileService();
+
+        // ==============================================================
+        // ASSEMBLAGE DE LA NOUVELLE ARCHITECTURE MODULAIRE
+        // ==============================================================
+
+        // 1. Services d'extraction de données et de nettoyage
+        var textNormalizer = new PdfTextNormalizerService();
+        var watermarkFilter = new PdfWatermarkFilterService();
+        var intelligentMasking = new PdfIntelligentMaskingService();
+
+        var extractionService = new PdfExtractionService(
+            watermarkFilter,
+            intelligentMasking,
+            textNormalizer
+        );
+
+        // 2. Services d'analyse et de comparaison (Diff)
+        var semanticService = new SemanticSimilarityService();
+        var layoutSanitizer = new PdfLayoutSanitizerService();
+        var textSummaryService = new TextDiffSummaryService();
+        var visualMatcherService = new VisualHighlightMatcherService(semanticService);
+
+        var diffAnalyzer = new PdfDiffAnalyzer(
+            layoutSanitizer,
+            textSummaryService,
+            visualMatcherService
+        );
+
+        // 3. Orchestrateur principal
         _orchestrator = new PdfComparisonOrchestrator(
-            new PdfExtractionService(),
-            new PdfDiffAnalyzer(),
+            extractionService,
+            diffAnalyzer,
             new PdfReportGenerator()
         );
+        // ==============================================================
 
         // Save folder in "AppData/Roaming/PDFComparisonPro"
         string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);

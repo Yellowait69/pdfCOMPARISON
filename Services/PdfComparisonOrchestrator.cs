@@ -15,40 +15,41 @@ public class PdfComparisonOrchestrator
     private readonly PdfDiffAnalyzer _diffAnalyzer;
     private readonly PdfReportGenerator _reportGenerator;
 
+    // Injection de dépendances sécurisée
     public PdfComparisonOrchestrator(
         PdfExtractionService extractionService,
         PdfDiffAnalyzer diffAnalyzer,
         PdfReportGenerator reportGenerator)
     {
-        _extractionService = extractionService;
-        _diffAnalyzer = diffAnalyzer;
-        _reportGenerator = reportGenerator;
+        _extractionService = extractionService ?? throw new ArgumentNullException(nameof(extractionService));
+        _diffAnalyzer = diffAnalyzer ?? throw new ArgumentNullException(nameof(diffAnalyzer));
+        _reportGenerator = reportGenerator ?? throw new ArgumentNullException(nameof(reportGenerator));
     }
 
     public async Task ProcessPairsAsync(IEnumerable<DocumentPair> validPairs, string outputDiffDir, IProgress<int> progress, CancellationToken cancellationToken = default)
     {
+        if (validPairs == null) throw new ArgumentNullException(nameof(validPairs));
+
         int completed = 0;
         var allSummaries = new ConcurrentBag<DocumentDiffSummary>();
 
-        // Environment.ProcessorCount is good, but sometimes leaving it to the ThreadPool default (-1)
-        // allows the runtime to manage I/O bound tasks (like reading PDFs) more efficiently.
+        // Limitation du parallélisme au nombre de cœurs logiques pour éviter de surcharger le disque (I/O Bound)
         var parallelOptions = new ParallelOptions
         {
             MaxDegreeOfParallelism = Environment.ProcessorCount,
             CancellationToken = cancellationToken
         };
 
-        // Parallel.ForEachAsync natively runs the delegate on ThreadPool threads
         await Parallel.ForEachAsync(validPairs, parallelOptions, (pair, ct) =>
         {
             try
             {
-                // Ensure we haven't been cancelled before starting a new heavy task
                 ct.ThrowIfCancellationRequested();
 
                 var sourceText = _extractionService.ExtractTextFast(pair.SourcePath);
                 var targetText = _extractionService.ExtractTextFast(pair.TargetPath!);
 
+                // Vérification rapide avant de lancer l'artillerie lourde (DiffPlex + Surbriallance)
                 if (string.Equals(sourceText, targetText, StringComparison.Ordinal))
                 {
                     pair.Status = CompareStatus.Identical;
@@ -57,7 +58,6 @@ public class PdfComparisonOrchestrator
                 }
                 else
                 {
-                    // Calling synchronous method directly since Parallel.ForEachAsync already runs this delegate on a background thread.
                     ProcessSinglePair(pair, sourceText, targetText, outputDiffDir, allSummaries, ct);
                 }
 
@@ -65,9 +65,14 @@ public class PdfComparisonOrchestrator
             }
             catch (OperationCanceledException)
             {
-                // User cancelled the operation
                 pair.Status = CompareStatus.Pending;
-                pair.ErrorMessage = "Cancelled";
+                pair.ErrorMessage = "Cancelled by user";
+            }
+            catch (IOException ex) // Capture spécifiquement les erreurs de fichiers (ex: fichier ouvert)
+            {
+                pair.Status = CompareStatus.Error;
+                pair.ErrorMessage = $"File access error (is it open?): {ex.Message}";
+                pair.DiffCount = -1;
             }
             catch (Exception ex)
             {
@@ -84,16 +89,31 @@ public class PdfComparisonOrchestrator
             return ValueTask.CompletedTask;
         });
 
-        // Outside of the Parallel loop, we use Task.Run for the final synchronous generation to keep UI responsive
+        // Génération du rapport de synthèse global (Synchrone mais exécuté en tâche de fond pour ne pas figer l'UI)
         if (!allSummaries.IsEmpty)
         {
-            await Task.Run(() => _reportGenerator.GenerateGlobalSynthesisReport(allSummaries.ToList(), outputDiffDir), cancellationToken);
+            await Task.Run(() =>
+            {
+                try
+                {
+                    _reportGenerator.GenerateGlobalSynthesisReport(allSummaries.ToList(), outputDiffDir);
+                }
+                catch (Exception ex)
+                {
+                    // Ne doit pas faire crasher l'application si seul le rapport global échoue
+                    System.Diagnostics.Debug.WriteLine($"Global Report Error: {ex.Message}");
+                }
+            }, cancellationToken);
         }
     }
 
-    // Removed 'async Task' and 'Task.Run' because this method is already being executed
-    // inside the background threads managed by Parallel.ForEachAsync.
-    private void ProcessSinglePair(DocumentPair pair, string sourceText, string targetText, string outputDiffDir, ConcurrentBag<DocumentDiffSummary> summariesBag, CancellationToken ct)
+    private void ProcessSinglePair(
+        DocumentPair pair,
+        string sourceText,
+        string targetText,
+        string outputDiffDir,
+        ConcurrentBag<DocumentDiffSummary> summariesBag,
+        CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -105,7 +125,7 @@ public class PdfComparisonOrchestrator
 
         ct.ThrowIfCancellationRequested();
 
-        // 1. Analyse métier (DiffPlex)
+        // 1. Appel au nouveau PdfDiffAnalyzer (refactorisé et allégé)
         var diffResult = _diffAnalyzer.AnalyzeDifferences(pair, cleanSource, cleanTarget, sourceWords, targetWords);
 
         pair.DiffCount = diffResult.DifferencesCount;
@@ -113,19 +133,34 @@ public class PdfComparisonOrchestrator
         if (diffResult.DifferencesCount > 0)
         {
             string reportPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{pair.MatchKey}.pdf");
-            pair.ReportPath = reportPath;
-            pair.Status = CompareStatus.Different;
-            pair.ErrorMessage = $"{diffResult.DifferencesCount} difference(s) detected";
 
             ct.ThrowIfCancellationRequested();
 
-            // 2. Génération du rendu (PdfPig)
-            _reportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, reportPath, diffResult.Highlights);
+            // 2. Génération du rendu avec gestion des verrous système (File Lock)
+            try
+            {
+                _reportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, reportPath, diffResult.Highlights);
+
+                pair.ReportPath = reportPath;
+                pair.Status = CompareStatus.Different;
+                pair.ErrorMessage = $"{diffResult.DifferencesCount} difference(s) detected";
+            }
+            catch (IOException)
+            {
+                // Si le fichier est verrouillé (ex: ouvert par l'utilisateur), on tente de créer une version horodatée
+                string fallbackPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{pair.MatchKey}_{DateTime.Now:HHmmss}.pdf");
+                _reportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, fallbackPath, diffResult.Highlights);
+
+                pair.ReportPath = fallbackPath;
+                pair.Status = CompareStatus.Different;
+                pair.ErrorMessage = $"{diffResult.DifferencesCount} difference(s) (Saved as new version)";
+            }
 
             summariesBag.Add(diffResult.Summary);
         }
         else
         {
+            // Élimination des "Faux Positifs" détectés par le moteur sémantique
             pair.Status = CompareStatus.Identical;
             pair.ErrorMessage = "False positives ignored";
         }
