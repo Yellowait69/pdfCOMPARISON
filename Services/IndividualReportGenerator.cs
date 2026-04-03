@@ -74,7 +74,8 @@ public class IndividualReportGenerator : IIndividualReportGenerator
                 if (sourceYellowDict.TryGetValue(pageIndex, out var sYellow))
                     _drawingService.DrawDiffMarkup(sPage, sYellow, ColorOrange.R, ColorOrange.G, ColorOrange.B, MarkupStyle.Highlight);
 
-                _drawingService.DrawPageStamp(sPage, $"[ DOCUMENT SOURCE - Page {pageIndex} ]", fontBold);
+                // CORRECTION ICI : Envoi du texte court tout en bas
+                _drawingService.DrawPageStamp(sPage, "SOURCE", fontBold);
             }
 
             // === TRAITEMENT DE LA PAGE DU DOCUMENT CIBLE ===
@@ -88,7 +89,8 @@ public class IndividualReportGenerator : IIndividualReportGenerator
                 if (targetYellowDict.TryGetValue(pageIndex, out var tYellow))
                     _drawingService.DrawDiffMarkup(tPage, tYellow, ColorOrange.R, ColorOrange.G, ColorOrange.B, MarkupStyle.Highlight);
 
-                _drawingService.DrawPageStamp(tPage, $"[ DOCUMENT CIBLE (Modifié) - Page {pageIndex} ]", fontBold);
+                // CORRECTION ICI : Envoi du texte court tout en bas
+                _drawingService.DrawPageStamp(tPage, "TARGET", fontBold);
             }
         }
 
