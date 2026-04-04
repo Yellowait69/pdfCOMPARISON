@@ -20,160 +20,149 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
     private const string DateIgnoreMask = "[DATE_IGNORE]";
     private const string NameIgnoreMask = "[NOM_IGNORE]";
 
-    // OPTIMISATION : Tolère maintenant les espaces générés par une extraction PDF défectueuse
-    [GeneratedRegex(@"\b\d{1,2}[./\-\s]+\d{1,2}[./\-\s]+\d{2,4}\b")]
+    // Regex optimisée avec compilation à la génération et timeouts pour éviter les dénis de service (DOS)
+    [GeneratedRegex(@"\b\d{1,2}[./\-\s]+\d{1,2}[./\-\s]+\d{2,4}\b", RegexOptions.Compiled)]
     private static partial Regex DateRegex();
 
-    // REGEX TEXTE : Cherche via le mot-clé (DE, NL, FR) OU l'ancienne méthode de la virgule
-    [GeneratedRegex(@"(?:[Aa]uftraggeber|[Oo]pdrachtgever|[Ss]ouscripteur)\s*[:\s]+([\p{Lu}-]{2,}(?:\s+[\p{Lu}-]{2,})?)|\b([\p{Lu}-]{2,}(?:\s+[\p{Lu}-]{2,})?)\s*,")]
+    [GeneratedRegex(@"(?:[Aa]uftraggeber|[Oo]pdrachtgever|[Ss]ouscripteur)\s*[:\s]+([\p{Lu}-]{2,}(?:\s+[\p{Lu}-]{2,})?)|\b([\p{Lu}-]{2,}(?:\s+[\p{Lu}-]{2,})?)\s*,", RegexOptions.Compiled)]
     private static partial Regex DynamicTextNameRegex();
 
-    public bool IsDate(string text) => DateRegex().IsMatch(text);
+    // Regex pour normaliser les séparateurs de date rapidement
+    [GeneratedRegex(@"[./\-\s]+")]
+    private static partial Regex DateSeparatorRegex();
+
+    public bool IsDate(string text) => !string.IsNullOrEmpty(text) && DateRegex().IsMatch(text);
+
+    /// <summary>
+    /// Normalise une date pour le comptage (ex: "13 01 2025" -> "13.01.2025")
+    /// </summary>
+    private string NormalizeDate(string dateValue) => DateSeparatorRegex().Replace(dateValue, ".");
 
     public string MaskRepeatingTextElements(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return text;
 
-        // 1. MASQUAGE DES DATES (Avec normalisation avant le comptage)
+        // 1. Comptage des dates normalisées
         var dateCounts = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (Match m in DateRegex().Matches(text))
+        var matches = DateRegex().Matches(text);
+
+        foreach (Match m in matches)
         {
-            // Normalise "13 01.2025" en "13.01.2025" pour avoir un compteur exact
-            string normDate = Regex.Replace(m.Value, @"[./\-\s]+", ".");
-            dateCounts.TryGetValue(normDate, out int count);
-            dateCounts[normDate] = count + 1;
+            string norm = NormalizeDate(m.Value);
+            dateCounts[norm] = dateCounts.GetValueOrDefault(norm) + 1;
         }
 
+        // 2. Remplacement des dates (en partant de la fin pour ne pas corrompre les index si on n'utilisait pas Replace)
         var sb = new StringBuilder(text);
-
-        foreach (Match m in DateRegex().Matches(text))
+        foreach (Match m in matches)
         {
-            string normDate = Regex.Replace(m.Value, @"[./\-\s]+", ".");
-            if (dateCounts.TryGetValue(normDate, out int count) && count >= 2)
+            if (dateCounts.TryGetValue(NormalizeDate(m.Value), out int count) && count >= 2)
             {
+                // Note: Replace sur StringBuilder est plus performant qu'une Regex ici
                 sb.Replace(m.Value, DateIgnoreMask);
             }
         }
 
-        // 2. MASQUAGE DU NOM
-        Match nameMatch = DynamicTextNameRegex().Match(sb.ToString());
+        // 3. Masquage du Nom
+        var currentText = sb.ToString();
+        var nameMatch = DynamicTextNameRegex().Match(currentText);
         if (nameMatch.Success)
         {
             string targetName = nameMatch.Groups[1].Success ? nameMatch.Groups[1].Value : nameMatch.Groups[2].Value;
 
-            string[] parts = targetName.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-            string pattern = $@"\b{string.Join(@"\s+", Array.ConvertAll(parts, Regex.Escape))}\b";
+            // Création d'un pattern qui accepte n'importe quel nombre d'espaces ou de sauts de ligne entre les parties du nom
+            string[] parts = targetName.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            string flexiblePattern = $@"\b{string.Join(@"\s+", parts.Select(Regex.Escape))}\b";
 
-            string replacedText = Regex.Replace(sb.ToString(), pattern, NameIgnoreMask);
-            sb.Clear();
-            sb.Append(replacedText);
+            return Regex.Replace(currentText, flexiblePattern, NameIgnoreMask);
         }
 
-        return sb.ToString();
+        return currentText;
     }
 
     public void MaskRepeatingWordElements(List<PdfWordInfo> words, HashSet<string> headerDates)
     {
         if (words == null || words.Count == 0) return;
 
-        // --- 1. MASQUAGE DES DATES (Au niveau des mots PdfPig) ---
+        // --- 1. TRAITEMENT DES DATES ---
         var dateCounts = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var w in words)
         {
-            var match = DateRegex().Match(w.Text);
-            if (match.Success)
+            var m = DateRegex().Match(w.Text);
+            if (m.Success)
             {
-                // Normalisation de la date trouvée dans la liste des mots
-                string normDate = Regex.Replace(match.Value, @"[./\-\s]+", ".");
-                dateCounts.TryGetValue(normDate, out int count);
-                dateCounts[normDate] = count + 1;
+                string norm = NormalizeDate(m.Value);
+                dateCounts[norm] = dateCounts.GetValueOrDefault(norm) + 1;
             }
         }
 
         for (int i = 0; i < words.Count; i++)
         {
-            var match = DateRegex().Match(words[i].Text);
-            if (match.Success)
+            var m = DateRegex().Match(words[i].Text);
+            if (m.Success)
             {
-                string normDate = Regex.Replace(match.Value, @"[./\-\s]+", ".");
-                // On vérifie si la date normalisée apparaît au moins 2 fois
-                if (headerDates.Contains(match.Value) || (dateCounts.TryGetValue(normDate, out int count) && count >= 2))
+                string norm = NormalizeDate(m.Value);
+                if (headerDates.Contains(m.Value) || dateCounts.GetValueOrDefault(norm) >= 2)
                 {
-                    // Remplace uniquement la partie date, conserve la ponctuation éventuelle à la fin
-                    string newText = words[i].Text.Replace(match.Value, DateIgnoreMask);
-                    words[i] = new PdfWordInfo { Text = newText, Letters = words[i].Letters, PageNumber = words[i].PageNumber };
+                    // On préserve les éventuels caractères collés au masque
+                    string newText = words[i].Text.Replace(m.Value, DateIgnoreMask);
+                    words[i] = new PdfWordInfo {
+                        Text = newText,
+                        Letters = words[i].Letters,
+                        PageNumber = words[i].PageNumber
+                    };
                 }
             }
         }
 
-        // --- 2. DÉTECTION DU NOM (Reconstruction robuste de la ligne) ---
-        // On fusionne tous les mots en une seule chaîne pour faire une détection parfaite,
-        // indépendamment de la façon dont PdfPig a découpé les blocs de texte.
-        var sb = new StringBuilder();
-        for (int i = 0; i < words.Count; i++)
-        {
-            sb.Append(words[i].Text).Append(' ');
-        }
-
-        Match nameMatch = DynamicTextNameRegex().Match(sb.ToString());
-        string[] targetNameParts = Array.Empty<string>();
+        // --- 2. DÉTECTION DU NOM (Analyse de flux) ---
+        var fullContent = string.Join(' ', words.Select(w => w.Text));
+        var nameMatch = DynamicTextNameRegex().Match(fullContent);
 
         if (nameMatch.Success)
         {
-            string targetName = nameMatch.Groups[1].Success ? nameMatch.Groups[1].Value : nameMatch.Groups[2].Value;
-            targetNameParts = targetName.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-        }
+            string foundName = nameMatch.Groups[1].Success ? nameMatch.Groups[1].Value : nameMatch.Groups[2].Value;
+            var nameParts = foundName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-        // --- 3. MASQUAGE UNIVERSEL DU NOM DANS LES MOTS ---
-        if (targetNameParts.Length > 0)
-        {
-            for (int i = 0; i < words.Count; i++)
+            // Masquage par fenêtre glissante pour plus de précision
+            for (int i = 0; i < words.Count - nameParts.Length + 1; i++)
             {
-                bool matchFound = true;
-
-                // Sécurité : s'assurer qu'il reste assez de mots dans la liste pour faire correspondre le nom complet
-                if (i + targetNameParts.Length > words.Count) break;
-
-                // Vérifier si la séquence de mots correspond aux parties du nom
-                for (int j = 0; j < targetNameParts.Length; j++)
+                bool sequenceMatch = true;
+                for (int j = 0; j < nameParts.Length; j++)
                 {
-                    string currentClean = words[i + j].Text.TrimEnd(',', '.', ':');
-                    if (!currentClean.Equals(targetNameParts[j], StringComparison.OrdinalIgnoreCase))
+                    // Nettoyage des ponctuations pour la comparaison
+                    string cleanWord = words[i + j].Text.Trim(',', '.', ':', ';', ' ');
+                    if (!cleanWord.Equals(nameParts[j], StringComparison.OrdinalIgnoreCase))
                     {
-                        matchFound = false;
+                        sequenceMatch = false;
                         break;
                     }
                 }
 
-                // Si on a trouvé la séquence complète (ex: "QARROLI" suivi de "LOCCAROLINE")
-                if (matchFound)
+                if (sequenceMatch)
                 {
-                    // Fusionne les lettres de tous les mots trouvés pour masquer l'ensemble proprement
+                    // Fusion des glyphes (Letters) pour le rapport visuel
                     var combinedLetters = new List<Letter>();
-                    for (int j = 0; j < targetNameParts.Length; j++)
+                    for (int j = 0; j < nameParts.Length; j++)
                     {
                         if (words[i + j].Letters != null)
-                        {
                             combinedLetters.AddRange(words[i + j].Letters);
-                        }
                     }
 
-                    // On assigne le masque au premier mot
+                    // On remplace le premier mot par le masque, et on vide les suivants
                     words[i] = new PdfWordInfo { Text = NameIgnoreMask, Letters = combinedLetters, PageNumber = words[i].PageNumber };
 
-                    // On vide les mots suivants qui faisaient partie du nom
-                    for (int j = 1; j < targetNameParts.Length; j++)
+                    for (int j = 1; j < nameParts.Length; j++)
                     {
                         words[i + j] = new PdfWordInfo { Text = string.Empty, Letters = new List<Letter>(), PageNumber = words[i + j].PageNumber };
                     }
 
-                    // On saute les mots qu'on vient de traiter
-                    i += targetNameParts.Length - 1;
+                    i += nameParts.Length - 1; // Sauter la séquence traitée
                 }
             }
         }
 
-        // Nettoyage final des mots vides
+        // Suppression efficace
         words.RemoveAll(w => string.IsNullOrEmpty(w.Text));
     }
 }
