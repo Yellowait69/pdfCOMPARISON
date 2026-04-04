@@ -34,19 +34,38 @@ public class PdfExtractionService
         {
             var currentLine = new StringBuilder();
             double lastY = -1;
+            double lastX = -1; // AJOUT : Mémorise la coordonnée X de la fin du mot précédent
 
             foreach (var word in page.GetWords())
             {
                 // FILTRE CRITIQUE : Ignorer les mots invisibles (Artefacts OCR)
                 if (IsHiddenOrWhiteWord(word)) continue;
 
+                // Changement de ligne détecté
                 if (lastY != -1 && Math.Abs(word.BoundingBox.BottomLeft.Y - lastY) > 5.0)
                 {
                     sb.AppendLine(_watermarkFilter.CleanRawText(currentLine.ToString().TrimEnd()));
                     currentLine.Clear();
+                    lastX = -1; // Réinitialiser l'axe X pour la nouvelle ligne
                 }
 
-                currentLine.Append(word.Text).Append(' ');
+                // AJOUT : Calcul de la distance avec le mot précédent pour ajouter ou non un espace
+                if (lastX != -1)
+                {
+                    double distance = word.BoundingBox.BottomLeft.X - lastX;
+
+                    // Si l'écart horizontal est suffisant (> 2.0 points), on insère un espace.
+                    // Sinon, on considère que le texte est "collé" (ex: "13", ".", "01")
+                    if (distance > 2.0)
+                    {
+                        currentLine.Append(' ');
+                    }
+                }
+
+                currentLine.Append(word.Text);
+
+                // Mémoriser la position X de la fin de ce mot et le Y actuel
+                lastX = word.BoundingBox.TopRight.X;
                 lastY = word.BoundingBox.BottomLeft.Y;
             }
 
@@ -111,6 +130,11 @@ public class PdfExtractionService
     private bool IsHiddenOrWhiteWord(Word word)
     {
         if (word.Letters.Count == 0) return false;
+
+        // AJOUT : Sauvegarder la ponctuation, même si sa largeur est minuscule !
+        // Cela empêche le filtre anti-artefact de supprimer les points dans les dates "13.01.2025"
+        string text = word.Text.Trim();
+        if (text == "." || text == "," || text == "-" || text == "'") return false;
 
         var firstLetter = word.Letters[0];
 
