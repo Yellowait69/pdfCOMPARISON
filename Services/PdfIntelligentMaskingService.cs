@@ -1,10 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using PDFComparison.Models;
-using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Content; // AJOUT CRUCIAL ICI pour la classe Letter
 
 namespace PDFComparison.Services;
 
@@ -20,149 +19,199 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
     private const string DateIgnoreMask = "[DATE_IGNORE]";
     private const string NameIgnoreMask = "[NOM_IGNORE]";
 
-    // Regex optimisée avec compilation à la génération et timeouts pour éviter les dénis de service (DOS)
-    [GeneratedRegex(@"\b\d{1,2}[./\-\s]+\d{1,2}[./\-\s]+\d{2,4}\b", RegexOptions.Compiled)]
+    // OPTIMISATION : Ajout de l'espace (\s) et du "+" pour tolérer les espaces accidentels
+    // générés par l'extraction PDF (ex: "13 01.2025" ou "13. 01 .2025")
+    [GeneratedRegex(@"\b\d{1,2}[./\-\s]+\d{1,2}[./\-\s]+\d{2,4}\b")]
     private static partial Regex DateRegex();
 
-    [GeneratedRegex(@"(?:[Aa]uftraggeber|[Oo]pdrachtgever|[Ss]ouscripteur)\s*[:\s]+([\p{Lu}-]{2,}(?:\s+[\p{Lu}-]{2,})?)|\b([\p{Lu}-]{2,}(?:\s+[\p{Lu}-]{2,})?)\s*,", RegexOptions.Compiled)]
+    // NOUVEAU : Regex pour identifier les mots-clés qui précèdent un nom de client (DE, NL, FR)
+    [GeneratedRegex(@"^([Aa]uftraggeber|[Oo]pdrachtgever|[Ss]ouscripteur):?$")]
+    private static partial Regex ClientKeywordRegex();
+
+    // REGEX TEXTE : Cherche via le mot-clé OU via l'ancienne méthode de la virgule.
+    // On n'utilise pas (?i) globalement pour ne pas casser la détection stricte des majuscules \p{Lu}.
+    [GeneratedRegex(@"(?:[Aa]uftraggeber|[Oo]pdrachtgever|[Ss]ouscripteur)\s*[:\s]+([\p{Lu}-]{2,}(?:\s+[\p{Lu}-]{2,})?)|\b([\p{Lu}-]{2,}(?:\s+[\p{Lu}-]{2,})?)\s*,")]
     private static partial Regex DynamicTextNameRegex();
 
-    // Regex pour normaliser les séparateurs de date rapidement
-    [GeneratedRegex(@"[./\-\s]+")]
-    private static partial Regex DateSeparatorRegex();
+    // REGEX MOTS (PdfPig) : Identifie un mot en majuscules (au moins 2 lettres), avec une virgule optionnelle collée.
+    [GeneratedRegex(@"^([\p{Lu}-]{2,})(,?)$")]
+    private static partial Regex UpperWordRegex();
 
-    public bool IsDate(string text) => !string.IsNullOrEmpty(text) && DateRegex().IsMatch(text);
-
-    /// <summary>
-    /// Normalise une date pour le comptage (ex: "13 01 2025" -> "13.01.2025")
-    /// </summary>
-    private string NormalizeDate(string dateValue) => DateSeparatorRegex().Replace(dateValue, ".");
+    public bool IsDate(string text) => DateRegex().IsMatch(text);
 
     public string MaskRepeatingTextElements(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return text;
 
-        // 1. Comptage des dates normalisées
         var dateCounts = new Dictionary<string, int>(StringComparer.Ordinal);
-        var matches = DateRegex().Matches(text);
-
-        foreach (Match m in matches)
+        foreach (Match m in DateRegex().Matches(text))
         {
-            string norm = NormalizeDate(m.Value);
-            dateCounts[norm] = dateCounts.GetValueOrDefault(norm) + 1;
+            dateCounts.TryGetValue(m.Value, out int count);
+            dateCounts[m.Value] = count + 1;
         }
 
-        // 2. Remplacement des dates (en partant de la fin pour ne pas corrompre les index si on n'utilisait pas Replace)
         var sb = new StringBuilder(text);
-        foreach (Match m in matches)
+
+        foreach (var kvp in dateCounts)
         {
-            if (dateCounts.TryGetValue(NormalizeDate(m.Value), out int count) && count >= 2)
-            {
-                // Note: Replace sur StringBuilder est plus performant qu'une Regex ici
-                sb.Replace(m.Value, DateIgnoreMask);
-            }
+            if (kvp.Value >= 2) sb.Replace(kvp.Key, DateIgnoreMask);
         }
 
-        // 3. Masquage du Nom
-        var currentText = sb.ToString();
-        var nameMatch = DynamicTextNameRegex().Match(currentText);
+        // --- DÉTECTION DU NOM (Par mot-clé ou par virgule) ---
+        Match nameMatch = DynamicTextNameRegex().Match(sb.ToString());
         if (nameMatch.Success)
         {
+            // Le groupe 1 contient le nom trouvé via le mot-clé (ex: "Auftraggeber QARROLI")
+            // Le groupe 2 contient le nom trouvé via la virgule (ex: "QARROLI,")
             string targetName = nameMatch.Groups[1].Success ? nameMatch.Groups[1].Value : nameMatch.Groups[2].Value;
 
-            // Création d'un pattern qui accepte n'importe quel nombre d'espaces ou de sauts de ligne entre les parties du nom
-            string[] parts = targetName.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            string flexiblePattern = $@"\b{string.Join(@"\s+", parts.Select(Regex.Escape))}\b";
+            // --- REMPLACEMENT SOUPLE (Espaces variables, avec ou sans virgule) ---
+            string[] parts = targetName.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            string pattern = $@"\b{string.Join(@"\s+", Array.ConvertAll(parts, Regex.Escape))}\b";
 
-            return Regex.Replace(currentText, flexiblePattern, NameIgnoreMask);
+            string replacedText = Regex.Replace(sb.ToString(), pattern, NameIgnoreMask);
+            sb.Clear();
+            sb.Append(replacedText);
         }
 
-        return currentText;
+        return sb.ToString();
     }
 
     public void MaskRepeatingWordElements(List<PdfWordInfo> words, HashSet<string> headerDates)
     {
         if (words == null || words.Count == 0) return;
 
-        // --- 1. TRAITEMENT DES DATES ---
         var dateCounts = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var w in words)
         {
-            var m = DateRegex().Match(w.Text);
-            if (m.Success)
+            var match = DateRegex().Match(w.Text);
+            if (match.Success)
             {
-                string norm = NormalizeDate(m.Value);
-                dateCounts[norm] = dateCounts.GetValueOrDefault(norm) + 1;
+                dateCounts.TryGetValue(match.Value, out int count);
+                dateCounts[match.Value] = count + 1;
             }
         }
 
         for (int i = 0; i < words.Count; i++)
         {
-            var m = DateRegex().Match(words[i].Text);
-            if (m.Success)
+            var match = DateRegex().Match(words[i].Text);
+            if (match.Success && (headerDates.Contains(match.Value) || (dateCounts.TryGetValue(match.Value, out int count) && count >= 2)))
             {
-                string norm = NormalizeDate(m.Value);
-                if (headerDates.Contains(m.Value) || dateCounts.GetValueOrDefault(norm) >= 2)
-                {
-                    // On préserve les éventuels caractères collés au masque
-                    string newText = words[i].Text.Replace(m.Value, DateIgnoreMask);
-                    words[i] = new PdfWordInfo {
-                        Text = newText,
-                        Letters = words[i].Letters,
-                        PageNumber = words[i].PageNumber
-                    };
-                }
+                words[i] = new PdfWordInfo { Text = DateIgnoreMask, Letters = words[i].Letters, PageNumber = words[i].PageNumber };
             }
         }
 
-        // --- 2. DÉTECTION DU NOM (Analyse de flux) ---
-        var fullContent = string.Join(' ', words.Select(w => w.Text));
-        var nameMatch = DynamicTextNameRegex().Match(fullContent);
+        // --- 1. DÉTECTION STRICTE DU PREMIER NOM ---
+        string[] targetNameParts = Array.Empty<string>();
 
-        if (nameMatch.Success)
+        for (int i = 0; i < words.Count; i++)
         {
-            string foundName = nameMatch.Groups[1].Success ? nameMatch.Groups[1].Value : nameMatch.Groups[2].Value;
-            var nameParts = foundName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-            // Masquage par fenêtre glissante pour plus de précision
-            for (int i = 0; i < words.Count - nameParts.Length + 1; i++)
+            // STRATÉGIE 1 : Détection ancrée sur le mot-clé ("Auftraggeber", "Opdrachtgever"...)
+            if (ClientKeywordRegex().IsMatch(words[i].Text))
             {
-                bool sequenceMatch = true;
-                for (int j = 0; j < nameParts.Length; j++)
+                if (i + 1 < words.Count)
                 {
-                    // Nettoyage des ponctuations pour la comparaison
-                    string cleanWord = words[i + j].Text.Trim(',', '.', ':', ';', ' ');
-                    if (!cleanWord.Equals(nameParts[j], StringComparison.OrdinalIgnoreCase))
+                    var matchNext1 = UpperWordRegex().Match(words[i + 1].Text);
+                    if (matchNext1.Success) // Le mot suivant est en majuscule
                     {
-                        sequenceMatch = false;
+                        string word1 = matchNext1.Groups[1].Value;
+
+                        // Vérifier s'il y a un 2ème nom/prénom en majuscule juste après
+                        if (i + 2 < words.Count)
+                        {
+                            var matchNext2 = UpperWordRegex().Match(words[i + 2].Text);
+                            if (matchNext2.Success)
+                            {
+                                targetNameParts = new[] { word1, matchNext2.Groups[1].Value };
+                                break;
+                            }
+                        }
+
+                        // Sinon on ne garde que le premier mot
+                        targetNameParts = new[] { word1 };
                         break;
                     }
                 }
+            }
 
-                if (sequenceMatch)
+            // STRATÉGIE 2 : Rétrocompatibilité (Mots en majuscules suivis d'une virgule)
+            var match1 = UpperWordRegex().Match(words[i].Text);
+            if (match1.Success && targetNameParts.Length == 0) // Exécuté seulement si la Stratégie 1 n'a rien trouvé
+            {
+                string word1 = match1.Groups[1].Value;
+                bool hasComma1 = match1.Groups[2].Value == ",";
+
+                if (hasComma1)
                 {
-                    // Fusion des glyphes (Letters) pour le rapport visuel
-                    var combinedLetters = new List<Letter>();
-                    for (int j = 0; j < nameParts.Length; j++)
+                    targetNameParts = new[] { word1 };
+                    break;
+                }
+
+                if (i + 1 < words.Count)
+                {
+                    if (words[i + 1].Text == ",")
                     {
-                        if (words[i + j].Letters != null)
-                            combinedLetters.AddRange(words[i + j].Letters);
+                        targetNameParts = new[] { word1 };
+                        break;
                     }
 
-                    // On remplace le premier mot par le masque, et on vide les suivants
-                    words[i] = new PdfWordInfo { Text = NameIgnoreMask, Letters = combinedLetters, PageNumber = words[i].PageNumber };
-
-                    for (int j = 1; j < nameParts.Length; j++)
+                    var match2 = UpperWordRegex().Match(words[i + 1].Text);
+                    if (match2.Success)
                     {
-                        words[i + j] = new PdfWordInfo { Text = string.Empty, Letters = new List<Letter>(), PageNumber = words[i + j].PageNumber };
-                    }
+                        string word2 = match2.Groups[1].Value;
+                        bool hasComma2 = match2.Groups[2].Value == ",";
 
-                    i += nameParts.Length - 1; // Sauter la séquence traitée
+                        if (hasComma2)
+                        {
+                            targetNameParts = new[] { word1, word2 };
+                            break;
+                        }
+
+                        if (i + 2 < words.Count && words[i + 2].Text == ",")
+                        {
+                            targetNameParts = new[] { word1, word2 };
+                            break;
+                        }
+                    }
                 }
             }
         }
 
-        // Suppression efficace
+        // --- 2. MASQUAGE UNIVERSEL DANS TOUT LE DOCUMENT ---
+        if (targetNameParts.Length > 0)
+        {
+            for (int i = 0; i < words.Count; i++)
+            {
+                // On retire la virgule pour comparer le mot pur
+                string currentClean = words[i].Text.TrimEnd(',');
+
+                if (targetNameParts.Length == 1)
+                {
+                    if (currentClean.Equals(targetNameParts[0], StringComparison.OrdinalIgnoreCase))
+                    {
+                        words[i] = new PdfWordInfo { Text = NameIgnoreMask, Letters = words[i].Letters, PageNumber = words[i].PageNumber };
+                    }
+                }
+                else if (targetNameParts.Length == 2)
+                {
+                    if (currentClean.Equals(targetNameParts[0], StringComparison.OrdinalIgnoreCase) && i + 1 < words.Count)
+                    {
+                        string nextClean = words[i + 1].Text.TrimEnd(',');
+                        if (nextClean.Equals(targetNameParts[1], StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Fusion des Letters pour masquer les deux mots proprement
+                            var combinedLetters = new List<Letter>(words[i].Letters);
+                            combinedLetters.AddRange(words[i + 1].Letters);
+
+                            words[i] = new PdfWordInfo { Text = NameIgnoreMask, Letters = combinedLetters, PageNumber = words[i].PageNumber };
+                            words[i + 1] = new PdfWordInfo { Text = string.Empty, Letters = new List<Letter>(), PageNumber = words[i + 1].PageNumber };
+                            i++;
+                        }
+                    }
+                }
+            }
+        }
+
         words.RemoveAll(w => string.IsNullOrEmpty(w.Text));
     }
 }
