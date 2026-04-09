@@ -40,7 +40,7 @@ public class PdfExtractionService
             // pour attraper les numéros de pages et dates qui descendent très bas
             // sur les pages de signature ou de garde.
             double headerThresholdY = page.Height - 130.0;
-            double footerThresholdY = 80.0;
+            double footerThresholdY = 40.0;
             double leftMarginThresholdX = 50.0;
 
             foreach (var word in page.GetWords())
@@ -106,7 +106,7 @@ public class PdfExtractionService
         {
             // CORRECTION DÉFINITIVE : Marges alignées avec ExtractTextFast pour une synchronisation 1:1
             double headerThresholdY = page.Height - 130.0;
-            double footerThresholdY = 80.0;
+            double footerThresholdY = 40.0;
             double leftMarginThresholdX = 50.0;
 
             foreach (var word in page.GetWords())

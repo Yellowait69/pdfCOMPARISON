@@ -37,7 +37,7 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         // Initialisation avec une estimation de capacité pour éviter les redimensionnements coûteux
         int estimatedDiffs = diffLinesModel.NewText.Lines.Count / 4;
 
-        // NOUVEAU : On stocke l'index de la ligne (la phrase) pour chaque mot
+        // On stocke l'index de la ligne (la phrase) pour chaque mot
         var globalDeletes = new List<(string CleanText, List<LetterLoc> Letters, int LineIndex)>(estimatedDiffs);
         var globalInserts = new List<(string CleanText, List<LetterLoc> Letters, int LineIndex)>(estimatedDiffs);
 
@@ -82,8 +82,6 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         bool[] matchedNew = new bool[insertsCount];
 
         // --- ÉTAPE A : Matcher de Phrases Entières (Déplacements de blocs) ---
-        // NOUVELLE LOGIQUE : On autorise un déplacement libre dans le document
-        // UNIQUEMENT si la séquence correspond à une phrase complète (même LineIndex du début à la fin).
         int idxDel = 0;
         while (idxDel < deletesCount)
         {
@@ -131,14 +129,15 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
                         bool isMatch = true;
                         for (int k = 0; k < delLen; k++)
                         {
-                            if (!string.Equals(globalDeletes[delStart + k].CleanText, globalInserts[insStart + k].CleanText))
+                            // MISE À JOUR : Utilisation du moteur sémantique pour tolérer les erreurs d'OCR ou petits slashs
+                            if (!_semanticService.AreConceptuallySimilar(globalDeletes[delStart + k].CleanText, globalInserts[insStart + k].CleanText))
                             {
                                 isMatch = false;
                                 break;
                             }
                         }
 
-                        // Match parfait ! La phrase entière a été déplacée.
+                        // Match ! La phrase entière a été déplacée.
                         if (isMatch)
                         {
                             for (int k = 0; k < delLen; k++)
@@ -172,8 +171,8 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
 
                 if (string.Equals(oldWord, globalInserts[j].CleanText))
                 {
-                    // RÈGLE STRICTE : Le mot isolé DOIT obligatoirement appartenir à la même phrase
-                    if (globalDeletes[i].LineIndex != globalInserts[j].LineIndex)
+                    // MISE À JOUR : Tolérance de décalage (Reflow). On autorise jusqu'à 5 lignes d'écart
+                    if (Math.Abs(globalDeletes[i].LineIndex - globalInserts[j].LineIndex) > 5)
                         continue;
 
                     // Maintien de la sécurité spatiale pour les anomalies de PDF superposés
@@ -200,8 +199,8 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
 
                 if (_semanticService.AreConceptuallySimilar(oldWord, globalInserts[j].CleanText))
                 {
-                    // RÈGLE STRICTE : Une modification sémantique n'est valable que dans la même phrase
-                    if (globalDeletes[i].LineIndex != globalInserts[j].LineIndex)
+                    // MISE À JOUR : Tolérance de décalage (Reflow). On autorise jusqu'à 2 lignes d'écart
+                    if (Math.Abs(globalDeletes[i].LineIndex - globalInserts[j].LineIndex) > 2)
                         continue;
 
                     // Vérification spatiale
@@ -218,7 +217,7 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         }
 
         // --- ÉTAPE D : Reliquat absolu (Rouge et Vert) ---
-        // Tous les mots isolés qui ont "voyagé" trop loin ou changé de phrase atterrissent ici
+        // Tous les mots isolés qui ont "voyagé" trop loin atterrissent ici
         for (int i = 0; i < deletesCount; i++)
         {
             if (!matchedOld[i])
