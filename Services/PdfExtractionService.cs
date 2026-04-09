@@ -36,10 +36,11 @@ public class PdfExtractionService
             double lastY = -1;
             double lastX = -1;
 
-            // NOUVEAU : Application stricte des mêmes marges que ExtractWords pour éviter toute désynchronisation.
-            // Marges légèrement augmentées (60 et 50) pour attraper les éléments qui flottent sur certaines pages.
-            double headerThresholdY = page.Height - 60.0;
-            double footerThresholdY = 50.0;
+            // CORRECTION DÉFINITIVE : Marge d'en-tête considérablement agrandie (130.0)
+            // pour attraper les numéros de pages et dates qui descendent très bas
+            // sur les pages de signature ou de garde.
+            double headerThresholdY = page.Height - 130.0;
+            double footerThresholdY = 80.0;
             double leftMarginThresholdX = 50.0;
 
             foreach (var word in page.GetWords())
@@ -103,9 +104,9 @@ public class PdfExtractionService
 
         foreach (var page in doc.GetPages())
         {
-            // NOUVEAU : Marges alignées avec ExtractTextFast pour une synchronisation 1:1
-            double headerThresholdY = page.Height - 60.0;
-            double footerThresholdY = 50.0;
+            // CORRECTION DÉFINITIVE : Marges alignées avec ExtractTextFast pour une synchronisation 1:1
+            double headerThresholdY = page.Height - 130.0;
+            double footerThresholdY = 80.0;
             double leftMarginThresholdX = 50.0;
 
             foreach (var word in page.GetWords())
@@ -121,10 +122,10 @@ public class PdfExtractionService
                     {
                         headerDatesToIgnore.Add(word.Text);
                     }
-                    continue;
+                    continue; // On ignore totalement tout ce qui est dans l'en-tête
                 }
 
-                if (word.BoundingBox.BottomLeft.Y < footerThresholdY) continue;
+                if (word.BoundingBox.BottomLeft.Y < footerThresholdY) continue; // On ignore le pied de page
                 if (word.BoundingBox.BottomLeft.X < leftMarginThresholdX) continue;
                 if (_watermarkFilter.IsWatermark(word)) continue;
 
