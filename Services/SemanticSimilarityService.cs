@@ -14,8 +14,7 @@ public interface ISemanticSimilarityService
 
 public partial class SemanticSimilarityService : ISemanticSimilarityService
 {
-    // MISE À JOUR ICI : Ajout de \s et + pour tolérer les espaces accidentels causés par l'OCR
-    [GeneratedRegex(@"\b\d{1,2}[./\-\s]+\d{1,2}[./\-\s]+\d{2,4}\b")]
+    [GeneratedRegex(@"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b")]
     private static partial Regex DateRegex();
 
     [GeneratedRegex(@"^\d{1,3}([.,]\d{3})*([.,]\d+)?%?$")]
