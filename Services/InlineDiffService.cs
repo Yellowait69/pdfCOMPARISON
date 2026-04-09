@@ -19,10 +19,11 @@ public partial class InlineDiffService : IInlineDiffService
     [GeneratedRegex(@"(?<=\s+)")]
     private static partial Regex SplitWordsRegex();
 
-    // Constantes de couleurs (Évite les "Magic Numbers" dispersés dans le code)
-    private static readonly (byte r, byte g, byte b) ColorDeleted = (200, 0, 0);       // Rouge
-    private static readonly (byte r, byte g, byte b) ColorInserted = (0, 150, 0);      // Vert
-    private static readonly (byte r, byte g, byte b) ColorUnchanged = (100, 100, 100); // Gris clair
+    // NOUVELLES COULEURS : Plus modernes et mieux séparées
+    private static readonly (byte r, byte g, byte b) ColorDeleted = (220, 38, 38);       // Rouge vif (Suppressions)
+    private static readonly (byte r, byte g, byte b) ColorInserted = (22, 163, 74);      // Vert vif (Ajouts)
+    private static readonly (byte r, byte g, byte b) ColorModified = (37, 99, 235);      // Bleu vif (Modifications)
+    private static readonly (byte r, byte g, byte b) ColorUnchanged = (100, 100, 100);   // Gris clair (Inchangé)
 
     public (List<(string Text, byte r, byte g, byte b, bool isBold)> Left,
             List<(string Text, byte r, byte g, byte b, bool isBold)> Right) GetInlineDiffChunks(string oldText, string newText)
@@ -50,22 +51,26 @@ public partial class InlineDiffService : IInlineDiffService
             // Traitement de la colonne de GAUCHE (Document Source)
             if (oLine.Type != ChangeType.Imaginary)
             {
-                // Unification des conditions (C# 9+)
                 bool isChanged = oLine.Type is ChangeType.Deleted or ChangeType.Modified;
-                var color = isChanged ? ColorDeleted : ColorUnchanged;
-                string cleanText = oLine.Text.Replace("\n", "");
 
+                // CORRECTION : Attribution de la bonne couleur selon le type exact
+                var color = oLine.Type == ChangeType.Deleted ? ColorDeleted :
+                           (oLine.Type == ChangeType.Modified ? ColorModified : ColorUnchanged);
+
+                string cleanText = oLine.Text.Replace("\n", "");
                 leftChunks.Add((cleanText, color.r, color.g, color.b, isChanged));
             }
 
             // Traitement de la colonne de DROITE (Document Cible)
             if (nLine.Type != ChangeType.Imaginary)
             {
-                // Unification des conditions
                 bool isChanged = nLine.Type is ChangeType.Inserted or ChangeType.Modified;
-                var color = isChanged ? ColorInserted : ColorUnchanged;
-                string cleanText = nLine.Text.Replace("\n", "");
 
+                // CORRECTION : Attribution de la bonne couleur selon le type exact
+                var color = nLine.Type == ChangeType.Inserted ? ColorInserted :
+                           (nLine.Type == ChangeType.Modified ? ColorModified : ColorUnchanged);
+
+                string cleanText = nLine.Text.Replace("\n", "");
                 rightChunks.Add((cleanText, color.r, color.g, color.b, isChanged));
             }
         }
