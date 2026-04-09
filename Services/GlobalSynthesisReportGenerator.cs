@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using DiffPlex;
+using DiffPlex.DiffBuilder;
 using DiffPlex.DiffBuilder.Model;
 using PDFComparison.Models;
 using UglyToad.PdfPig.Writer;
@@ -61,6 +63,10 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         var languageFileCounts = new Dictionary<string, int>();
         var languageDiffCounts = new Dictionary<string, int>();
 
+        // Moteur de Diff pour l'analyse au niveau du mot
+        var differ = new Differ();
+        var diffBuilder = new SideBySideDiffBuilder(differ);
+
         foreach (var doc in summaries)
         {
             string lang = string.IsNullOrWhiteSpace(doc.Language) ? "ND" : doc.Language;
@@ -76,9 +82,32 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
             foreach (var block in doc.Blocks)
             {
-                if (block.Type == ChangeType.Inserted) totalInserts++;
-                else if (block.Type == ChangeType.Deleted) totalDeletes++;
-                else if (block.Type == ChangeType.Modified) totalModifies++;
+                // CORRECTION : Comptage exact pour les graphiques ScottPlot (Mot par Mot)
+                if (block.Type == ChangeType.Inserted)
+                {
+                    totalInserts += block.NewText.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
+                }
+                else if (block.Type == ChangeType.Deleted)
+                {
+                    totalDeletes += block.OldText.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
+                }
+                else if (block.Type == ChangeType.Modified)
+                {
+                    string oldWords = string.Join("\n", block.OldText.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries));
+                    string newWords = string.Join("\n", block.NewText.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries));
+
+                    var wordDiff = diffBuilder.BuildDiffModel(oldWords, newWords);
+
+                    foreach (var line in wordDiff.NewText.Lines)
+                    {
+                        if (line.Type == ChangeType.Inserted) totalInserts++;
+                        else if (line.Type == ChangeType.Modified) totalModifies++;
+                    }
+                    foreach (var line in wordDiff.OldText.Lines)
+                    {
+                        if (line.Type == ChangeType.Deleted) totalDeletes++;
+                    }
+                }
 
                 string oldTxt = block.OldText ?? string.Empty;
                 string newTxt = block.NewText ?? string.Empty;

@@ -6,6 +6,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using DiffPlex;
+using DiffPlex.DiffBuilder;
+using DiffPlex.DiffBuilder.Model;
 using PDFComparison.Models;
 
 namespace PDFComparison.Services;
@@ -134,11 +137,44 @@ public class PdfComparisonOrchestrator
         var diffResult = _diffAnalyzer.AnalyzeDifferences(pair, cleanSource, cleanTarget, sourceWords, targetWords);
 
         // ==============================================================
-        // NOUVEAU : Calcul détaillé des types de différences pour l'UI
+        // CORRECTION : Calcul détaillé des types de différences pour l'UI (Mot par mot)
         // ==============================================================
-        int inserted = diffResult.Summary.Blocks.Count(b => b.Type == DiffPlex.DiffBuilder.Model.ChangeType.Inserted);
-        int deleted = diffResult.Summary.Blocks.Count(b => b.Type == DiffPlex.DiffBuilder.Model.ChangeType.Deleted);
-        int modified = diffResult.Summary.Blocks.Count(b => b.Type == DiffPlex.DiffBuilder.Model.ChangeType.Modified);
+        int inserted = 0;
+        int deleted = 0;
+        int modified = 0;
+
+        var differ = new Differ();
+        var diffBuilder = new SideBySideDiffBuilder(differ);
+
+        foreach (var block in diffResult.Summary.Blocks)
+        {
+            if (block.Type == ChangeType.Inserted)
+            {
+                inserted += block.NewText.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
+            }
+            else if (block.Type == ChangeType.Deleted)
+            {
+                deleted += block.OldText.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
+            }
+            else if (block.Type == ChangeType.Modified)
+            {
+                // On compare les mots à l'intérieur de la phrase modifiée
+                string oldWords = string.Join("\n", block.OldText.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries));
+                string newWords = string.Join("\n", block.NewText.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries));
+
+                var wordDiff = diffBuilder.BuildDiffModel(oldWords, newWords);
+
+                foreach (var line in wordDiff.NewText.Lines)
+                {
+                    if (line.Type == ChangeType.Inserted) inserted++;
+                    else if (line.Type == ChangeType.Modified) modified++;
+                }
+                foreach (var line in wordDiff.OldText.Lines)
+                {
+                    if (line.Type == ChangeType.Deleted) deleted++;
+                }
+            }
+        }
 
         if (Application.Current != null && Application.Current.Dispatcher != null)
         {
