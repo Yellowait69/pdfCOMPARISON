@@ -105,7 +105,9 @@ public class TextDiffSummaryService : ITextDiffSummaryService
 
                 blocks.Add(new DiffSummaryBlock
                 {
-                    Type = newLine.Type is not ChangeType.Unchanged ? newLine.Type : oldLine.Type,
+                    // CORRECTION ICI : On ne prend newLine.Type que si c'est vraiment un Ajout ou une Modif.
+                    // Sinon, on prend oldLine.Type (qui contiendra correctement "Deleted").
+                    Type = (newLine.Type is ChangeType.Inserted or ChangeType.Modified) ? newLine.Type : oldLine.Type,
                     ContextBefore = GetValidContextLine(diffLines.NewText.Lines, i, -1),
                     ContextAfter = GetValidContextLine(diffLines.NewText.Lines, i, 1),
                     OldText = (newLine.Type is ChangeType.Modified || oldLine.Type is ChangeType.Deleted) ? oldLine.Text : string.Empty,
