@@ -133,6 +133,30 @@ public class PdfComparisonOrchestrator
 
         var diffResult = _diffAnalyzer.AnalyzeDifferences(pair, cleanSource, cleanTarget, sourceWords, targetWords);
 
+        // ==============================================================
+        // NOUVEAU : Calcul détaillé des types de différences pour l'UI
+        // ==============================================================
+        int inserted = diffResult.Summary.Blocks.Count(b => b.Type == DiffPlex.DiffBuilder.Model.ChangeType.Inserted);
+        int deleted = diffResult.Summary.Blocks.Count(b => b.Type == DiffPlex.DiffBuilder.Model.ChangeType.Deleted);
+        int modified = diffResult.Summary.Blocks.Count(b => b.Type == DiffPlex.DiffBuilder.Model.ChangeType.Modified);
+
+        if (Application.Current != null && Application.Current.Dispatcher != null)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                pair.InsertedCount = inserted;
+                pair.DeletedCount = deleted;
+                pair.ModifiedCount = modified;
+            });
+        }
+        else
+        {
+            pair.InsertedCount = inserted;
+            pair.DeletedCount = deleted;
+            pair.ModifiedCount = modified;
+        }
+        // ==============================================================
+
         if (diffResult.DifferencesCount > 0)
         {
             string reportPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{pair.MatchKey}.pdf");
