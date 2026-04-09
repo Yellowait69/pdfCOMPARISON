@@ -35,11 +35,11 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
 
     public bool IsDate(string text) => DateRegex().IsMatch(text);
 
-    // NOUVEAU : Normalise une date pour un comptage fiable malgré les artefacts OCR
-    // (ex: le "." coupé par un filigrane et lu comme "/")
+    // Normalise une date pour un comptage fiable malgré les artefacts OCR
     private string NormalizeDateString(string date)
     {
-        return Regex.Replace(date, @"[/\-\s]+", ".");
+        // Remplace tout ce qui n'est pas un chiffre par un point
+        return Regex.Replace(date, @"[^\d]+", ".");
     }
 
     public string MaskRepeatingTextElements(string text)
@@ -48,7 +48,6 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
 
         var dateCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        // 1. Comptage basé sur les dates normalisées
         foreach (Match m in DateRegex().Matches(text))
         {
             string norm = NormalizeDateString(m.Value);
@@ -56,7 +55,6 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
             dateCounts[norm] = count + 1;
         }
 
-        // 2. Remplacement dynamique basé sur le dictionnaire normalisé
         string textWithMaskedDates = DateRegex().Replace(text, match =>
         {
             string norm = NormalizeDateString(match.Value);
@@ -64,20 +62,15 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
             {
                 return DateIgnoreMask;
             }
-            return match.Value; // On garde le texte original s'il n'est pas masqué
+            return match.Value;
         });
 
         var sb = new StringBuilder(textWithMaskedDates);
 
-        // --- DÉTECTION DU NOM (Par mot-clé ou par virgule) ---
         Match nameMatch = DynamicTextNameRegex().Match(sb.ToString());
         if (nameMatch.Success)
         {
-            // Le groupe 1 contient le nom trouvé via le mot-clé (ex: "Auftraggeber QARROLI")
-            // Le groupe 2 contient le nom trouvé via la virgule (ex: "QARROLI,")
             string targetName = nameMatch.Groups[1].Success ? nameMatch.Groups[1].Value : nameMatch.Groups[2].Value;
-
-            // --- REMPLACEMENT SOUPLE (Espaces variables, avec ou sans virgule) ---
             string[] parts = targetName.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
             string pattern = $@"\b{string.Join(@"\s+", Array.ConvertAll(parts, Regex.Escape))}\b";
 
@@ -93,55 +86,103 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
     {
         if (words == null || words.Count == 0) return;
 
-        // Normaliser le dictionnaire des dates d'en-tête pour la comparaison
         var normalizedHeaderDates = new HashSet<string>(headerDates.Select(NormalizeDateString), StringComparer.Ordinal);
-
         var dateCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        // 1. Comptage des mots normalisés
-        foreach (var w in words)
-        {
-            var match = DateRegex().Match(w.Text);
-            if (match.Success)
-            {
-                string norm = NormalizeDateString(match.Value);
-                dateCounts.TryGetValue(norm, out int count);
-                dateCounts[norm] = count + 1;
-            }
-        }
+        // =========================================================================
+        // NOUVELLE LOGIQUE : Reconstruction du texte complet pour contrer la découpe
+        // accidentelle des mots par PdfPig à cause des filigranes.
+        // =========================================================================
+        var sb = new StringBuilder();
+        var charToWord = new List<int>();
 
-        // 2. Application du masque
         for (int i = 0; i < words.Count; i++)
         {
-            var match = DateRegex().Match(words[i].Text);
-            if (match.Success)
+            foreach (char c in words[i].Text)
             {
-                string norm = NormalizeDateString(match.Value);
+                sb.Append(c);
+                charToWord.Add(i); // On mémorise à quel index de mot appartient chaque caractère
+            }
+            sb.Append(' ');
+            charToWord.Add(-1); // Les espaces artificiels n'appartiennent à aucun mot
+        }
 
-                // Si la date normalisée est dans l'en-tête OU apparaît >= 2 fois, on la masque
-                if (normalizedHeaderDates.Contains(norm) || (dateCounts.TryGetValue(norm, out int count) && count >= 2))
+        string fullText = sb.ToString();
+        var matches = DateRegex().Matches(fullText);
+
+        // 1. Comptage des mots normalisés sur le texte global
+        foreach (Match match in matches)
+        {
+            string norm = NormalizeDateString(match.Value);
+            dateCounts.TryGetValue(norm, out int count);
+            dateCounts[norm] = count + 1;
+        }
+
+        // 2. Application du masque et fusion des mots découpés
+        foreach (Match match in matches)
+        {
+            string norm = NormalizeDateString(match.Value);
+
+            if (normalizedHeaderDates.Contains(norm) || (dateCounts.TryGetValue(norm, out int count) && count >= 2))
+            {
+                int startWordIdx = -1;
+                int endWordIdx = -1;
+
+                // Retrouver quels mots exacts de PdfPig contiennent cette date
+                for (int c = match.Index; c < match.Index + match.Length; c++)
                 {
-                    words[i] = new PdfWordInfo { Text = DateIgnoreMask, Letters = words[i].Letters, PageNumber = words[i].PageNumber };
+                    int wIdx = charToWord[c];
+                    if (wIdx != -1)
+                    {
+                        if (startWordIdx == -1) startWordIdx = wIdx;
+                        endWordIdx = wIdx;
+                    }
+                }
+
+                if (startWordIdx != -1 && endWordIdx != -1)
+                {
+                    // Si le mot est déjà masqué, on l'ignore pour éviter les conflits
+                    if (words[startWordIdx].Text == DateIgnoreMask) continue;
+
+                    // Fusionner les coordonnées (Letters) de tous les fragments de la date
+                    var combinedLetters = new List<Letter>();
+                    for (int k = startWordIdx; k <= endWordIdx; k++)
+                    {
+                        if (words[k].Letters != null)
+                        {
+                            combinedLetters.AddRange(words[k].Letters);
+                        }
+
+                        // On vide les fragments suivants (ils seront supprimés plus bas)
+                        if (k > startWordIdx)
+                        {
+                            words[k] = new PdfWordInfo { Text = string.Empty, Letters = new List<Letter>(), PageNumber = words[k].PageNumber };
+                        }
+                    }
+
+                    // On place le Masque sur le premier fragment avec les coordonnées fusionnées
+                    words[startWordIdx] = new PdfWordInfo { Text = DateIgnoreMask, Letters = combinedLetters, PageNumber = words[startWordIdx].PageNumber };
                 }
             }
         }
 
-        // --- 1. DÉTECTION STRICTE DU PREMIER NOM ---
+        // Nettoyage des mots vidés par la fusion des dates
+        words.RemoveAll(w => string.IsNullOrEmpty(w.Text));
+
+        // --- 3. DÉTECTION STRICTE DU PREMIER NOM ---
         string[] targetNameParts = Array.Empty<string>();
 
         for (int i = 0; i < words.Count; i++)
         {
-            // STRATÉGIE 1 : Détection ancrée sur le mot-clé ("Auftraggeber", "Opdrachtgever"...)
             if (ClientKeywordRegex().IsMatch(words[i].Text))
             {
                 if (i + 1 < words.Count)
                 {
                     var matchNext1 = UpperWordRegex().Match(words[i + 1].Text);
-                    if (matchNext1.Success) // Le mot suivant est en majuscule
+                    if (matchNext1.Success)
                     {
                         string word1 = matchNext1.Groups[1].Value;
 
-                        // Vérifier s'il y a un 2ème nom/prénom en majuscule juste après
                         if (i + 2 < words.Count)
                         {
                             var matchNext2 = UpperWordRegex().Match(words[i + 2].Text);
@@ -152,16 +193,14 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
                             }
                         }
 
-                        // Sinon on ne garde que le premier mot
                         targetNameParts = new[] { word1 };
                         break;
                     }
                 }
             }
 
-            // STRATÉGIE 2 : Rétrocompatibilité (Mots en majuscules suivis d'une virgule)
             var match1 = UpperWordRegex().Match(words[i].Text);
-            if (match1.Success && targetNameParts.Length == 0) // Exécuté seulement si la Stratégie 1 n'a rien trouvé
+            if (match1.Success && targetNameParts.Length == 0)
             {
                 string word1 = match1.Groups[1].Value;
                 bool hasComma1 = match1.Groups[2].Value == ",";
@@ -202,12 +241,11 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
             }
         }
 
-        // --- 2. MASQUAGE UNIVERSEL DANS TOUT LE DOCUMENT ---
+        // --- 4. MASQUAGE UNIVERSEL DANS TOUT LE DOCUMENT ---
         if (targetNameParts.Length > 0)
         {
             for (int i = 0; i < words.Count; i++)
             {
-                // On retire la virgule pour comparer le mot pur
                 string currentClean = words[i].Text.TrimEnd(',');
 
                 if (targetNameParts.Length == 1)
@@ -224,7 +262,6 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
                         string nextClean = words[i + 1].Text.TrimEnd(',');
                         if (nextClean.Equals(targetNameParts[1], StringComparison.OrdinalIgnoreCase))
                         {
-                            // Fusion des Letters pour masquer les deux mots proprement
                             var combinedLetters = new List<Letter>(words[i].Letters);
                             combinedLetters.AddRange(words[i + 1].Letters);
 
