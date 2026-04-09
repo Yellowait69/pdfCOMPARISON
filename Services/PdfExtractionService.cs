@@ -34,12 +34,26 @@ public class PdfExtractionService
         {
             var currentLine = new StringBuilder();
             double lastY = -1;
-            double lastX = -1; // AJOUT : Mémorise la coordonnée X de la fin du mot précédent
+            double lastX = -1;
+
+            // NOUVEAU : Application stricte des mêmes marges que ExtractWords pour éviter toute désynchronisation.
+            // Marges légèrement augmentées (60 et 50) pour attraper les éléments qui flottent sur certaines pages.
+            double headerThresholdY = page.Height - 60.0;
+            double footerThresholdY = 50.0;
+            double leftMarginThresholdX = 50.0;
 
             foreach (var word in page.GetWords())
             {
+                if (string.IsNullOrWhiteSpace(word.Text)) continue;
+
                 // FILTRE CRITIQUE : Ignorer les mots invisibles (Artefacts OCR)
                 if (IsHiddenOrWhiteWord(word)) continue;
+
+                // NOUVEAU : Les filtres géométriques et de filigrane sont maintenant appliqués avant d'envoyer au Diff !
+                if (word.BoundingBox.BottomLeft.Y > headerThresholdY) continue;
+                if (word.BoundingBox.BottomLeft.Y < footerThresholdY) continue;
+                if (word.BoundingBox.BottomLeft.X < leftMarginThresholdX) continue;
+                if (_watermarkFilter.IsWatermark(word)) continue;
 
                 // Changement de ligne détecté
                 if (lastY != -1 && Math.Abs(word.BoundingBox.BottomLeft.Y - lastY) > 5.0)
@@ -49,7 +63,7 @@ public class PdfExtractionService
                     lastX = -1; // Réinitialiser l'axe X pour la nouvelle ligne
                 }
 
-                // AJOUT : Calcul de la distance avec le mot précédent pour ajouter ou non un espace
+                // Calcul de la distance avec le mot précédent pour ajouter ou non un espace
                 if (lastX != -1)
                 {
                     double distance = word.BoundingBox.BottomLeft.X - lastX;
@@ -89,8 +103,9 @@ public class PdfExtractionService
 
         foreach (var page in doc.GetPages())
         {
-            double headerThresholdY = page.Height - 50.0;
-            double footerThresholdY = 40.0;
+            // NOUVEAU : Marges alignées avec ExtractTextFast pour une synchronisation 1:1
+            double headerThresholdY = page.Height - 60.0;
+            double footerThresholdY = 50.0;
             double leftMarginThresholdX = 50.0;
 
             foreach (var word in page.GetWords())
@@ -131,7 +146,7 @@ public class PdfExtractionService
     {
         if (word.Letters.Count == 0) return false;
 
-        // AJOUT : Sauvegarder la ponctuation, même si sa largeur est minuscule !
+        // Sauvegarder la ponctuation, même si sa largeur est minuscule !
         // Cela empêche le filtre anti-artefact de supprimer les points dans les dates "13.01.2025"
         string text = word.Text.Trim();
         if (text == "." || text == "," || text == "-" || text == "'") return false;
