@@ -36,8 +36,10 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
 
         // Initialisation avec une estimation de capacité pour éviter les redimensionnements coûteux
         int estimatedDiffs = diffLinesModel.NewText.Lines.Count / 4;
-        var globalDeletes = new List<(string CleanText, List<LetterLoc> Letters)>(estimatedDiffs);
-        var globalInserts = new List<(string CleanText, List<LetterLoc> Letters)>(estimatedDiffs);
+
+        // NOUVEAU : On stocke l'index de la ligne (la phrase) pour chaque mot
+        var globalDeletes = new List<(string CleanText, List<LetterLoc> Letters, int LineIndex)>(estimatedDiffs);
+        var globalInserts = new List<(string CleanText, List<LetterLoc> Letters, int LineIndex)>(estimatedDiffs);
 
         int sLineIdx = 0, tLineIdx = 0;
         int diffLinesCount = diffLinesModel.NewText.Lines.Count;
@@ -56,12 +58,20 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
 
             if (oldLineDiff.Type is ChangeType.Deleted or ChangeType.Modified)
             {
-                if (hasS && sLine != null) globalDeletes.AddRange(sLine);
+                if (hasS && sLine != null)
+                {
+                    foreach (var item in sLine)
+                        globalDeletes.Add((item.CleanText, item.Letters, i)); // 'i' représente la phrase
+                }
             }
 
             if (newLineDiff.Type is ChangeType.Inserted or ChangeType.Modified)
             {
-                if (hasT && tLine != null) globalInserts.AddRange(tLine);
+                if (hasT && tLine != null)
+                {
+                    foreach (var item in tLine)
+                        globalInserts.Add((item.CleanText, item.Letters, i));
+                }
             }
         }
 
@@ -71,57 +81,82 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         bool[] matchedOld = new bool[deletesCount];
         bool[] matchedNew = new bool[insertsCount];
 
-        // --- ÉTAPE A : N-Gram Matcher (Blocs déplacés) ---
-        // Les séquences de mots (phrases de 2 mots ou plus) ont le droit d'être déplacées librement dans le document.
-        const int minSequenceLength = 2;
-        for (int i = 0; i <= deletesCount - minSequenceLength; i++)
+        // --- ÉTAPE A : Matcher de Phrases Entières (Déplacements de blocs) ---
+        // NOUVELLE LOGIQUE : On autorise un déplacement libre dans le document
+        // UNIQUEMENT si la séquence correspond à une phrase complète (même LineIndex du début à la fin).
+        int idxDel = 0;
+        while (idxDel < deletesCount)
         {
-            if (matchedOld[i]) continue;
-
-            int bestJ = -1, maxLen = 0;
-
-            for (int j = 0; j <= insertsCount - minSequenceLength; j++)
+            if (matchedOld[idxDel])
             {
-                if (matchedNew[j]) continue;
+                idxDel++;
+                continue;
+            }
 
-                int len = 0;
-                // Vérification rapide avec string.Equals pour les performances
-                while (i + len < deletesCount && j + len < insertsCount &&
-                       !matchedOld[i + len] && !matchedNew[j + len] &&
-                       string.Equals(globalDeletes[i + len].CleanText, globalInserts[j + len].CleanText))
-                {
-                    len++;
-                }
+            int currentLineIndex = globalDeletes[idxDel].LineIndex;
+            int delStart = idxDel;
+            int delLen = 0;
 
-                if (len > maxLen)
+            // Mesurer la longueur exacte de la phrase supprimée
+            while (idxDel + delLen < deletesCount && globalDeletes[idxDel + delLen].LineIndex == currentLineIndex)
+            {
+                delLen++;
+            }
+
+            // On ne cherche à déplacer que des phrases d'au moins 2 mots
+            if (delLen >= 2)
+            {
+                int idxIns = 0;
+                while (idxIns < insertsCount)
                 {
-                    bool isMeaningfulSequence = false;
-                    for (int k = 0; k < len; k++)
+                    if (matchedNew[idxIns])
                     {
-                        string word = globalDeletes[i + k].CleanText;
-                        if (word.Length > 2 && !_semanticService.IsNumber(word))
+                        idxIns++;
+                        continue;
+                    }
+
+                    int targetLineIndex = globalInserts[idxIns].LineIndex;
+                    int insStart = idxIns;
+                    int insLen = 0;
+
+                    // Mesurer la longueur de la phrase insérée
+                    while (idxIns + insLen < insertsCount && globalInserts[idxIns + insLen].LineIndex == targetLineIndex)
+                    {
+                        insLen++;
+                    }
+
+                    // Si les deux phrases ont exactement le même nombre de mots, on les compare
+                    if (delLen == insLen)
+                    {
+                        bool isMatch = true;
+                        for (int k = 0; k < delLen; k++)
                         {
-                            isMeaningfulSequence = true;
-                            break;
+                            if (!string.Equals(globalDeletes[delStart + k].CleanText, globalInserts[insStart + k].CleanText))
+                            {
+                                isMatch = false;
+                                break;
+                            }
+                        }
+
+                        // Match parfait ! La phrase entière a été déplacée.
+                        if (isMatch)
+                        {
+                            for (int k = 0; k < delLen; k++)
+                            {
+                                matchedOld[delStart + k] = true;
+                                matchedNew[insStart + k] = true;
+                            }
+                            break; // Phrase trouvée, on arrête de chercher dans les insertions
                         }
                     }
-                    if (isMeaningfulSequence)
-                    {
-                        maxLen = len;
-                        bestJ = j;
-                    }
+
+                    // Sauter à la prochaine phrase insérée
+                    idxIns += insLen;
                 }
             }
 
-            if (maxLen >= minSequenceLength)
-            {
-                for (int k = 0; k < maxLen; k++)
-                {
-                    matchedOld[i + k] = true;
-                    matchedNew[bestJ + k] = true;
-                }
-                i += maxLen - 1;
-            }
+            // Sauter à la prochaine phrase supprimée
+            idxDel += delLen;
         }
 
         // --- ÉTAPE B : Matcher de Mots Isolés Exacts ---
@@ -137,8 +172,11 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
 
                 if (string.Equals(oldWord, globalInserts[j].CleanText))
                 {
-                    // RÈGLE STRICTE : Si c'est un mot isolé, il DOIT être au même endroit (X, Y et Page).
-                    // Sinon, c'est considéré comme une suppression et un ajout indépendant.
+                    // RÈGLE STRICTE : Le mot isolé DOIT obligatoirement appartenir à la même phrase
+                    if (globalDeletes[i].LineIndex != globalInserts[j].LineIndex)
+                        continue;
+
+                    // Maintien de la sécurité spatiale pour les anomalies de PDF superposés
                     if (!IsLocallyClose(globalDeletes[i].Letters, globalInserts[j].Letters))
                         continue;
 
@@ -162,8 +200,11 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
 
                 if (_semanticService.AreConceptuallySimilar(oldWord, globalInserts[j].CleanText))
                 {
-                    // RÈGLE STRICTE : Une modification sémantique d'un mot isolé
-                    // n'est valable que si on est au même endroit sur la page.
+                    // RÈGLE STRICTE : Une modification sémantique n'est valable que dans la même phrase
+                    if (globalDeletes[i].LineIndex != globalInserts[j].LineIndex)
+                        continue;
+
+                    // Vérification spatiale
                     if (!IsLocallyClose(globalDeletes[i].Letters, globalInserts[j].Letters))
                         continue;
 
@@ -177,7 +218,7 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         }
 
         // --- ÉTAPE D : Reliquat absolu (Rouge et Vert) ---
-        // Tous les mots isolés qui ont "voyagé" trop loin atterrissent ici et sont correctement mis en Diff absolu.
+        // Tous les mots isolés qui ont "voyagé" trop loin ou changé de phrase atterrissent ici
         for (int i = 0; i < deletesCount; i++)
         {
             if (!matchedOld[i])
@@ -193,8 +234,6 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         return highlights;
     }
 
-    // L'attribut MethodImplOptions.AggressiveInlining force le compilateur à intégrer cette méthode
-    // directement dans l'appelant, ce qui évite le coût d'un saut de fonction en mémoire.
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private bool IsLocallyClose(List<LetterLoc> oldLocList, List<LetterLoc> newLocList)
     {
