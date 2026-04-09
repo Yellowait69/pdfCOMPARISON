@@ -42,6 +42,14 @@ public class DocumentDiffSummary
 
     // Le setter a été retiré. La liste est instanciée une fois pour toutes.
     public List<DiffSummaryBlock> Blocks { get; } = new();
+
+    // ======================================================================
+    // NOUVEAU : Compteurs basés sur la réalité géométrique (rectangles)
+    // Garantissent que l'UI et les graphiques matchent ce qui est dessiné
+    // ======================================================================
+    public int VisualInsertedCount { get; set; }
+    public int VisualDeletedCount { get; set; }
+    public int VisualModifiedCount { get; set; }
 }
 
 /// <summary>

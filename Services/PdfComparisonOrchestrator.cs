@@ -137,44 +137,20 @@ public class PdfComparisonOrchestrator
         var diffResult = _diffAnalyzer.AnalyzeDifferences(pair, cleanSource, cleanTarget, sourceWords, targetWords);
 
         // ==============================================================
-        // CORRECTION : Calcul détaillé des types de différences pour l'UI (Mot par mot)
+        // SYNCHRONISATION PARFAITE UI <=> PDF (Comptage des rectangles)
         // ==============================================================
-        int inserted = 0;
-        int deleted = 0;
-        int modified = 0;
+        int inserted = CountVisualBoxes(diffResult.Highlights.TargetRed);
+        int deleted = CountVisualBoxes(diffResult.Highlights.SourceRed);
+        int modified = CountVisualBoxes(diffResult.Highlights.TargetYellow); // ou SourceYellow (ils vont de paire)
 
-        var differ = new Differ();
-        var diffBuilder = new SideBySideDiffBuilder(differ);
+        int totalVisualDiffs = inserted + deleted + modified;
 
-        foreach (var block in diffResult.Summary.Blocks)
-        {
-            if (block.Type == ChangeType.Inserted)
-            {
-                inserted += block.NewText.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
-            }
-            else if (block.Type == ChangeType.Deleted)
-            {
-                deleted += block.OldText.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
-            }
-            else if (block.Type == ChangeType.Modified)
-            {
-                // On compare les mots à l'intérieur de la phrase modifiée
-                string oldWords = string.Join("\n", block.OldText.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries));
-                string newWords = string.Join("\n", block.NewText.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries));
+        // On écrase le compteur abstrait de DiffPlex avec la vraie réalité géométrique !
+        diffResult.DifferencesCount = totalVisualDiffs;
 
-                var wordDiff = diffBuilder.BuildDiffModel(oldWords, newWords);
-
-                foreach (var line in wordDiff.NewText.Lines)
-                {
-                    if (line.Type == ChangeType.Inserted) inserted++;
-                    else if (line.Type == ChangeType.Modified) modified++;
-                }
-                foreach (var line in wordDiff.OldText.Lines)
-                {
-                    if (line.Type == ChangeType.Deleted) deleted++;
-                }
-            }
-        }
+        diffResult.Summary.VisualInsertedCount = inserted;
+        diffResult.Summary.VisualDeletedCount = deleted;
+        diffResult.Summary.VisualModifiedCount = modified;
 
         if (Application.Current != null && Application.Current.Dispatcher != null)
         {
@@ -223,6 +199,68 @@ public class PdfComparisonOrchestrator
             // Élimination des "Faux Positifs" détectés par le moteur sémantique
             UpdatePairStatus(pair, CompareStatus.Identical, "False positives ignored", 0);
         }
+    }
+
+    // ==============================================================
+    // ALGORITHME GÉOMÉTRIQUE : Simule le dessin des cadres PDF
+    // ==============================================================
+    private int CountVisualBoxes(List<LetterLoc> letters)
+    {
+        if (letters == null || letters.Count == 0) return 0;
+
+        int totalBoxes = 0;
+        var pages = letters.GroupBy(l => l.PageNumber);
+
+        foreach (var page in pages)
+        {
+            decimal AlignmentTolerance = 5.0m;
+            var sorted = page
+                .OrderByDescending(l => Math.Round(l.BaselineY / AlignmentTolerance) * AlignmentTolerance)
+                .ThenBy(l => l.BoundingBox.BottomLeft.X)
+                .ToList();
+
+            if (sorted.Count == 0) continue;
+
+            int boxCount = 0;
+            var first = sorted[0];
+
+            decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X;
+            decimal cMaxX = (decimal)first.BoundingBox.TopRight.X;
+            decimal cBaseline = first.BaselineY;
+            decimal cFontSize = first.FontSize;
+
+            for (int i = 1; i < sorted.Count; i++)
+            {
+                var loc = sorted[i];
+                decimal x = (decimal)loc.BoundingBox.BottomLeft.X;
+                decimal y = loc.BaselineY;
+
+                bool isSameLine = Math.Abs(Math.Round(y / AlignmentTolerance) * AlignmentTolerance - Math.Round(cBaseline / AlignmentTolerance) * AlignmentTolerance) < 1m;
+
+                // Tolérance de l'espace (pour lier les mots en un seul grand rectangle)
+                decimal maxGap = Math.Max(15m, cFontSize * 1.5m);
+
+                if (isSameLine && (x - cMaxX) < maxGap && x >= cMinX - 5m)
+                {
+                    // Extension du rectangle en cours
+                    cMaxX = Math.Max(cMaxX, (decimal)loc.BoundingBox.TopRight.X);
+                    cFontSize = Math.Max(cFontSize, loc.FontSize);
+                }
+                else
+                {
+                    // Clôture du rectangle précédent et démarrage d'un nouveau
+                    boxCount++;
+                    cMinX = x;
+                    cMaxX = (decimal)loc.BoundingBox.TopRight.X;
+                    cBaseline = y;
+                    cFontSize = loc.FontSize;
+                }
+            }
+            boxCount++; // Pour fermer la dernière boîte de la ligne/page
+            totalBoxes += boxCount;
+        }
+
+        return totalBoxes;
     }
 
     // ==========================================
