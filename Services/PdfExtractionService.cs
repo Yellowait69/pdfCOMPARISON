@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Text.RegularExpressions;
 using PDFComparison.Models;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
@@ -12,6 +13,10 @@ public class PdfExtractionService
     private readonly IPdfWatermarkFilterService _watermarkFilter;
     private readonly IPdfIntelligentMaskingService _intelligentMasking;
     private readonly IPdfTextNormalizerService _textNormalizer;
+
+    // NOUVEAU : Regex partagée pour extraire en toute sécurité les dates de l'en-tête,
+    // même si elles ont été déformées par des artefacts OCR (ex: l, I, |, \, etc.)
+    private static readonly Regex HeaderDateRegex = new Regex(@"\b\d{1,2}[./\-\s,lI|\\:;]+\d{1,2}[./\-\s,lI|\\:;]+\d{2,4}\b", RegexOptions.Compiled);
 
     public PdfExtractionService(
         IPdfWatermarkFilterService watermarkFilter,
@@ -28,6 +33,8 @@ public class PdfExtractionService
         if (string.IsNullOrWhiteSpace(pdfPath)) throw new ArgumentException("PDF path cannot be empty.", nameof(pdfPath));
 
         var sb = new StringBuilder();
+        var headerSb = new StringBuilder(); // NOUVEAU : Accumulateur pour reconstruire l'en-tête
+
         using var document = PdfDocument.Open(pdfPath, new ParsingOptions { ClipPaths = false });
 
         foreach (var page in document.GetPages())
@@ -36,9 +43,7 @@ public class PdfExtractionService
             double lastY = -1;
             double lastX = -1;
 
-            // CORRECTION DÉFINITIVE : Marge d'en-tête considérablement agrandie (130.0)
-            // pour attraper les numéros de pages et dates qui descendent très bas
-            // sur les pages de signature ou de garde.
+            // Marge d'en-tête agrandie (130.0) pour attraper les dates très basses sur les pages de signature
             double headerThresholdY = page.Height - 130.0;
             double footerThresholdY = 80.0;
             double leftMarginThresholdX = 50.0;
@@ -50,8 +55,13 @@ public class PdfExtractionService
                 // FILTRE CRITIQUE : Ignorer les mots invisibles (Artefacts OCR)
                 if (IsHiddenOrWhiteWord(word)) continue;
 
-                // NOUVEAU : Les filtres géométriques et de filigrane sont maintenant appliqués avant d'envoyer au Diff !
-                if (word.BoundingBox.BottomLeft.Y > headerThresholdY) continue;
+                // NOUVEAU : On conserve virtuellement le texte de l'en-tête pour le fournir au MaskingService
+                if (word.BoundingBox.BottomLeft.Y > headerThresholdY)
+                {
+                    headerSb.Append(word.Text).Append(' ');
+                    continue; // On ne l'ajoute pas au texte principal
+                }
+
                 if (word.BoundingBox.BottomLeft.Y < footerThresholdY) continue;
                 if (word.BoundingBox.BottomLeft.X < leftMarginThresholdX) continue;
                 if (_watermarkFilter.IsWatermark(word)) continue;
@@ -70,7 +80,6 @@ public class PdfExtractionService
                     double distance = word.BoundingBox.BottomLeft.X - lastX;
 
                     // Si l'écart horizontal est suffisant (> 2.0 points), on insère un espace.
-                    // Sinon, on considère que le texte est "collé" (ex: "13", ".", "01")
                     if (distance > 2.0)
                     {
                         currentLine.Append(' ');
@@ -90,7 +99,15 @@ public class PdfExtractionService
             }
         }
 
-        return _intelligentMasking.MaskRepeatingTextElements(sb.ToString());
+        // NOUVEAU : Extraction infaillible des dates d'en-tête depuis le texte reconstruit
+        var headerDates = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Match m in HeaderDateRegex.Matches(headerSb.ToString()))
+        {
+            headerDates.Add(m.Value);
+        }
+
+        // Transmission des dates d'en-tête au service de masquage
+        return _intelligentMasking.MaskRepeatingTextElements(sb.ToString(), headerDates);
     }
 
     public List<PdfWordInfo> ExtractWords(string pdfPath)
@@ -98,13 +115,13 @@ public class PdfExtractionService
         if (string.IsNullOrWhiteSpace(pdfPath)) throw new ArgumentException("PDF path cannot be empty.", nameof(pdfPath));
 
         var words = new List<PdfWordInfo>();
-        var headerDatesToIgnore = new HashSet<string>(StringComparer.Ordinal);
+        var headerSb = new StringBuilder(); // NOUVEAU : Accumulateur pour l'en-tête
 
         using var doc = PdfDocument.Open(pdfPath, new ParsingOptions { ClipPaths = false });
 
         foreach (var page in doc.GetPages())
         {
-            // CORRECTION DÉFINITIVE : Marges alignées avec ExtractTextFast pour une synchronisation 1:1
+            // Marges alignées avec ExtractTextFast pour une synchronisation 1:1
             double headerThresholdY = page.Height - 130.0;
             double footerThresholdY = 80.0;
             double leftMarginThresholdX = 50.0;
@@ -118,14 +135,11 @@ public class PdfExtractionService
 
                 if (word.BoundingBox.BottomLeft.Y > headerThresholdY)
                 {
-                    if (_intelligentMasking.IsDate(word.Text))
-                    {
-                        headerDatesToIgnore.Add(word.Text);
-                    }
-                    continue; // On ignore totalement tout ce qui est dans l'en-tête
+                    headerSb.Append(word.Text).Append(' '); // Reconstruction de l'en-tête
+                    continue;
                 }
 
-                if (word.BoundingBox.BottomLeft.Y < footerThresholdY) continue; // On ignore le pied de page
+                if (word.BoundingBox.BottomLeft.Y < footerThresholdY) continue;
                 if (word.BoundingBox.BottomLeft.X < leftMarginThresholdX) continue;
                 if (_watermarkFilter.IsWatermark(word)) continue;
 
@@ -138,7 +152,15 @@ public class PdfExtractionService
             }
         }
 
-        _intelligentMasking.MaskRepeatingWordElements(words, headerDatesToIgnore);
+        // Même principe ici, on rassemble l'en-tête pour vaincre les découpes de PdfPig
+        var headerDates = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Match m in HeaderDateRegex.Matches(headerSb.ToString()))
+        {
+            headerDates.Add(m.Value);
+        }
+
+        // Application du masquage intelligent avec les dates d'en-tête
+        _intelligentMasking.MaskRepeatingWordElements(words, headerDates);
 
         return words;
     }
