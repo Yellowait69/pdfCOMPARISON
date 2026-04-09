@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using PDFComparison.Models;
-using UglyToad.PdfPig.Content; // AJOUT CRUCIAL ICI pour la classe Letter
+using UglyToad.PdfPig.Content;
 
 namespace PDFComparison.Services;
 
@@ -19,43 +20,54 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
     private const string DateIgnoreMask = "[DATE_IGNORE]";
     private const string NameIgnoreMask = "[NOM_IGNORE]";
 
-    // OPTIMISATION : Ajout de l'espace (\s) et du "+" pour tolérer les espaces accidentels
-    // générés par l'extraction PDF (ex: "13 01.2025" ou "13. 01 .2025")
+    // Tolère les espaces accidentels et différents séparateurs générés par l'extraction PDF
     [GeneratedRegex(@"\b\d{1,2}[./\-\s]+\d{1,2}[./\-\s]+\d{2,4}\b")]
     private static partial Regex DateRegex();
 
-    // NOUVEAU : Regex pour identifier les mots-clés qui précèdent un nom de client (DE, NL, FR)
     [GeneratedRegex(@"^([Aa]uftraggeber|[Oo]pdrachtgever|[Ss]ouscripteur):?$")]
     private static partial Regex ClientKeywordRegex();
 
-    // REGEX TEXTE : Cherche via le mot-clé OU via l'ancienne méthode de la virgule.
-    // On n'utilise pas (?i) globalement pour ne pas casser la détection stricte des majuscules \p{Lu}.
     [GeneratedRegex(@"(?:[Aa]uftraggeber|[Oo]pdrachtgever|[Ss]ouscripteur)\s*[:\s]+([\p{Lu}-]{2,}(?:\s+[\p{Lu}-]{2,})?)|\b([\p{Lu}-]{2,}(?:\s+[\p{Lu}-]{2,})?)\s*,")]
     private static partial Regex DynamicTextNameRegex();
 
-    // REGEX MOTS (PdfPig) : Identifie un mot en majuscules (au moins 2 lettres), avec une virgule optionnelle collée.
     [GeneratedRegex(@"^([\p{Lu}-]{2,})(,?)$")]
     private static partial Regex UpperWordRegex();
 
     public bool IsDate(string text) => DateRegex().IsMatch(text);
+
+    // NOUVEAU : Normalise une date pour un comptage fiable malgré les artefacts OCR
+    // (ex: le "." coupé par un filigrane et lu comme "/")
+    private string NormalizeDateString(string date)
+    {
+        return Regex.Replace(date, @"[/\-\s]+", ".");
+    }
 
     public string MaskRepeatingTextElements(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return text;
 
         var dateCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        // 1. Comptage basé sur les dates normalisées
         foreach (Match m in DateRegex().Matches(text))
         {
-            dateCounts.TryGetValue(m.Value, out int count);
-            dateCounts[m.Value] = count + 1;
+            string norm = NormalizeDateString(m.Value);
+            dateCounts.TryGetValue(norm, out int count);
+            dateCounts[norm] = count + 1;
         }
 
-        var sb = new StringBuilder(text);
-
-        foreach (var kvp in dateCounts)
+        // 2. Remplacement dynamique basé sur le dictionnaire normalisé
+        string textWithMaskedDates = DateRegex().Replace(text, match =>
         {
-            if (kvp.Value >= 2) sb.Replace(kvp.Key, DateIgnoreMask);
-        }
+            string norm = NormalizeDateString(match.Value);
+            if (dateCounts.TryGetValue(norm, out int count) && count >= 2)
+            {
+                return DateIgnoreMask;
+            }
+            return match.Value; // On garde le texte original s'il n'est pas masqué
+        });
+
+        var sb = new StringBuilder(textWithMaskedDates);
 
         // --- DÉTECTION DU NOM (Par mot-clé ou par virgule) ---
         Match nameMatch = DynamicTextNameRegex().Match(sb.ToString());
@@ -81,23 +93,36 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
     {
         if (words == null || words.Count == 0) return;
 
+        // Normaliser le dictionnaire des dates d'en-tête pour la comparaison
+        var normalizedHeaderDates = new HashSet<string>(headerDates.Select(NormalizeDateString), StringComparer.Ordinal);
+
         var dateCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        // 1. Comptage des mots normalisés
         foreach (var w in words)
         {
             var match = DateRegex().Match(w.Text);
             if (match.Success)
             {
-                dateCounts.TryGetValue(match.Value, out int count);
-                dateCounts[match.Value] = count + 1;
+                string norm = NormalizeDateString(match.Value);
+                dateCounts.TryGetValue(norm, out int count);
+                dateCounts[norm] = count + 1;
             }
         }
 
+        // 2. Application du masque
         for (int i = 0; i < words.Count; i++)
         {
             var match = DateRegex().Match(words[i].Text);
-            if (match.Success && (headerDates.Contains(match.Value) || (dateCounts.TryGetValue(match.Value, out int count) && count >= 2)))
+            if (match.Success)
             {
-                words[i] = new PdfWordInfo { Text = DateIgnoreMask, Letters = words[i].Letters, PageNumber = words[i].PageNumber };
+                string norm = NormalizeDateString(match.Value);
+
+                // Si la date normalisée est dans l'en-tête OU apparaît >= 2 fois, on la masque
+                if (normalizedHeaderDates.Contains(norm) || (dateCounts.TryGetValue(norm, out int count) && count >= 2))
+                {
+                    words[i] = new PdfWordInfo { Text = DateIgnoreMask, Letters = words[i].Letters, PageNumber = words[i].PageNumber };
+                }
             }
         }
 
