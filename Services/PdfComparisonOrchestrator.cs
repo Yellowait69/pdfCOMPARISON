@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Drawing; // NOUVEAU : Pour RectangleF
+using System.Drawing; // Pour RectangleF
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -18,7 +18,7 @@ public class PdfComparisonOrchestrator
     private readonly PdfDiffAnalyzer _diffAnalyzer;
     private readonly IIndividualReportGenerator _individualReportGenerator;
     private readonly IGlobalSynthesisReportGenerator _globalReportGenerator;
-    private readonly IPdfImageService _imageService; // NOUVEAU : Service d'image
+    private readonly IPdfImageService _imageService; // Service d'image
 
     // Injection de dépendances mise à jour
     public PdfComparisonOrchestrator(
@@ -26,7 +26,7 @@ public class PdfComparisonOrchestrator
         PdfDiffAnalyzer diffAnalyzer,
         IIndividualReportGenerator individualReportGenerator,
         IGlobalSynthesisReportGenerator globalReportGenerator,
-        IPdfImageService imageService) // NOUVEAU
+        IPdfImageService imageService)
     {
         _extractionService = extractionService ?? throw new ArgumentNullException(nameof(extractionService));
         _diffAnalyzer = diffAnalyzer ?? throw new ArgumentNullException(nameof(diffAnalyzer));
@@ -148,7 +148,7 @@ public class PdfComparisonOrchestrator
             ct.ThrowIfCancellationRequested();
 
             // =====================================================================
-            // NOUVEAU : Capture des images des zones modifiées pour le rapport global
+            // Capture des images des zones modifiées pour le rapport global
             // =====================================================================
             foreach (var block in diffResult.Summary.Blocks)
             {
@@ -240,8 +240,9 @@ public class PdfComparisonOrchestrator
                 {
                     foreach (var letter in words[i + j].Letters)
                     {
-                        minY = Math.Min(minY, letter.BoundingBox.BottomLeft.Y);
-                        maxY = Math.Max(maxY, letter.BoundingBox.TopRight.Y);
+                        // CORRECTION APPLIQUÉE : GlyphRectangle au lieu de BoundingBox
+                        minY = Math.Min(minY, letter.GlyphRectangle.BottomLeft.Y);
+                        maxY = Math.Max(maxY, letter.GlyphRectangle.TopRight.Y);
                     }
                     j++;
                 }
@@ -272,6 +273,8 @@ public class PdfComparisonOrchestrator
         int count = 0;
         var first = sorted[0];
 
+        // L'objet `LetterLoc` de notre propre modèle (DiffModels.cs) a bien une propriété BoundingBox,
+        // donc on la laisse telle quelle ici.
         decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X;
         decimal cMaxX = (decimal)first.BoundingBox.TopRight.X;
         decimal cBaseline = first.BaselineY;
