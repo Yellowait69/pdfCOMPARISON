@@ -286,8 +286,25 @@
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
 
-                    <DataGridTextColumn Header="Details (Diffs)" Binding="{Binding ErrorMessage}" Width="*" Foreground="#64748B" FontStyle="Italic"/>
+                    <DataGridTextColumn Header="Total Diffs" Binding="{Binding DiffCount}" Width="85" FontWeight="Bold" Foreground="#0F172A"/>
 
+                    <DataGridTemplateColumn Header="Ajouts" Width="70">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding InsertionsCount}" Foreground="#059669" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+
+                    <DataGridTemplateColumn Header="Suppressions" Width="100">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DeletionsCount}" Foreground="#DC2626" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+
+                    <DataGridTextColumn Header="Détails" Binding="{Binding ErrorMessage}" Width="*" Foreground="#64748B" FontStyle="Italic"/>
                     <DataGridTextColumn Header="Time" Binding="{Binding CompletedTime, StringFormat=\{0:HH:mm\}}" Width="80" Foreground="#94A3B8"/>
 
                     <DataGridTemplateColumn Header="Action" Width="140">

@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using PDFComparison.Models;
+using DiffPlex.DiffBuilder.Model; // NOUVEAU : Ajouté pour accéder à ChangeType
 
 namespace PDFComparison.Services;
 
@@ -139,12 +140,18 @@ public class PdfComparisonOrchestrator
 
             ct.ThrowIfCancellationRequested();
 
+            // NOUVEAU : Calcul du nombre d'ajouts et de suppressions basés sur les blocs
+            int insertions = diffResult.Summary.Blocks.Count(b => b.Type == ChangeType.Inserted);
+            int deletions = diffResult.Summary.Blocks.Count(b => b.Type == ChangeType.Deleted);
+
             try
             {
                 _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, reportPath, diffResult.Highlights);
 
                 SetReportPath(pair, reportPath);
-                UpdatePairStatus(pair, CompareStatus.Different, $"{diffResult.DifferencesCount} difference(s) detected", diffResult.DifferencesCount);
+
+                // NOUVEAU : On passe les compteurs d'ajouts et suppressions
+                UpdatePairStatus(pair, CompareStatus.Different, $"{diffResult.DifferencesCount} difference(s) detected", diffResult.DifferencesCount, insertions, deletions);
             }
             catch (IOException)
             {
@@ -153,7 +160,9 @@ public class PdfComparisonOrchestrator
                 _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, fallbackPath, diffResult.Highlights);
 
                 SetReportPath(pair, fallbackPath);
-                UpdatePairStatus(pair, CompareStatus.Different, $"{diffResult.DifferencesCount} difference(s) (Saved as new version)", diffResult.DifferencesCount);
+
+                // NOUVEAU : On passe les compteurs d'ajouts et suppressions
+                UpdatePairStatus(pair, CompareStatus.Different, $"{diffResult.DifferencesCount} difference(s) (Saved as new version)", diffResult.DifferencesCount, insertions, deletions);
             }
 
             summariesBag.Add(diffResult.Summary);
@@ -169,7 +178,8 @@ public class PdfComparisonOrchestrator
     // MÉTHODES UTILITAIRES (Thread-Safety WPF)
     // ==========================================
 
-    private void UpdatePairStatus(DocumentPair pair, CompareStatus status, string errorMessage, int diffCount)
+    // NOUVEAU : Ajout des paramètres optionnels `insertions` et `deletions`
+    private void UpdatePairStatus(DocumentPair pair, CompareStatus status, string errorMessage, int diffCount, int insertions = 0, int deletions = 0)
     {
         if (Application.Current != null && Application.Current.Dispatcher != null)
         {
@@ -178,6 +188,10 @@ public class PdfComparisonOrchestrator
                 pair.Status = status;
                 pair.ErrorMessage = errorMessage;
                 if (diffCount != pair.DiffCount) pair.DiffCount = diffCount;
+
+                // NOUVEAU : Mise à jour des compteurs
+                pair.InsertionsCount = insertions;
+                pair.DeletionsCount = deletions;
             });
         }
         else
@@ -186,6 +200,10 @@ public class PdfComparisonOrchestrator
             pair.Status = status;
             pair.ErrorMessage = errorMessage;
             pair.DiffCount = diffCount;
+
+            // NOUVEAU : Mise à jour des compteurs
+            pair.InsertionsCount = insertions;
+            pair.DeletionsCount = deletions;
         }
     }
 

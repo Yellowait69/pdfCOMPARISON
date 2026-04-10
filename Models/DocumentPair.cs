@@ -30,6 +30,14 @@ public partial class DocumentPair : ObservableObject
     [ObservableProperty]
     private int _diffCount;
 
+    // NOUVEAU : Nombre d'ajouts (encadrés verts)
+    [ObservableProperty]
+    private int _insertionsCount;
+
+    // NOUVEAU : Nombre de suppressions (encadrés rouges)
+    [ObservableProperty]
+    private int _deletionsCount;
+
     // Chemin du rapport PDF généré
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasReport))]
