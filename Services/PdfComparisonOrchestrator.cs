@@ -134,15 +134,21 @@ public class PdfComparisonOrchestrator
 
         var diffResult = _diffAnalyzer.AnalyzeDifferences(pair, cleanSource, cleanTarget, sourceWords, targetWords);
 
-        if (diffResult.DifferencesCount > 0)
+        // NOUVEAU : On calcule le nombre exact d'encadrés visuels qui seront dessinés
+        int visualInsertions = CountVisualSegments(diffResult.Highlights.TargetRed);
+        int visualDeletions = CountVisualSegments(diffResult.Highlights.SourceRed);
+        int visualModifications = CountVisualSegments(diffResult.Highlights.TargetYellow);
+
+        int totalVisualDiffs = visualInsertions + visualDeletions + visualModifications;
+
+        // On écrase le score textuel de DiffPlex par le vrai score visuel pour le tableau
+        diffResult.DifferencesCount = totalVisualDiffs;
+
+        if (totalVisualDiffs > 0)
         {
             string reportPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{pair.MatchKey}.pdf");
 
             ct.ThrowIfCancellationRequested();
-
-            // NOUVEAU : Calcul du nombre d'ajouts et de suppressions basés sur les blocs
-            int insertions = diffResult.Summary.Blocks.Count(b => b.Type == ChangeType.Inserted);
-            int deletions = diffResult.Summary.Blocks.Count(b => b.Type == ChangeType.Deleted);
 
             try
             {
@@ -150,8 +156,8 @@ public class PdfComparisonOrchestrator
 
                 SetReportPath(pair, reportPath);
 
-                // NOUVEAU : On passe les compteurs d'ajouts et suppressions
-                UpdatePairStatus(pair, CompareStatus.Different, $"{diffResult.DifferencesCount} difference(s) detected", diffResult.DifferencesCount, insertions, deletions);
+                // NOUVEAU : On met à jour le tableau Wpf avec les compteurs visuels exacts
+                UpdatePairStatus(pair, CompareStatus.Different, $"{totalVisualDiffs} difference(s) detected", totalVisualDiffs, visualInsertions, visualDeletions);
             }
             catch (IOException)
             {
@@ -161,8 +167,8 @@ public class PdfComparisonOrchestrator
 
                 SetReportPath(pair, fallbackPath);
 
-                // NOUVEAU : On passe les compteurs d'ajouts et suppressions
-                UpdatePairStatus(pair, CompareStatus.Different, $"{diffResult.DifferencesCount} difference(s) (Saved as new version)", diffResult.DifferencesCount, insertions, deletions);
+                // NOUVEAU : On met à jour le tableau Wpf avec les compteurs visuels exacts
+                UpdatePairStatus(pair, CompareStatus.Different, $"{totalVisualDiffs} difference(s) (Saved as new version)", totalVisualDiffs, visualInsertions, visualDeletions);
             }
 
             summariesBag.Add(diffResult.Summary);
@@ -172,6 +178,60 @@ public class PdfComparisonOrchestrator
             // Élimination des "Faux Positifs" détectés par le moteur sémantique
             UpdatePairStatus(pair, CompareStatus.Identical, "False positives ignored", 0);
         }
+    }
+
+    /// <summary>
+    /// Reproduit très exactement la logique de regroupement géométrique du PdfDrawingService.
+    /// Permet de prédire et compter combien de boîtes (encadrés) seront dessinées.
+    /// </summary>
+    private int CountVisualSegments(IEnumerable<LetterLoc> letters)
+    {
+        if (letters == null || !letters.Any()) return 0;
+
+        const decimal AlignmentTolerance = 5.0m;
+        var sorted = letters
+            .OrderByDescending(l => Math.Round(l.BaselineY / AlignmentTolerance) * AlignmentTolerance)
+            .ThenBy(l => l.BoundingBox.BottomLeft.X)
+            .ToList();
+
+        if (sorted.Count == 0) return 0;
+
+        int count = 0;
+        var first = sorted[0];
+
+        decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X;
+        decimal cMaxX = (decimal)first.BoundingBox.TopRight.X;
+        decimal cBaseline = first.BaselineY;
+        decimal cFontSize = first.FontSize;
+
+        for (int i = 1; i < sorted.Count; i++)
+        {
+            var loc = sorted[i];
+            decimal x = (decimal)loc.BoundingBox.BottomLeft.X;
+            decimal y = loc.BaselineY;
+
+            bool isSameLine = Math.Abs(Math.Round(y / AlignmentTolerance) * AlignmentTolerance - Math.Round(cBaseline / AlignmentTolerance) * AlignmentTolerance) < 1m;
+            decimal maxGap = Math.Max(15m, cFontSize * 1.5m);
+
+            if (isSameLine && (x - cMaxX) < maxGap && x >= cMinX - 5m)
+            {
+                // Regroupement au sein du même encadré
+                cMaxX = Math.Max(cMaxX, (decimal)loc.BoundingBox.TopRight.X);
+                cFontSize = Math.Max(cFontSize, loc.FontSize);
+            }
+            else
+            {
+                // Fin de l'encadré actuel, on incrémente le compteur
+                count++;
+                cMinX = x;
+                cMaxX = (decimal)loc.BoundingBox.TopRight.X;
+                cBaseline = y;
+                cFontSize = loc.FontSize;
+            }
+        }
+
+        count++; // Ajout du tout dernier encadré
+        return count;
     }
 
     // ==========================================
