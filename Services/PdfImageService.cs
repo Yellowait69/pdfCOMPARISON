@@ -8,12 +8,13 @@ namespace PDFComparison.Services;
 
 public interface IPdfImageService
 {
-    byte[]? CaptureZone(string pdfPath, int pageNumber, RectangleF zone);
+    // NOUVEAU : On passe la couleur exacte du surlignage (Vert, Rouge, Orange)
+    byte[]? CaptureZone(string pdfPath, int pageNumber, RectangleF exactTextZone, Color highlightColor);
 }
 
 public class PdfImageService : IPdfImageService
 {
-    public byte[]? CaptureZone(string pdfPath, int pageNumber, RectangleF zone)
+    public byte[]? CaptureZone(string pdfPath, int pageNumber, RectangleF exactTextZone, Color highlightColor)
     {
         if (string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
             return null;
@@ -35,14 +36,63 @@ public class PdfImageService : IPdfImageService
                     {
                         var pdfPageSize = document.PageSizes[pdfiumPageIndex];
 
-                        // Calcul des coordonnées exactes de découpe
-                        Rectangle cropRect = CalculatePixelRect(bitmap, zone, pdfPageSize);
+                        // Facteurs d'échelle (ex: 300 DPI vs 72 DPI natif)
+                        float scaleX = bitmap.Width / pdfPageSize.Width;
+                        float scaleY = bitmap.Height / pdfPageSize.Height;
 
-                        // Si la zone est invalide ou vide, on abandonne
+                        // =================================================================
+                        // 1. DESSIN DU SURLIGNEUR DIRECTEMENT SUR L'IMAGE
+                        // =================================================================
+                        using (Graphics g = Graphics.FromImage(bitmap))
+                        {
+                            // Inversion de l'Axe Y : PdfPig compte de bas en haut, System.Drawing de haut en bas
+                            float topYPdf = pdfPageSize.Height - (exactTextZone.Y + exactTextZone.Height);
+
+                            // Calcul du rectangle exact en pixels (avec une marge de 2 unités PDF pour encadrer joliment le texte)
+                            RectangleF pixelHighlight = new RectangleF(
+                                (exactTextZone.X - 2f) * scaleX,
+                                (topYPdf - 2f) * scaleY,
+                                (exactTextZone.Width + 4f) * scaleX,
+                                (exactTextZone.Height + 4f) * scaleY
+                            );
+
+                            // Remplissage semi-transparent (Alpha à 70 sur 255)
+                            using (Brush brush = new SolidBrush(Color.FromArgb(70, highlightColor)))
+                            {
+                                g.FillRectangle(brush, pixelHighlight);
+                            }
+
+                            // Bordure un peu plus prononcée pour délimiter le cadre
+                            using (Pen pen = new Pen(Color.FromArgb(200, highlightColor), 3f))
+                            {
+                                g.DrawRectangle(pen, pixelHighlight.X, pixelHighlight.Y, pixelHighlight.Width, pixelHighlight.Height);
+                            }
+                        }
+
+                        // =================================================================
+                        // 2. ROGNAGE LARGE (CROP) POUR GARDER LE CONTEXTE DE LA PAGE
+                        // =================================================================
+                        // On prend toute la largeur de la page, et on ajoute 40 points de marge en haut et en bas
+                        float cropTopYPdf = pdfPageSize.Height - (exactTextZone.Y + exactTextZone.Height) - 40f;
+
+                        Rectangle cropRect = new Rectangle(
+                            0, // On prend toute la largeur (X = 0)
+                            (int)(cropTopYPdf * scaleY), // Y calculé avec la marge
+                            bitmap.Width, // Largeur totale de l'image
+                            (int)((exactTextZone.Height + 80f) * scaleY) // Hauteur ciblée (zone + marges)
+                        );
+
+                        // Sécurité (Clamping) pour ne pas sortir des limites de l'image
+                        cropRect.X = Math.Max(0, cropRect.X);
+                        cropRect.Y = Math.Max(0, cropRect.Y);
+                        cropRect.Width = Math.Min(cropRect.Width, bitmap.Width - cropRect.X);
+                        cropRect.Height = Math.Min(cropRect.Height, bitmap.Height - cropRect.Y);
+
+                        // Si la zone de rognage est invalide, on abandonne
                         if (cropRect.Width <= 0 || cropRect.Height <= 0)
                             return null;
 
-                        // Rognage (Crop) de l'image
+                        // Création de l'image finale rognée
                         using (Bitmap cropped = bitmap.Clone(cropRect, bitmap.PixelFormat))
                         using (var ms = new MemoryStream())
                         {
@@ -58,44 +108,5 @@ public class PdfImageService : IPdfImageService
             System.Diagnostics.Debug.WriteLine($"Erreur lors de la capture d'image : {ex.Message}");
             return null;
         }
-    }
-
-    /// <summary>
-    /// Convertit les coordonnées vectorielles du PDF (PdfPig) en coordonnées de pixels pour l'image.
-    /// </summary>
-    private Rectangle CalculatePixelRect(Bitmap bitmap, RectangleF zone, SizeF pdfPageSize)
-    {
-        // 1. Facteur de mise à l'échelle (ex: image 300 DPI vs PDF standard 72 DPI)
-        float scaleX = bitmap.Width / pdfPageSize.Width;
-        float scaleY = bitmap.Height / pdfPageSize.Height;
-
-        // 2. Conversion des largeurs et hauteurs en pixels
-        int width = (int)(zone.Width * scaleX);
-        int height = (int)(zone.Height * scaleY);
-        int x = (int)(zone.X * scaleX);
-
-        // 3. INVERSION DE L'AXE Y CRITIQUE
-        // UglyToad.PdfPig (origine zone.Y) est en BAS de la page.
-        // System.Drawing (origine image) est en HAUT de la page.
-        float topYInPdf = pdfPageSize.Height - (zone.Y + zone.Height);
-        int y = (int)(topYInPdf * scaleY);
-
-        // 4. Marge de sécurité (Padding) pour inclure un peu de contexte autour du texte modifié
-        // Environ 50 pixels de chaque côté
-        int paddingX = 50;
-        int paddingY = 30;
-
-        x -= paddingX;
-        y -= paddingY;
-        width += paddingX * 2;
-        height += paddingY * 2;
-
-        // 5. CLAMPING (Sécurité pour ne pas sortir des limites de l'image)
-        x = Math.Max(0, x);
-        y = Math.Max(0, y);
-        width = Math.Min(width, bitmap.Width - x);
-        height = Math.Min(height, bitmap.Height - y);
-
-        return new Rectangle(x, y, width, height);
     }
 }

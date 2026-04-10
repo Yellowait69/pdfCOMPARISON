@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Drawing; // Pour RectangleF
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -148,20 +148,28 @@ public class PdfComparisonOrchestrator
             ct.ThrowIfCancellationRequested();
 
             // =====================================================================
-            // Capture des images des zones modifiées pour le rapport global
+            // CAPTURES D'IMAGES AVEC COULEURS DYNAMIQUES
             // =====================================================================
             foreach (var block in diffResult.Summary.Blocks)
             {
                 if (block.Type == ChangeType.Deleted || block.Type == ChangeType.Modified)
                 {
-                    var rect = FindBoundingBoxForText(block.OldText, sourceWords, out int pageNum);
-                    if (pageNum > 0) block.SourceImage = _imageService.CaptureZone(pair.SourcePath, pageNum, rect);
+                    var rect = FindExactBoundingBoxForText(block.OldText, sourceWords, out int pageNum);
+                    if (pageNum > 0)
+                    {
+                        var color = block.Type == ChangeType.Modified ? Color.FromArgb(245, 158, 11) : Color.FromArgb(239, 68, 68); // Orange ou Rouge
+                        block.SourceImage = _imageService.CaptureZone(pair.SourcePath, pageNum, rect, color);
+                    }
                 }
 
                 if (block.Type == ChangeType.Inserted || block.Type == ChangeType.Modified)
                 {
-                    var rect = FindBoundingBoxForText(block.NewText, targetWords, out int pageNum);
-                    if (pageNum > 0) block.TargetImage = _imageService.CaptureZone(pair.TargetPath!, pageNum, rect);
+                    var rect = FindExactBoundingBoxForText(block.NewText, targetWords, out int pageNum);
+                    if (pageNum > 0)
+                    {
+                        var color = block.Type == ChangeType.Modified ? Color.FromArgb(245, 158, 11) : Color.FromArgb(16, 185, 129); // Orange ou Vert
+                        block.TargetImage = _imageService.CaptureZone(pair.TargetPath!, pageNum, rect, color);
+                    }
                 }
             }
             // =====================================================================
@@ -199,18 +207,16 @@ public class PdfComparisonOrchestrator
     }
 
     /// <summary>
-    /// Recherche la position d'un bloc de texte dans le document pour créer une zone de capture (RectangleF).
+    /// Trouve la boîte EXACTE englobant le texte pour que le service d'image puisse la surligner avec précision.
     /// </summary>
-    private RectangleF FindBoundingBoxForText(string text, IReadOnlyList<PdfWordInfo> words, out int pageNumber)
+    private RectangleF FindExactBoundingBoxForText(string text, IReadOnlyList<PdfWordInfo> words, out int pageNumber)
     {
         pageNumber = -1;
         if (string.IsNullOrWhiteSpace(text) || words == null || words.Count == 0) return RectangleF.Empty;
 
-        // Découpage du texte recherché
         var searchWords = text.Split(new[] { ' ', '\n', '\r', '.', ',', ';', ':' }, StringSplitOptions.RemoveEmptyEntries);
         if (searchWords.Length == 0) return RectangleF.Empty;
 
-        // On cherche une correspondance sur les 3 premiers mots pour être robuste face aux sauts de ligne
         int matchTarget = Math.Min(searchWords.Length, 3);
 
         for (int i = 0; i <= words.Count - matchTarget; i++)
@@ -231,27 +237,28 @@ public class PdfComparisonOrchestrator
             if (match)
             {
                 pageNumber = words[i].PageNumber;
+                double minX = double.MaxValue;
                 double minY = double.MaxValue;
+                double maxX = double.MinValue;
                 double maxY = double.MinValue;
 
-                // On capture la hauteur totale du bloc trouvé
                 int j = 0;
                 while (i + j < words.Count && words[i+j].PageNumber == pageNumber && j < searchWords.Length * 1.5)
                 {
                     foreach (var letter in words[i + j].Letters)
                     {
-                        // CORRECTION APPLIQUÉE : GlyphRectangle au lieu de BoundingBox
+                        // On récupère bien les dimensions exactes en X et Y pour le surlignage
+                        minX = Math.Min(minX, letter.GlyphRectangle.BottomLeft.X);
                         minY = Math.Min(minY, letter.GlyphRectangle.BottomLeft.Y);
+                        maxX = Math.Max(maxX, letter.GlyphRectangle.TopRight.X);
                         maxY = Math.Max(maxY, letter.GlyphRectangle.TopRight.Y);
                     }
                     j++;
                 }
 
-                if (minY != double.MaxValue)
+                if (minX != double.MaxValue)
                 {
-                    // ASTUCE : On renvoie un Rectangle qui prend toute la largeur de la page (X=30 à 560)
-                    // pour conserver la mise en forme (tableaux, colonnes) autour du texte modifié.
-                    return new RectangleF(30f, (float)minY, 530f, (float)(maxY - minY));
+                    return new RectangleF((float)minX, (float)minY, (float)(maxX - minX), (float)(maxY - minY));
                 }
             }
         }
@@ -261,7 +268,6 @@ public class PdfComparisonOrchestrator
     private int CountVisualSegments(IEnumerable<LetterLoc> letters)
     {
         if (letters == null || !letters.Any()) return 0;
-
         const decimal AlignmentTolerance = 5.0m;
         var sorted = letters
             .OrderByDescending(l => Math.Round(l.BaselineY / AlignmentTolerance) * AlignmentTolerance)
@@ -273,8 +279,6 @@ public class PdfComparisonOrchestrator
         int count = 0;
         var first = sorted[0];
 
-        // L'objet `LetterLoc` de notre propre modèle (DiffModels.cs) a bien une propriété BoundingBox,
-        // donc on la laisse telle quelle ici.
         decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X;
         decimal cMaxX = (decimal)first.BoundingBox.TopRight.X;
         decimal cBaseline = first.BaselineY;
@@ -303,7 +307,6 @@ public class PdfComparisonOrchestrator
                 cFontSize = loc.FontSize;
             }
         }
-
         count++;
         return count;
     }

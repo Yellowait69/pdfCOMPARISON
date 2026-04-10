@@ -21,7 +21,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
     private readonly IPdfChartService _chartService;
     private readonly IInlineDiffService _inlineDiffService;
 
-    // Expressions régulières compilées (Haute performance)
     [GeneratedRegex(@"^\s*[\d.,%€$£]+\s*$")]
     private static partial Regex NumRegex();
 
@@ -51,9 +50,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         var builder = new PdfDocumentBuilder();
         var (font, fontBold) = _drawingService.LoadFonts(builder);
 
-        // ==========================================
-        // 1. CALCUL DES STATISTIQUES GLOBALES
-        // ==========================================
         int totalInserts = 0, totalDeletes = 0, totalModifies = 0;
         int typeDates = 0, typeNumbers = 0, typeWords = 0;
         int totalOldWords = 0, totalNewWords = 0, criticalAlerts = 0;
@@ -97,15 +93,10 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
             }
         }
 
-        // Le total des différences calculé précisément sur les blocs extraits
         int totalChanges = summaries.Sum(s => s.Blocks.Count);
         int wordBalance = totalNewWords - totalOldWords;
-
         var topModifiedFiles = summaries.OrderByDescending(s => s.Blocks.Count).Take(3).ToList();
 
-        // ==========================================
-        // 2. CRÉATION DU TABLEAU DE BORD
-        // ==========================================
         PdfPageBuilder page = builder.AddPage(842, 595); // Paysage (A4)
         decimal margin = 40m;
         decimal yPosition = 595m - margin;
@@ -117,12 +108,10 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
             _chartService.DrawDashboardCharts(page, margin, yPosition - 160m, totalInserts, totalDeletes, totalModifies, typeDates, typeNumbers, typeWords, languageFileCounts, font);
         }
 
-        // ==========================================
-        // 3. GÉNÉRATION DES PAGES DE DÉTAILS
-        // ==========================================
         decimal leftColumnX = margin;
         decimal rightColumnX = 430m;
         int maxCharsCol = 55;
+        decimal drawWidth = 370m; // Largeur fixe des colonnes
 
         foreach (var doc in summaries.OrderBy(s => s.DocumentName))
         {
@@ -132,8 +121,31 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
             {
                 bool hasImages = block.SourceImage != null || block.TargetImage != null;
 
-                // Calcul de l'encombrement (Plus grand si on dessine des images)
-                decimal estimatedHeight = hasImages ? 160m :
+                decimal sourceImgHeight = 0m;
+                decimal targetImgHeight = 0m;
+
+                // --- 1. CALCUL PRÉCIS DE LA HAUTEUR DE L'IMAGE ---
+                // Empêche totalement la déformation de l'image
+                if (block.SourceImage != null)
+                {
+                    using var ms = new MemoryStream(block.SourceImage);
+                    using var img = System.Drawing.Image.FromStream(ms);
+                    decimal aspect = (decimal)img.Width / (decimal)img.Height;
+                    sourceImgHeight = drawWidth / aspect;
+                }
+
+                if (block.TargetImage != null)
+                {
+                    using var ms = new MemoryStream(block.TargetImage);
+                    using var img = System.Drawing.Image.FromStream(ms);
+                    decimal aspect = (decimal)img.Width / (decimal)img.Height;
+                    targetImgHeight = drawWidth / aspect;
+                }
+
+                decimal maxImgHeight = Math.Max(sourceImgHeight, targetImgHeight);
+
+                // Calcul dynamique de l'espace requis
+                decimal estimatedHeight = hasImages ? (maxImgHeight + 90m) :
                     (Math.Max(block.OldText.Length, block.NewText.Length) / maxCharsCol + 3) * 15m + 100m;
 
                 if (page == null || yPosition - estimatedHeight < margin)
@@ -150,7 +162,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                     _ => "CHANGE"
                 };
 
-                // --- 1. EN-TÊTE DU BLOC ---
                 page.SetTextAndFillColor(71, 85, 105);
                 page.AddText($"File: {doc.DocumentName}", 11m, new PdfPoint((double)margin, (double)yPosition), fontBold);
 
@@ -164,34 +175,28 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
                 yPosition -= 16m;
 
-                // --- 2. BADGE DE LIEN VERS LE RAPPORT ---
                 if (!string.IsNullOrEmpty(doc.ReportFileName))
                 {
-                    page.SetTextAndFillColor(239, 246, 255); // Fond bleu clair
+                    page.SetTextAndFillColor(239, 246, 255);
                     page.DrawRectangle(new PdfPoint((double)margin, (double)(yPosition - 2m)), 270m, 14m, 0m, true);
 
-                    page.SetTextAndFillColor(37, 99, 235); // Texte bleu vif
+                    page.SetTextAndFillColor(37, 99, 235);
                     page.AddText($"► See Details in : {doc.ReportFileName}", 9m, new PdfPoint((double)(margin + 6m), (double)yPosition), fontBold);
                 }
 
                 yPosition -= 18m;
 
-                // --- 3. TITRES DES COLONNES ---
                 page.SetTextAndFillColor(150, 150, 150);
                 page.AddText("Original Document (Source)", 9m, new PdfPoint((double)leftColumnX, (double)yPosition), fontBold);
                 page.AddText("Modified Document (Target)", 9m, new PdfPoint((double)rightColumnX, (double)yPosition), fontBold);
                 yPosition -= 15m;
 
-                // --- 4. AFFICHAGE DES DONNÉES (IMAGES OU TEXTE) ---
                 if (hasImages)
                 {
-                    // MODE IMAGE : Affichage des captures d'écran PdfiumViewer
-                    decimal imageBoxHeight = 85m;
-                    decimal imageBoxWidth = 360m;
-
+                    // --- AFFICHAGE PARFAIT DES IMAGES ---
                     if (block.SourceImage != null)
                     {
-                        page.AddPng(block.SourceImage, new PdfRectangle((double)leftColumnX, (double)(yPosition - imageBoxHeight), (double)(leftColumnX + imageBoxWidth), (double)yPosition));
+                        page.AddPng(block.SourceImage, new PdfRectangle((double)leftColumnX, (double)(yPosition - sourceImgHeight), (double)(leftColumnX + drawWidth), (double)yPosition));
                     }
                     else
                     {
@@ -201,7 +206,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
                     if (block.TargetImage != null)
                     {
-                        page.AddPng(block.TargetImage, new PdfRectangle((double)rightColumnX, (double)(yPosition - imageBoxHeight), (double)(rightColumnX + imageBoxWidth), (double)yPosition));
+                        page.AddPng(block.TargetImage, new PdfRectangle((double)rightColumnX, (double)(yPosition - targetImgHeight), (double)(rightColumnX + drawWidth), (double)yPosition));
                     }
                     else
                     {
@@ -209,11 +214,11 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                         page.AddText("(Content deleted)", 10m, new PdfPoint((double)rightColumnX, (double)(yPosition - 20m)), font);
                     }
 
-                    yPosition -= (imageBoxHeight + 10m);
+                    // On décale proprement le curseur Y sous les images
+                    yPosition -= (maxImgHeight + 10m);
                 }
                 else
                 {
-                    // MODE TEXTE : Fallback de sécurité utilisant l'InlineDiffService
                     var (leftChunks, rightChunks) = _inlineDiffService.GetInlineDiffChunks(block.OldText, block.NewText);
 
                     decimal currentYLeft = yPosition;
@@ -221,7 +226,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                         currentYLeft = _drawingService.DrawTextLines(page, $"... {block.ContextBefore}", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
 
                     if (leftChunks.Count > 0)
-                        currentYLeft = _drawingService.DrawMixedTextLines(page, leftChunks, currentYLeft, leftColumnX, 370m, font, fontBold);
+                        currentYLeft = _drawingService.DrawMixedTextLines(page, leftChunks, currentYLeft, leftColumnX, drawWidth, font, fontBold);
                     else
                         currentYLeft = _drawingService.DrawTextLines(page, "(No original text)", currentYLeft, leftColumnX, maxCharsCol, 180, 180, 180, font);
 
@@ -233,7 +238,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                         currentYRight = _drawingService.DrawTextLines(page, $"... {block.ContextBefore}", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
 
                     if (rightChunks.Count > 0)
-                        currentYRight = _drawingService.DrawMixedTextLines(page, rightChunks, currentYRight, rightColumnX, 370m, font, fontBold);
+                        currentYRight = _drawingService.DrawMixedTextLines(page, rightChunks, currentYRight, rightColumnX, drawWidth, font, fontBold);
                     else
                         currentYRight = _drawingService.DrawTextLines(page, "(Text deleted)", currentYRight, rightColumnX, maxCharsCol, 180, 180, 180, font);
 
@@ -243,7 +248,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                     yPosition = Math.Min(currentYLeft, currentYRight) - 10m;
                 }
 
-                // Ligne de séparation élégante
                 page.SetStrokeColor(220, 220, 220);
                 page.DrawLine(new PdfPoint((double)margin, (double)(yPosition + 5m)), new PdfPoint((double)(842m - margin), (double)(yPosition + 5m)), 1.0m);
                 yPosition -= 15m;
