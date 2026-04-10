@@ -26,25 +26,9 @@ public partial class DocumentPair : ObservableObject
     [ObservableProperty]
     private string _errorMessage = string.Empty;
 
-    // Nombre de différences totales détectées (utile pour trier la liste dans l'UI)
+    // Nombre de différences détectées (utile pour trier la liste dans l'UI)
     [ObservableProperty]
     private int _diffCount;
-
-    // --- NOUVELLES PROPRIÉTÉS DE DÉTAIL ---
-
-    // Nombre d'ajouts détectés
-    [ObservableProperty]
-    private int _insertedCount;
-
-    // Nombre de suppressions détectées
-    [ObservableProperty]
-    private int _deletedCount;
-
-    // Nombre de modifications détectées
-    [ObservableProperty]
-    private int _modifiedCount;
-
-    // --------------------------------------
 
     // Chemin du rapport PDF généré
     [ObservableProperty]

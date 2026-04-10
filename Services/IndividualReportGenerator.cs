@@ -17,10 +17,10 @@ public class IndividualReportGenerator : IIndividualReportGenerator
 {
     private readonly IPdfDrawingService _drawingService;
 
-    // NOUVELLES COULEURS : Contraste maximal garanti
-    private static readonly (byte R, byte G, byte B) ColorRedSource = (220, 38, 38);    // Rouge fort (Suppressions)
-    private static readonly (byte R, byte G, byte B) ColorBlueModified = (37, 99, 235); // Bleu fort (Modifications)
-    private static readonly (byte R, byte G, byte B) ColorGreenTarget = (22, 163, 74);  // Vert fort (Ajouts)
+    // NOUVELLES COULEURS : Des teintes vives mais adaptées au surlignage
+    private static readonly (byte R, byte G, byte B) ColorRedSource = (255, 99, 71);    // Rouge Tomate (Suppressions)
+    private static readonly (byte R, byte G, byte B) ColorOrange = (255, 165, 0);       // Orange (Modifications)
+    private static readonly (byte R, byte G, byte B) ColorGreenTarget = (50, 205, 50);  // Vert Lime (Ajouts)
 
     public IndividualReportGenerator(IPdfDrawingService drawingService)
     {
@@ -51,7 +51,7 @@ public class IndividualReportGenerator : IIndividualReportGenerator
         // Cela évite de rescanner toute la liste de mots pour chaque page du document.
         // =========================================================================
         var sourceRedDict = GroupHighlightsByPage(highlights.SourceRed);
-        var sourceYellowDict = GroupHighlightsByPage(highlights.SourceYellow); // Ce "Yellow" correspond aux modifs (Maintenant dessiné en Bleu)
+        var sourceYellowDict = GroupHighlightsByPage(highlights.SourceYellow);
         var targetRedDict = GroupHighlightsByPage(highlights.TargetRed);
         var targetYellowDict = GroupHighlightsByPage(highlights.TargetYellow);
 
@@ -71,10 +71,10 @@ public class IndividualReportGenerator : IIndividualReportGenerator
                 if (sourceRedDict.TryGetValue(pageIndex, out var sRed))
                     _drawingService.DrawDiffMarkup(sPage, sRed, ColorRedSource.R, ColorRedSource.G, ColorRedSource.B, MarkupStyle.Highlight);
 
-                // CORRECTION : On dessine les modifications en BLEU au lieu de Orange
                 if (sourceYellowDict.TryGetValue(pageIndex, out var sYellow))
-                    _drawingService.DrawDiffMarkup(sPage, sYellow, ColorBlueModified.R, ColorBlueModified.G, ColorBlueModified.B, MarkupStyle.Highlight);
+                    _drawingService.DrawDiffMarkup(sPage, sYellow, ColorOrange.R, ColorOrange.G, ColorOrange.B, MarkupStyle.Highlight);
 
+                // CORRECTION ICI : Envoi du texte court tout en bas
                 _drawingService.DrawPageStamp(sPage, "SOURCE", fontBold);
             }
 
@@ -86,10 +86,10 @@ public class IndividualReportGenerator : IIndividualReportGenerator
                 if (targetRedDict.TryGetValue(pageIndex, out var tRed))
                     _drawingService.DrawDiffMarkup(tPage, tRed, ColorGreenTarget.R, ColorGreenTarget.G, ColorGreenTarget.B, MarkupStyle.Highlight);
 
-                // CORRECTION : On dessine les modifications en BLEU
                 if (targetYellowDict.TryGetValue(pageIndex, out var tYellow))
-                    _drawingService.DrawDiffMarkup(tPage, tYellow, ColorBlueModified.R, ColorBlueModified.G, ColorBlueModified.B, MarkupStyle.Highlight);
+                    _drawingService.DrawDiffMarkup(tPage, tYellow, ColorOrange.R, ColorOrange.G, ColorOrange.B, MarkupStyle.Highlight);
 
+                // CORRECTION ICI : Envoi du texte court tout en bas
                 _drawingService.DrawPageStamp(tPage, "TARGET", fontBold);
             }
         }

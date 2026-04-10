@@ -286,12 +286,7 @@
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
 
-                    <DataGridTextColumn Header="Total Diffs" Binding="{Binding DiffCount}" Width="85" FontWeight="Bold" Foreground="#334155"/>
-                    <DataGridTextColumn Header="Ajouts" Binding="{Binding InsertedCount}" Width="70" Foreground="#10B981" FontWeight="SemiBold"/>
-                    <DataGridTextColumn Header="Suppr." Binding="{Binding DeletedCount}" Width="70" Foreground="#EF4444" FontWeight="SemiBold"/>
-                    <DataGridTextColumn Header="Modifs" Binding="{Binding ModifiedCount}" Width="70" Foreground="#F59E0B" FontWeight="SemiBold"/>
-
-                    <DataGridTextColumn Header="Message" Binding="{Binding ErrorMessage}" Width="*" Foreground="#64748B" FontStyle="Italic"/>
+                    <DataGridTextColumn Header="Details (Diffs)" Binding="{Binding ErrorMessage}" Width="*" Foreground="#64748B" FontStyle="Italic"/>
 
                     <DataGridTextColumn Header="Time" Binding="{Binding CompletedTime, StringFormat=\{0:HH:mm\}}" Width="80" Foreground="#94A3B8"/>
 

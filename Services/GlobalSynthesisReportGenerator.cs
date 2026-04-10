@@ -72,17 +72,14 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
             }
 
             languageFileCounts[lang]++;
-
-            // SYNCHRONISATION : On utilise les compteurs visuels (rectangles)
-            int visualTotalForDoc = doc.VisualInsertedCount + doc.VisualDeletedCount + doc.VisualModifiedCount;
-            languageDiffCounts[lang] += visualTotalForDoc;
-
-            totalInserts += doc.VisualInsertedCount;
-            totalDeletes += doc.VisualDeletedCount;
-            totalModifies += doc.VisualModifiedCount;
+            languageDiffCounts[lang] += doc.Blocks.Count;
 
             foreach (var block in doc.Blocks)
             {
+                if (block.Type == ChangeType.Inserted) totalInserts++;
+                else if (block.Type == ChangeType.Deleted) totalDeletes++;
+                else if (block.Type == ChangeType.Modified) totalModifies++;
+
                 string oldTxt = block.OldText ?? string.Empty;
                 string newTxt = block.NewText ?? string.Empty;
 
@@ -103,11 +100,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         int totalChanges = totalInserts + totalDeletes + totalModifies;
         int wordBalance = totalNewWords - totalOldWords;
 
-        // Top 3 basé sur la réalité visuelle
-        var topModifiedFiles = summaries
-            .OrderByDescending(s => s.VisualInsertedCount + s.VisualDeletedCount + s.VisualModifiedCount)
-            .Take(3)
-            .ToList();
+        var topModifiedFiles = summaries.OrderByDescending(s => s.Blocks.Count).Take(3).ToList();
 
         // ==========================================
         // 2. CRÉATION DU TABLEAU DE BORD
@@ -118,7 +111,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
         DrawDashboardLayout(page, margin, yPosition, totalChanges, summaries.Count, wordBalance, criticalAlerts, topModifiedFiles, languageDiffCounts, font, fontBold);
 
-        // Les graphiques ScottPlot utiliseront désormais les valeurs synchronisées
+        // Délégation des graphiques (ScottPlot) au ChartService
         if (totalChanges > 0)
         {
             _chartService.DrawDashboardCharts(page, margin, yPosition - 160m, totalInserts, totalDeletes, totalModifies, typeDates, typeNumbers, typeWords, languageFileCounts, font);
@@ -142,6 +135,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
             foreach (var block in doc.Blocks)
             {
+                // Calcul de la hauteur estimée pour éviter de couper un bloc en plein milieu
                 int linesLeft = (block.ContextBefore.Length + block.OldText.Length + block.ContextAfter.Length) / maxCharsCol;
                 int linesRight = (block.ContextBefore.Length + block.NewText.Length + block.ContextAfter.Length) / maxCharsCol;
                 decimal estimatedHeight = Math.Max(linesLeft, linesRight) * 13m + 60m;
@@ -169,6 +163,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                 page.AddText("Document Modifié (Cible)", 9m, new PdfPoint((double)rightColumnX, (double)yPosition), fontBold);
                 yPosition -= 15m;
 
+                // Délégation de la comparaison en ligne au service InlineDiffService
                 var (leftChunks, rightChunks) = _inlineDiffService.GetInlineDiffChunks(block.OldText, block.NewText);
 
                 // --- COLONNE GAUCHE ---
@@ -199,12 +194,14 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
                 yPosition = Math.Min(currentYLeft, currentYRight) - 20m;
 
+                // Ligne de séparation entre les blocs
                 page.SetStrokeColor(220, 220, 220);
                 page.DrawLine(new PdfPoint((double)margin, (double)(yPosition + 10m)), new PdfPoint((double)(842m - margin), (double)(yPosition + 10m)), 0.5m);
             }
             yPosition -= 20m;
         }
 
+        // Sauvegarde finale
         try
         {
             File.WriteAllBytes(reportPath, builder.Build());
@@ -215,6 +212,9 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         }
     }
 
+    /// <summary>
+    /// Gère uniquement le positionnement du texte et des encadrés de la page de garde (Dashboard).
+    /// </summary>
     private void DrawDashboardLayout(PdfPageBuilder page, decimal startX, decimal startY, int totalChanges, int totalFiles, int wordBalance, int criticalAlerts, List<DocumentDiffSummary> topFiles, Dictionary<string, int> languageDiffCounts, PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold)
     {
         decimal currentY = startY;
@@ -229,6 +229,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
         string balanceText = wordBalance > 0 ? $"+ {wordBalance} mots" : $"{wordBalance} mots";
 
+        // Délégation du dessin des encadrés au DrawingService
         _drawingService.DrawStatBox(page, startX, currentY, "Fichiers impactés", totalFiles.ToString(), font, fontBold, 0, 50, 150);
         _drawingService.DrawStatBox(page, startX + 155m, currentY, "Total changements", totalChanges.ToString(), font, fontBold, 0, 50, 150);
         _drawingService.DrawStatBox(page, startX + 310m, currentY, "Bilan net (Volume)", balanceText, font, fontBold, wordBalance < 0 ? (byte)220 : (byte)16, wordBalance < 0 ? (byte)20 : (byte)185, wordBalance < 0 ? (byte)20 : (byte)129);
@@ -253,10 +254,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
             page.SetTextAndFillColor(80, 80, 80);
             page.AddText($"• {file.DocumentName}", 10m, new PdfPoint((double)startX, (double)listY), font);
             page.SetTextAndFillColor(0, 50, 150);
-
-            // SYNCHRONISATION : Utilisation des compteurs visuels ici aussi
-            int docVisualTotal = file.VisualInsertedCount + file.VisualDeletedCount + file.VisualModifiedCount;
-            page.AddText($"{docVisualTotal} diffs", 10m, new PdfPoint((double)(startX + 280m), (double)listY), fontBold);
+            page.AddText($"{file.Blocks.Count} diffs", 10m, new PdfPoint((double)(startX + 280m), (double)listY), fontBold);
             listY -= 15m;
         }
 

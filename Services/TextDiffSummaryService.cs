@@ -9,11 +9,13 @@ namespace PDFComparison.Services;
 
 public interface ITextDiffSummaryService
 {
+    // CORRECTION : Remplacement de DiffPaneModel par SideBySideDiffModel
     (int DifferencesCount, List<DiffSummaryBlock> Blocks, SideBySideDiffModel DiffLinesModel) BuildTextSummary(string cleanSource, string cleanTarget);
 }
 
 public class TextDiffSummaryService : ITextDiffSummaryService
 {
+    // CORRECTION : Remplacement de DiffPaneModel par SideBySideDiffModel
     public (int DifferencesCount, List<DiffSummaryBlock> Blocks, SideBySideDiffModel DiffLinesModel) BuildTextSummary(string cleanSource, string cleanTarget)
     {
         var diffBuilder = new SideBySideDiffBuilder(new Differ());
@@ -31,7 +33,7 @@ public class TextDiffSummaryService : ITextDiffSummaryService
         var sumDel = new Dictionary<string, int>(StringComparer.Ordinal);
         var sumIns = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        // 1. Première passe : Comptabiliser les insertions et suppressions (en ignorant les lignes vides)
+        // 1. Première passe : Comptabiliser les insertions et suppressions
         for (int i = 0; i < linesCount; i++)
         {
             var oldLine = diffLines.OldText.Lines[i];
@@ -99,22 +101,11 @@ public class TextDiffSummaryService : ITextDiffSummaryService
 
             if (newLine.Type is ChangeType.Inserted or ChangeType.Modified || oldLine.Type is ChangeType.Deleted)
             {
-                // ==============================================================
-                // CORRECTION DU BUG :
-                // Ignorer complètement les différences qui ne sont constituées
-                // que de lignes vides (sauts de page/paragraphe invisibles).
-                // Cela évite de gonfler artificiellement les ajouts/suppressions.
-                // ==============================================================
-                if (string.IsNullOrWhiteSpace(oldLine.Text) && string.IsNullOrWhiteSpace(newLine.Text))
-                {
-                    continue;
-                }
-
                 diffCount++;
 
                 blocks.Add(new DiffSummaryBlock
                 {
-                    Type = (newLine.Type is ChangeType.Inserted or ChangeType.Modified) ? newLine.Type : oldLine.Type,
+                    Type = newLine.Type is not ChangeType.Unchanged ? newLine.Type : oldLine.Type,
                     ContextBefore = GetValidContextLine(diffLines.NewText.Lines, i, -1),
                     ContextAfter = GetValidContextLine(diffLines.NewText.Lines, i, 1),
                     OldText = (newLine.Type is ChangeType.Modified || oldLine.Type is ChangeType.Deleted) ? oldLine.Text : string.Empty,
@@ -123,7 +114,7 @@ public class TextDiffSummaryService : ITextDiffSummaryService
             }
         }
 
-        return (diffCount, blocks, diffLines);
+        return (diffCount, blocks, diffLines); // retourne bien le SideBySideDiffModel maintenant
     }
 
     private string GetValidContextLine(List<DiffPiece> lines, int currentIndex, int direction)

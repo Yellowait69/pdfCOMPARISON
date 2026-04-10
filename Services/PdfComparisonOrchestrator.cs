@@ -6,9 +6,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
-using DiffPlex;
-using DiffPlex.DiffBuilder;
-using DiffPlex.DiffBuilder.Model;
 using PDFComparison.Models;
 
 namespace PDFComparison.Services;
@@ -136,39 +133,6 @@ public class PdfComparisonOrchestrator
 
         var diffResult = _diffAnalyzer.AnalyzeDifferences(pair, cleanSource, cleanTarget, sourceWords, targetWords);
 
-        // ==============================================================
-        // SYNCHRONISATION PARFAITE UI <=> PDF (Comptage des rectangles)
-        // ==============================================================
-        int inserted = CountVisualBoxes(diffResult.Highlights.TargetRed);
-        int deleted = CountVisualBoxes(diffResult.Highlights.SourceRed);
-        int modified = CountVisualBoxes(diffResult.Highlights.TargetYellow); // ou SourceYellow (ils vont de paire)
-
-        int totalVisualDiffs = inserted + deleted + modified;
-
-        // On écrase le compteur abstrait de DiffPlex avec la vraie réalité géométrique !
-        diffResult.DifferencesCount = totalVisualDiffs;
-
-        diffResult.Summary.VisualInsertedCount = inserted;
-        diffResult.Summary.VisualDeletedCount = deleted;
-        diffResult.Summary.VisualModifiedCount = modified;
-
-        if (Application.Current != null && Application.Current.Dispatcher != null)
-        {
-            Application.Current.Dispatcher.Invoke(() =>
-            {
-                pair.InsertedCount = inserted;
-                pair.DeletedCount = deleted;
-                pair.ModifiedCount = modified;
-            });
-        }
-        else
-        {
-            pair.InsertedCount = inserted;
-            pair.DeletedCount = deleted;
-            pair.ModifiedCount = modified;
-        }
-        // ==============================================================
-
         if (diffResult.DifferencesCount > 0)
         {
             string reportPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{pair.MatchKey}.pdf");
@@ -199,68 +163,6 @@ public class PdfComparisonOrchestrator
             // Élimination des "Faux Positifs" détectés par le moteur sémantique
             UpdatePairStatus(pair, CompareStatus.Identical, "False positives ignored", 0);
         }
-    }
-
-    // ==============================================================
-    // ALGORITHME GÉOMÉTRIQUE : Simule le dessin des cadres PDF
-    // ==============================================================
-    private int CountVisualBoxes(List<LetterLoc> letters)
-    {
-        if (letters == null || letters.Count == 0) return 0;
-
-        int totalBoxes = 0;
-        var pages = letters.GroupBy(l => l.PageNumber);
-
-        foreach (var page in pages)
-        {
-            decimal AlignmentTolerance = 5.0m;
-            var sorted = page
-                .OrderByDescending(l => Math.Round(l.BaselineY / AlignmentTolerance) * AlignmentTolerance)
-                .ThenBy(l => l.BoundingBox.BottomLeft.X)
-                .ToList();
-
-            if (sorted.Count == 0) continue;
-
-            int boxCount = 0;
-            var first = sorted[0];
-
-            decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X;
-            decimal cMaxX = (decimal)first.BoundingBox.TopRight.X;
-            decimal cBaseline = first.BaselineY;
-            decimal cFontSize = first.FontSize;
-
-            for (int i = 1; i < sorted.Count; i++)
-            {
-                var loc = sorted[i];
-                decimal x = (decimal)loc.BoundingBox.BottomLeft.X;
-                decimal y = loc.BaselineY;
-
-                bool isSameLine = Math.Abs(Math.Round(y / AlignmentTolerance) * AlignmentTolerance - Math.Round(cBaseline / AlignmentTolerance) * AlignmentTolerance) < 1m;
-
-                // Tolérance de l'espace (pour lier les mots en un seul grand rectangle)
-                decimal maxGap = Math.Max(15m, cFontSize * 1.5m);
-
-                if (isSameLine && (x - cMaxX) < maxGap && x >= cMinX - 5m)
-                {
-                    // Extension du rectangle en cours
-                    cMaxX = Math.Max(cMaxX, (decimal)loc.BoundingBox.TopRight.X);
-                    cFontSize = Math.Max(cFontSize, loc.FontSize);
-                }
-                else
-                {
-                    // Clôture du rectangle précédent et démarrage d'un nouveau
-                    boxCount++;
-                    cMinX = x;
-                    cMaxX = (decimal)loc.BoundingBox.TopRight.X;
-                    cBaseline = y;
-                    cFontSize = loc.FontSize;
-                }
-            }
-            boxCount++; // Pour fermer la dernière boîte de la ligne/page
-            totalBoxes += boxCount;
-        }
-
-        return totalBoxes;
     }
 
     // ==========================================
