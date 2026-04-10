@@ -28,7 +28,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
     [GeneratedRegex(@"\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}\b")]
     private static partial Regex DateRegex();
 
-    [GeneratedRegex(@"(?i)\b(prix|pénalité|pénalités|résiliation|ttc|ht|garantie|article|euro|taxe|montant|facture)\b")]
+    [GeneratedRegex(@"(?i)\b(prix|pénalité|pénalités|résiliation|ttc|ht|garantie|article|euro|taxe|montant|facture|price|penalty|termination|vat|warranty|tax|amount|invoice)\b")]
     private static partial Regex CriticalRegex();
 
     public GlobalSynthesisReportGenerator(
@@ -63,7 +63,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
         foreach (var doc in summaries)
         {
-            string lang = string.IsNullOrWhiteSpace(doc.Language) ? "ND" : doc.Language;
+            string lang = string.IsNullOrWhiteSpace(doc.Language) ? "NA" : doc.Language;
 
             if (!languageFileCounts.ContainsKey(lang))
             {
@@ -97,7 +97,8 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
             }
         }
 
-        int totalChanges = totalInserts + totalDeletes + totalModifies;
+        // Le total des différences calculé précisément sur les blocs extraits
+        int totalChanges = summaries.Sum(s => s.Blocks.Count);
         int wordBalance = totalNewWords - totalOldWords;
 
         var topModifiedFiles = summaries.OrderByDescending(s => s.Blocks.Count).Take(3).ToList();
@@ -111,7 +112,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
         DrawDashboardLayout(page, margin, yPosition, totalChanges, summaries.Count, wordBalance, criticalAlerts, topModifiedFiles, languageDiffCounts, font, fontBold);
 
-        // Délégation des graphiques (ScottPlot) au ChartService
         if (totalChanges > 0)
         {
             _chartService.DrawDashboardCharts(page, margin, yPosition - 160m, totalInserts, totalDeletes, totalModifies, typeDates, typeNumbers, typeWords, languageFileCounts, font);
@@ -122,25 +122,21 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         // ==========================================
         decimal leftColumnX = margin;
         decimal rightColumnX = 430m;
-        int maxCharsCol = 65;
+        int maxCharsCol = 55;
 
         foreach (var doc in summaries.OrderBy(s => s.DocumentName))
         {
-            page = builder.AddPage(842, 595);
-            yPosition = 595m - margin;
-
-            page.SetTextAndFillColor(0, 50, 150);
-            page.AddText($"► Fichier: {doc.DocumentName}", 14m, new PdfPoint((double)margin, (double)yPosition), fontBold);
-            yPosition -= 25m;
+            if (doc.Blocks.Count == 0) continue;
 
             foreach (var block in doc.Blocks)
             {
-                // Calcul de la hauteur estimée pour éviter de couper un bloc en plein milieu
-                int linesLeft = (block.ContextBefore.Length + block.OldText.Length + block.ContextAfter.Length) / maxCharsCol;
-                int linesRight = (block.ContextBefore.Length + block.NewText.Length + block.ContextAfter.Length) / maxCharsCol;
-                decimal estimatedHeight = Math.Max(linesLeft, linesRight) * 13m + 60m;
+                bool hasImages = block.SourceImage != null || block.TargetImage != null;
 
-                if (yPosition - estimatedHeight < margin)
+                // Calcul de l'encombrement (Plus grand si on dessine des images)
+                decimal estimatedHeight = hasImages ? 160m :
+                    (Math.Max(block.OldText.Length, block.NewText.Length) / maxCharsCol + 3) * 15m + 100m;
+
+                if (page == null || yPosition - estimatedHeight < margin)
                 {
                     page = builder.AddPage(842, 595);
                     yPosition = 595m - margin;
@@ -148,105 +144,153 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
                 string changeTypeStr = block.Type switch
                 {
-                    ChangeType.Inserted => "[ AJOUT ]",
-                    ChangeType.Deleted => "[ SUPPRESSION ]",
-                    ChangeType.Modified => "[ MODIFICATION ]",
-                    _ => "[ CHANGEMENT ]"
+                    ChangeType.Inserted => "INSERTION",
+                    ChangeType.Deleted => "DELETION",
+                    ChangeType.Modified => "MODIFICATION",
+                    _ => "CHANGE"
                 };
 
-                page.SetTextAndFillColor(0, 0, 0);
-                page.AddText(changeTypeStr, 11m, new PdfPoint((double)margin, (double)yPosition), fontBold);
+                // --- 1. EN-TÊTE DU BLOC ---
+                page.SetTextAndFillColor(71, 85, 105);
+                page.AddText($"File: {doc.DocumentName}", 11m, new PdfPoint((double)margin, (double)yPosition), fontBold);
 
-                yPosition -= 15m;
+                byte r = 0, g = 50, b = 150;
+                if (block.Type == ChangeType.Inserted) { r = 16; g = 185; b = 129; }
+                else if (block.Type == ChangeType.Deleted) { r = 239; g = 68; b = 68; }
+                else if (block.Type == ChangeType.Modified) { r = 245; g = 158; b = 11; }
+
+                page.SetTextAndFillColor(r, g, b);
+                page.AddText($" | Type: {changeTypeStr}", 11m, new PdfPoint((double)(margin + 280m), (double)yPosition), fontBold);
+
+                yPosition -= 16m;
+
+                // --- 2. BADGE DE LIEN VERS LE RAPPORT ---
+                if (!string.IsNullOrEmpty(doc.ReportFileName))
+                {
+                    page.SetTextAndFillColor(239, 246, 255); // Fond bleu clair
+                    page.DrawRectangle(new PdfPoint((double)margin, (double)(yPosition - 2m)), 270m, 14m, 0m, true);
+
+                    page.SetTextAndFillColor(37, 99, 235); // Texte bleu vif
+                    page.AddText($"► See Details in : {doc.ReportFileName}", 9m, new PdfPoint((double)(margin + 6m), (double)yPosition), fontBold);
+                }
+
+                yPosition -= 18m;
+
+                // --- 3. TITRES DES COLONNES ---
                 page.SetTextAndFillColor(150, 150, 150);
-                page.AddText("Document Original (Source)", 9m, new PdfPoint((double)leftColumnX, (double)yPosition), fontBold);
-                page.AddText("Document Modifié (Cible)", 9m, new PdfPoint((double)rightColumnX, (double)yPosition), fontBold);
+                page.AddText("Original Document (Source)", 9m, new PdfPoint((double)leftColumnX, (double)yPosition), fontBold);
+                page.AddText("Modified Document (Target)", 9m, new PdfPoint((double)rightColumnX, (double)yPosition), fontBold);
                 yPosition -= 15m;
 
-                // Délégation de la comparaison en ligne au service InlineDiffService
-                var (leftChunks, rightChunks) = _inlineDiffService.GetInlineDiffChunks(block.OldText, block.NewText);
+                // --- 4. AFFICHAGE DES DONNÉES (IMAGES OU TEXTE) ---
+                if (hasImages)
+                {
+                    // MODE IMAGE : Affichage des captures d'écran PdfiumViewer
+                    decimal imageBoxHeight = 85m;
+                    decimal imageBoxWidth = 360m;
 
-                // --- COLONNE GAUCHE ---
-                decimal currentYLeft = yPosition;
-                if (!string.IsNullOrWhiteSpace(block.ContextBefore))
-                    currentYLeft = _drawingService.DrawTextLines(page, $"... {block.ContextBefore}", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
+                    if (block.SourceImage != null)
+                    {
+                        page.AddPng(block.SourceImage, new PdfRectangle((double)leftColumnX, (double)(yPosition - imageBoxHeight), (double)(leftColumnX + imageBoxWidth), (double)yPosition));
+                    }
+                    else
+                    {
+                        page.SetTextAndFillColor(180, 180, 180);
+                        page.AddText("(No original content)", 10m, new PdfPoint((double)leftColumnX, (double)(yPosition - 20m)), font);
+                    }
 
-                if (leftChunks.Count > 0)
-                    currentYLeft = _drawingService.DrawMixedTextLines(page, leftChunks, currentYLeft, leftColumnX, 370m, font, fontBold);
+                    if (block.TargetImage != null)
+                    {
+                        page.AddPng(block.TargetImage, new PdfRectangle((double)rightColumnX, (double)(yPosition - imageBoxHeight), (double)(rightColumnX + imageBoxWidth), (double)yPosition));
+                    }
+                    else
+                    {
+                        page.SetTextAndFillColor(180, 180, 180);
+                        page.AddText("(Content deleted)", 10m, new PdfPoint((double)rightColumnX, (double)(yPosition - 20m)), font);
+                    }
+
+                    yPosition -= (imageBoxHeight + 10m);
+                }
                 else
-                    currentYLeft = _drawingService.DrawTextLines(page, "(Aucun texte original)", currentYLeft, leftColumnX, maxCharsCol, 180, 180, 180, font);
+                {
+                    // MODE TEXTE : Fallback de sécurité utilisant l'InlineDiffService
+                    var (leftChunks, rightChunks) = _inlineDiffService.GetInlineDiffChunks(block.OldText, block.NewText);
 
-                if (!string.IsNullOrWhiteSpace(block.ContextAfter))
-                    currentYLeft = _drawingService.DrawTextLines(page, $"{block.ContextAfter} ...", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
+                    decimal currentYLeft = yPosition;
+                    if (!string.IsNullOrWhiteSpace(block.ContextBefore))
+                        currentYLeft = _drawingService.DrawTextLines(page, $"... {block.ContextBefore}", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
 
-                // --- COLONNE DROITE ---
-                decimal currentYRight = yPosition;
-                if (!string.IsNullOrWhiteSpace(block.ContextBefore))
-                    currentYRight = _drawingService.DrawTextLines(page, $"... {block.ContextBefore}", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
+                    if (leftChunks.Count > 0)
+                        currentYLeft = _drawingService.DrawMixedTextLines(page, leftChunks, currentYLeft, leftColumnX, 370m, font, fontBold);
+                    else
+                        currentYLeft = _drawingService.DrawTextLines(page, "(No original text)", currentYLeft, leftColumnX, maxCharsCol, 180, 180, 180, font);
 
-                if (rightChunks.Count > 0)
-                    currentYRight = _drawingService.DrawMixedTextLines(page, rightChunks, currentYRight, rightColumnX, 370m, font, fontBold);
-                else
-                    currentYRight = _drawingService.DrawTextLines(page, "(Texte supprimé)", currentYRight, rightColumnX, maxCharsCol, 180, 180, 180, font);
+                    if (!string.IsNullOrWhiteSpace(block.ContextAfter))
+                        currentYLeft = _drawingService.DrawTextLines(page, $"{block.ContextAfter} ...", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
 
-                if (!string.IsNullOrWhiteSpace(block.ContextAfter))
-                    currentYRight = _drawingService.DrawTextLines(page, $"{block.ContextAfter} ...", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
+                    decimal currentYRight = yPosition;
+                    if (!string.IsNullOrWhiteSpace(block.ContextBefore))
+                        currentYRight = _drawingService.DrawTextLines(page, $"... {block.ContextBefore}", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
 
-                yPosition = Math.Min(currentYLeft, currentYRight) - 20m;
+                    if (rightChunks.Count > 0)
+                        currentYRight = _drawingService.DrawMixedTextLines(page, rightChunks, currentYRight, rightColumnX, 370m, font, fontBold);
+                    else
+                        currentYRight = _drawingService.DrawTextLines(page, "(Text deleted)", currentYRight, rightColumnX, maxCharsCol, 180, 180, 180, font);
 
-                // Ligne de séparation entre les blocs
+                    if (!string.IsNullOrWhiteSpace(block.ContextAfter))
+                        currentYRight = _drawingService.DrawTextLines(page, $"{block.ContextAfter} ...", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
+
+                    yPosition = Math.Min(currentYLeft, currentYRight) - 10m;
+                }
+
+                // Ligne de séparation élégante
                 page.SetStrokeColor(220, 220, 220);
-                page.DrawLine(new PdfPoint((double)margin, (double)(yPosition + 10m)), new PdfPoint((double)(842m - margin), (double)(yPosition + 10m)), 0.5m);
+                page.DrawLine(new PdfPoint((double)margin, (double)(yPosition + 5m)), new PdfPoint((double)(842m - margin), (double)(yPosition + 5m)), 1.0m);
+                yPosition -= 15m;
             }
-            yPosition -= 20m;
         }
 
-        // Sauvegarde finale
         try
         {
             File.WriteAllBytes(reportPath, builder.Build());
         }
         catch (Exception ex)
         {
-            throw new Exception($"Erreur critique lors de la construction du fichier {Path.GetFileName(reportPath)}. {ex.Message}");
+            throw new Exception($"Critical error while building the file {Path.GetFileName(reportPath)}. {ex.Message}");
         }
     }
 
-    /// <summary>
-    /// Gère uniquement le positionnement du texte et des encadrés de la page de garde (Dashboard).
-    /// </summary>
     private void DrawDashboardLayout(PdfPageBuilder page, decimal startX, decimal startY, int totalChanges, int totalFiles, int wordBalance, int criticalAlerts, List<DocumentDiffSummary> topFiles, Dictionary<string, int> languageDiffCounts, PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold)
     {
         decimal currentY = startY;
 
         page.SetTextAndFillColor(0, 50, 150);
-        page.AddText("RAPPORT DE SYNTHÈSE GLOBALE", 18m, new PdfPoint((double)startX, (double)currentY), fontBold);
+        page.AddText("GLOBAL SYNTHESIS REPORT", 18m, new PdfPoint((double)startX, (double)currentY), fontBold);
 
         page.SetTextAndFillColor(100, 100, 100);
-        page.AddText($"Généré le {DateTime.Now:dd/MM/yyyy à HH:mm} • Comparaison automatisée de documents.", 10m, new PdfPoint((double)startX, (double)(currentY - 18m)), font);
+        page.AddText($"Generated on {DateTime.Now:dd/MM/yyyy at HH:mm} • Automated document comparison.", 10m, new PdfPoint((double)startX, (double)(currentY - 18m)), font);
 
         currentY -= 50m;
 
-        string balanceText = wordBalance > 0 ? $"+ {wordBalance} mots" : $"{wordBalance} mots";
+        string balanceText = wordBalance > 0 ? $"+ {wordBalance} words" : $"{wordBalance} words";
 
-        // Délégation du dessin des encadrés au DrawingService
-        _drawingService.DrawStatBox(page, startX, currentY, "Fichiers impactés", totalFiles.ToString(), font, fontBold, 0, 50, 150);
-        _drawingService.DrawStatBox(page, startX + 155m, currentY, "Total changements", totalChanges.ToString(), font, fontBold, 0, 50, 150);
-        _drawingService.DrawStatBox(page, startX + 310m, currentY, "Bilan net (Volume)", balanceText, font, fontBold, wordBalance < 0 ? (byte)220 : (byte)16, wordBalance < 0 ? (byte)20 : (byte)185, wordBalance < 0 ? (byte)20 : (byte)129);
-        _drawingService.DrawStatBox(page, startX + 465m, currentY, "Mots Sensibles", criticalAlerts.ToString(), font, fontBold, criticalAlerts > 0 ? (byte)255 : (byte)0, criticalAlerts > 0 ? (byte)140 : (byte)50, criticalAlerts > 0 ? (byte)0 : (byte)150);
+        _drawingService.DrawStatBox(page, startX, currentY, "Impacted Files", totalFiles.ToString(), font, fontBold, 0, 50, 150);
+        _drawingService.DrawStatBox(page, startX + 155m, currentY, "Total Differences", totalChanges.ToString(), font, fontBold, 0, 50, 150);
+        _drawingService.DrawStatBox(page, startX + 310m, currentY, "Net Balance (Volume)", balanceText, font, fontBold, wordBalance < 0 ? (byte)220 : (byte)16, wordBalance < 0 ? (byte)20 : (byte)185, wordBalance < 0 ? (byte)20 : (byte)129);
+        _drawingService.DrawStatBox(page, startX + 465m, currentY, "Sensitive Words", criticalAlerts.ToString(), font, fontBold, criticalAlerts > 0 ? (byte)255 : (byte)0, criticalAlerts > 0 ? (byte)140 : (byte)50, criticalAlerts > 0 ? (byte)0 : (byte)150);
 
         currentY -= 60m;
 
         if (totalChanges == 0)
         {
             page.SetTextAndFillColor(100, 100, 100);
-            page.AddText("Aucune différence détectée lors de cette session.", 12m, new PdfPoint((double)startX, (double)currentY), font);
+            page.AddText("No differences detected during this session.", 12m, new PdfPoint((double)startX, (double)currentY), font);
             return;
         }
 
         page.SetTextAndFillColor(0, 0, 0);
-        page.AddText("Top 3 des fichiers les plus modifiés :", 12m, new PdfPoint((double)startX, (double)currentY), fontBold);
-        page.AddText("Volume de différences par Langue :", 12m, new PdfPoint((double)(startX + 400m), (double)currentY), fontBold);
+        page.AddText("Top 3 Most Modified Files:", 12m, new PdfPoint((double)startX, (double)currentY), fontBold);
+        page.AddText("Differences Volume by Language:", 12m, new PdfPoint((double)(startX + 400m), (double)currentY), fontBold);
 
         decimal listY = currentY - 20m;
         foreach (var file in topFiles)
@@ -264,15 +308,15 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
             page.SetTextAndFillColor(80, 80, 80);
             page.AddText($"• Documents [{kvp.Key}]", 10m, new PdfPoint((double)(startX + 400m), (double)langY), font);
             page.SetTextAndFillColor(0, 50, 150);
-            page.AddText($"{kvp.Value} erreurs", 10m, new PdfPoint((double)(startX + 520m), (double)langY), fontBold);
+            page.AddText($"{kvp.Value} errors", 10m, new PdfPoint((double)(startX + 520m), (double)langY), fontBold);
             langY -= 15m;
         }
 
         currentY -= 75m;
 
         page.SetTextAndFillColor(0, 0, 0);
-        page.AddText("Répartition par type d'action :", 11m, new PdfPoint((double)startX, (double)currentY), fontBold);
-        page.AddText("Nature des données impactées :", 11m, new PdfPoint((double)(startX + 260m), (double)currentY), fontBold);
-        page.AddText("Documents modifiés par Langue :", 11m, new PdfPoint((double)(startX + 520m), (double)currentY), fontBold);
+        page.AddText("Distribution by Action Type:", 11m, new PdfPoint((double)startX, (double)currentY), fontBold);
+        page.AddText("Nature of Impacted Data:", 11m, new PdfPoint((double)(startX + 260m), (double)currentY), fontBold);
+        page.AddText("Modified Documents by Language:", 11m, new PdfPoint((double)(startX + 520m), (double)currentY), fontBold);
     }
 }

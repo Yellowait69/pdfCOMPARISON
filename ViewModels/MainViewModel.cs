@@ -89,12 +89,16 @@ public partial class MainViewModel : ObservableObject
         var individualReportGen = new IndividualReportGenerator(drawingService);
         var globalReportGen = new GlobalSynthesisReportGenerator(drawingService, chartService, inlineDiffService);
 
-        // 4. Orchestrateur principal mis à jour
+        // NOUVEAU : Service d'image (PdfiumViewer) pour les captures visuelles
+        var imageService = new PdfImageService();
+
+        // 4. Orchestrateur principal mis à jour avec le service d'image
         _orchestrator = new PdfComparisonOrchestrator(
             extractionService,
             diffAnalyzer,
             individualReportGen,
-            globalReportGen
+            globalReportGen,
+            imageService
         );
         // ==============================================================
 

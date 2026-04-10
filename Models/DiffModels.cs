@@ -28,6 +28,10 @@ public class DiffSummaryBlock
     public string NewText { get; init; } = string.Empty;
     public string ContextAfter { get; init; } = string.Empty;
     public ChangeType Type { get; init; }
+
+    // NOUVEAU : Stockage des captures d'écran pour le rapport visuel (via PdfiumViewer)
+    public byte[]? SourceImage { get; set; }
+    public byte[]? TargetImage { get; set; }
 }
 
 /// <summary>
@@ -39,6 +43,9 @@ public class DocumentDiffSummary
 
     // NOUVELLE PROPRIÉTÉ : Stocke la langue extraite du fichier (ex: "NL", "FR", "DE")
     public string Language { get; init; } = string.Empty;
+
+    // NOUVEAU : Stocke le nom exact du fichier PDF de rapport détaillé (pour le lien)
+    public string ReportFileName { get; set; } = string.Empty;
 
     // Le setter a été retiré. La liste est instanciée une fois pour toutes.
     public List<DiffSummaryBlock> Blocks { get; } = new();
