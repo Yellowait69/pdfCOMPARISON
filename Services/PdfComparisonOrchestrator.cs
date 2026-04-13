@@ -18,7 +18,7 @@ public class PdfComparisonOrchestrator
     private readonly PdfDiffAnalyzer _diffAnalyzer;
     private readonly IIndividualReportGenerator _individualReportGenerator;
     private readonly IGlobalSynthesisReportGenerator _globalReportGenerator;
-    private readonly IPdfImageService _imageService; // Service d'image
+    private readonly IPdfImageService _imageService;
 
     // Injection de dépendances mise à jour
     public PdfComparisonOrchestrator(
@@ -45,7 +45,7 @@ public class PdfComparisonOrchestrator
         var parallelOptions = new ParallelOptions
         {
             // Limitation stricte pour éviter la saturation de RAM avec PdfiumViewer
-            MaxDegreeOfParallelism = Math.Max(1, Math.Min(Environment.ProcessorCount, 3)),
+            MaxDegreeOfParallelism = Math.Max(1, Math.Min(Environment.ProcessorCount, 16)),
             CancellationToken = cancellationToken
         };
 
@@ -133,14 +133,17 @@ public class PdfComparisonOrchestrator
 
         var diffResult = _diffAnalyzer.AnalyzeDifferences(pair, cleanSource, cleanTarget, sourceWords, targetWords);
 
-        int visualInsertions = CountVisualSegments(diffResult.Highlights.TargetRed);
-        int visualDeletions = CountVisualSegments(diffResult.Highlights.SourceRed);
-        int visualModifications = CountVisualSegments(diffResult.Highlights.TargetYellow);
+        // =====================================================================
+        // NOUVEAU COMPTAGE : On utilise directement les blocs logiques fusionnés
+        // du résumé au lieu de compter les fragments visuels un par un.
+        // =====================================================================
+        int insertions = diffResult.Summary.Blocks.Count(b => b.Type == ChangeType.Inserted);
+        int deletions = diffResult.Summary.Blocks.Count(b => b.Type == ChangeType.Deleted);
 
-        int totalVisualDiffs = visualInsertions + visualDeletions + visualModifications;
-        diffResult.DifferencesCount = totalVisualDiffs;
+        int totalDiffs = diffResult.Summary.Blocks.Count;
+        diffResult.DifferencesCount = totalDiffs;
 
-        if (totalVisualDiffs > 0)
+        if (totalDiffs > 0)
         {
             string reportFileName = $"DiffReport_Doc_{pair.MatchKey}.pdf";
             string reportPath = Path.Combine(outputDiffDir, reportFileName);
@@ -182,7 +185,7 @@ public class PdfComparisonOrchestrator
                 // Mémorisation du nom du fichier pour le bouton du Dashboard
                 diffResult.Summary.ReportFileName = reportFileName;
 
-                UpdatePairStatus(pair, CompareStatus.Different, $"{totalVisualDiffs} difference(s) detected", totalVisualDiffs, visualInsertions, visualDeletions);
+                UpdatePairStatus(pair, CompareStatus.Different, $"{totalDiffs} difference(s) detected", totalDiffs, insertions, deletions);
             }
             catch (IOException)
             {
@@ -195,7 +198,7 @@ public class PdfComparisonOrchestrator
                 // Mémorisation du nom du fichier de secours pour le bouton du Dashboard
                 diffResult.Summary.ReportFileName = reportFileName;
 
-                UpdatePairStatus(pair, CompareStatus.Different, $"{totalVisualDiffs} difference(s) (Saved as new version)", totalVisualDiffs, visualInsertions, visualDeletions);
+                UpdatePairStatus(pair, CompareStatus.Different, $"{totalDiffs} difference(s) (Saved as new version)", totalDiffs, insertions, deletions);
             }
 
             summariesBag.Add(diffResult.Summary);
@@ -263,52 +266,6 @@ public class PdfComparisonOrchestrator
             }
         }
         return RectangleF.Empty;
-    }
-
-    private int CountVisualSegments(IEnumerable<LetterLoc> letters)
-    {
-        if (letters == null || !letters.Any()) return 0;
-        const decimal AlignmentTolerance = 5.0m;
-        var sorted = letters
-            .OrderByDescending(l => Math.Round(l.BaselineY / AlignmentTolerance) * AlignmentTolerance)
-            .ThenBy(l => l.BoundingBox.BottomLeft.X)
-            .ToList();
-
-        if (sorted.Count == 0) return 0;
-
-        int count = 0;
-        var first = sorted[0];
-
-        decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X;
-        decimal cMaxX = (decimal)first.BoundingBox.TopRight.X;
-        decimal cBaseline = first.BaselineY;
-        decimal cFontSize = first.FontSize;
-
-        for (int i = 1; i < sorted.Count; i++)
-        {
-            var loc = sorted[i];
-            decimal x = (decimal)loc.BoundingBox.BottomLeft.X;
-            decimal y = loc.BaselineY;
-
-            bool isSameLine = Math.Abs(Math.Round(y / AlignmentTolerance) * AlignmentTolerance - Math.Round(cBaseline / AlignmentTolerance) * AlignmentTolerance) < 1m;
-            decimal maxGap = Math.Max(15m, cFontSize * 1.5m);
-
-            if (isSameLine && (x - cMaxX) < maxGap && x >= cMinX - 5m)
-            {
-                cMaxX = Math.Max(cMaxX, (decimal)loc.BoundingBox.TopRight.X);
-                cFontSize = Math.Max(cFontSize, loc.FontSize);
-            }
-            else
-            {
-                count++;
-                cMinX = x;
-                cMaxX = (decimal)loc.BoundingBox.TopRight.X;
-                cBaseline = y;
-                cFontSize = loc.FontSize;
-            }
-        }
-        count++;
-        return count;
     }
 
     private void UpdatePairStatus(DocumentPair pair, CompareStatus status, string errorMessage, int diffCount, int insertions = 0, int deletions = 0)
