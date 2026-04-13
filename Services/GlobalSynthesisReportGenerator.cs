@@ -330,9 +330,19 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         foreach (var file in topFiles)
         {
             page.SetTextAndFillColor(80, 80, 80);
-            page.AddText($"• {file.DocumentName}", 10m, new PdfPoint((double)startX, (double)listY), font);
+
+            // CORRECTION: Troncature du nom de fichier pour éviter le chevauchement
+            string displayName = file.DocumentName;
+            if (displayName.Length > 45)
+            {
+                displayName = displayName.Substring(0, 42) + "...";
+            }
+
+            page.AddText($"• {displayName}", 10m, new PdfPoint((double)startX, (double)listY), font);
+
             page.SetTextAndFillColor(0, 50, 150);
-            page.AddText($"{file.Blocks.Count} diffs", 10m, new PdfPoint((double)(startX + 280m), (double)listY), fontBold);
+            // CORRECTION: Le compteur est décalé à + 330m pour garantir de l'espace
+            page.AddText($"{file.Blocks.Count} diffs", 10m, new PdfPoint((double)(startX + 330m), (double)listY), fontBold);
             listY -= 15m;
         }
 
