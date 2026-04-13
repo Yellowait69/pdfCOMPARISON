@@ -100,15 +100,11 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         decimal margin = 40m;
         decimal yPosition = 595m - margin;
 
-        // --- 1. DESSIN DU DASHBOARD (PAGE 1) ---
-        DrawDashboardLayout(page, margin, yPosition, totalChanges, summaries.Count, wordBalance, criticalAlerts, topModifiedFiles, languageDiffCounts, font, fontBold);
+        // --- 1. DESSIN DU DASHBOARD (PAGE 1) SANS CHEVAUCHEMENT ---
+        // On délègue tout le dessin de la première page à cette nouvelle méthode
+        DrawDashboardPage(page, margin, yPosition, totalChanges, summaries.Count, wordBalance, criticalAlerts, totalInserts, totalDeletes, typeDates, typeNumbers, typeWords, languageFileCounts, languageDiffCounts, topModifiedFiles, font, fontBold);
 
-        if (totalChanges > 0)
-        {
-            _chartService.DrawDashboardCharts(page, margin, yPosition - 160m, totalInserts, totalDeletes, typeDates, typeNumbers, typeWords, languageFileCounts, font);
-        }
-
-        // --- CORRECTION MAJEURE : SAUT DE PAGE FORCÉ POUR LES DÉTAILS ---
+        // --- 2. SAUT DE PAGE FORCÉ POUR LES DÉTAILS ---
         if (summaries.Any(s => s.Blocks.Count > 0))
         {
             page = builder.AddPage(842, 595);
@@ -120,7 +116,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         int maxCharsCol = 55;
         decimal drawWidth = 370m;
 
-        // --- 2. DESSIN DES DÉTAILS LIGNE PAR LIGNE ---
+        // --- 3. DESSIN DES DÉTAILS LIGNE PAR LIGNE ---
         foreach (var doc in summaries.OrderBy(s => s.DocumentName))
         {
             if (doc.Blocks.Count == 0) continue;
@@ -153,28 +149,27 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                 decimal estimatedHeight = hasImages ? (maxImgHeight + 90m) :
                     (Math.Max(block.OldText.Length, block.NewText.Length) / maxCharsCol + 3) * 15m + 80m;
 
-                // On prévoit plus d'espace si on doit dessiner l'en-tête du document
                 decimal requiredHeight = estimatedHeight + (isFirstBlockOfDoc ? 35m : 0m);
 
                 if (page == null || yPosition - requiredHeight < margin)
                 {
                     page = builder.AddPage(842, 595);
                     yPosition = 595m - margin;
-                    isFirstBlockOfDoc = true; // On redessine l'en-tête sur la nouvelle page
+                    isFirstBlockOfDoc = true;
                 }
 
-                // DESSIN DE L'EN-TÊTE DU DOCUMENT (Une seule fois par document/page)
+                // DESSIN DE L'EN-TÊTE DU DOCUMENT
                 if (isFirstBlockOfDoc)
                 {
-                    page.SetTextAndFillColor(240, 245, 250); // Fond Gris/Bleuté très clair
+                    page.SetTextAndFillColor(240, 245, 250);
                     page.DrawRectangle(new PdfPoint((double)(margin - 5m), (double)(yPosition - 4m)), 772m, 22m, 0m, true);
 
-                    page.SetTextAndFillColor(15, 23, 42); // Noir "Slate 900"
+                    page.SetTextAndFillColor(15, 23, 42);
                     page.AddText($"Document: {doc.DocumentName}", 12m, new PdfPoint((double)margin, (double)yPosition), fontBold);
 
                     if (!string.IsNullOrEmpty(doc.ReportFileName))
                     {
-                        page.SetTextAndFillColor(37, 99, 235); // Bleu lien
+                        page.SetTextAndFillColor(37, 99, 235);
                         page.AddText($"► See Details in: {doc.ReportFileName}", 10m, new PdfPoint((double)(margin + 400m), (double)yPosition), fontBold);
                     }
 
@@ -182,7 +177,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                     isFirstBlockOfDoc = false;
                 }
 
-                // DESSIN DU BADGE DE TYPE DE DIFFÉRENCE
                 string changeTypeStr = block.Type switch
                 {
                     ChangeType.Inserted => "INSERTION",
@@ -198,7 +192,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                 page.AddText($"Type: {changeTypeStr}", 10m, new PdfPoint((double)margin, (double)yPosition), fontBold);
                 yPosition -= 15m;
 
-                // EN-TÊTES DE COLONNES
                 page.SetTextAndFillColor(150, 150, 150);
                 page.AddText("Original Document (Source)", 9m, new PdfPoint((double)leftColumnX, (double)yPosition), fontBold);
                 page.AddText("Modified Document (Target)", 9m, new PdfPoint((double)rightColumnX, (double)yPosition), fontBold);
@@ -259,7 +252,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                     yPosition = Math.Min(currentYLeft, currentYRight) - 10m;
                 }
 
-                // LIGNE DE SÉPARATION ENTRE LES BLOCS D'UN MÊME DOCUMENT
                 page.SetStrokeColor(220, 220, 220);
                 page.DrawLine(new PdfPoint((double)margin, (double)(yPosition + 5m)), new PdfPoint((double)(842m - margin), (double)(yPosition + 5m)), 1.0m);
                 yPosition -= 15m;
@@ -276,18 +268,29 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         }
     }
 
-    private void DrawDashboardLayout(PdfPageBuilder page, decimal startX, decimal startY, int totalChanges, int totalFiles, int wordBalance, int criticalAlerts, List<DocumentDiffSummary> topFiles, Dictionary<string, int> languageDiffCounts, PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold)
+    /// <summary>
+    /// Nouvelle méthode gérant le dessin complet et séquentiel de la page 1 (Dashboard).
+    /// Chaque élément descend proprement le curseur (currentY) pour empêcher tout chevauchement.
+    /// </summary>
+    private void DrawDashboardPage(
+        PdfPageBuilder page, decimal startX, decimal startY, int totalChanges, int totalFiles,
+        int wordBalance, int criticalAlerts, int totalInserts, int totalDeletes, int typeDates,
+        int typeNumbers, int typeWords, Dictionary<string, int> languageFileCounts,
+        Dictionary<string, int> languageDiffCounts, List<DocumentDiffSummary> topFiles,
+        PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold)
     {
         decimal currentY = startY;
 
+        // --- 1. TITRE ET DATE ---
         page.SetTextAndFillColor(0, 50, 150);
         page.AddText("GLOBAL SYNTHESIS REPORT", 18m, new PdfPoint((double)startX, (double)currentY), fontBold);
 
         page.SetTextAndFillColor(100, 100, 100);
         page.AddText($"Generated on {DateTime.Now:dd/MM/yyyy at HH:mm} • Automated document comparison.", 10m, new PdfPoint((double)startX, (double)(currentY - 18m)), font);
 
-        currentY -= 50m;
+        currentY -= 65m; // Descente sous le titre
 
+        // --- 2. BOÎTES DE STATISTIQUES ---
         string balanceText = wordBalance > 0 ? $"+ {wordBalance} words" : $"{wordBalance} words";
 
         _drawingService.DrawStatBox(page, startX, currentY, "Impacted Files", totalFiles.ToString(), font, fontBold, 0, 50, 150);
@@ -295,7 +298,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         _drawingService.DrawStatBox(page, startX + 310m, currentY, "Net Balance (Volume)", balanceText, font, fontBold, wordBalance < 0 ? (byte)220 : (byte)16, wordBalance < 0 ? (byte)20 : (byte)185, wordBalance < 0 ? (byte)20 : (byte)129);
         _drawingService.DrawStatBox(page, startX + 465m, currentY, "Sensitive Words", criticalAlerts.ToString(), font, fontBold, criticalAlerts > 0 ? (byte)255 : (byte)0, criticalAlerts > 0 ? (byte)140 : (byte)50, criticalAlerts > 0 ? (byte)0 : (byte)150);
 
-        currentY -= 60m;
+        currentY -= 60m; // Descente sous les boîtes de stats
 
         if (totalChanges == 0)
         {
@@ -304,6 +307,21 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
             return;
         }
 
+        // --- 3. TITRES DES GRAPHIQUES ---
+        page.SetTextAndFillColor(0, 0, 0);
+        page.AddText("Distribution by Action Type:", 11m, new PdfPoint((double)startX, (double)currentY), fontBold);
+        page.AddText("Nature of Impacted Data:", 11m, new PdfPoint((double)(startX + 260m), (double)currentY), fontBold);
+        page.AddText("Modified Documents by Language:", 11m, new PdfPoint((double)(startX + 520m), (double)currentY), fontBold);
+
+        currentY -= 15m; // Descente juste sous le titre des graphiques
+
+        // --- 4. GRAPHIQUES (CAMEMBERTS) ---
+        // Le chartService dessine le camembert de currentY vers le bas (hauteur de 200px)
+        _chartService.DrawDashboardCharts(page, startX, currentY, totalInserts, totalDeletes, typeDates, typeNumbers, typeWords, languageFileCounts, font);
+
+        currentY -= 210m; // On saute l'espace visuel pris par les graphiques (200px + 10px de marge)
+
+        // --- 5. LISTES DES FICHIERS ET LANGUES ---
         page.SetTextAndFillColor(0, 0, 0);
         page.AddText("Top 3 Most Modified Files:", 12m, new PdfPoint((double)startX, (double)currentY), fontBold);
         page.AddText("Differences Volume by Language:", 12m, new PdfPoint((double)(startX + 400m), (double)currentY), fontBold);
@@ -327,12 +345,5 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
             page.AddText($"{kvp.Value} errors", 10m, new PdfPoint((double)(startX + 520m), (double)langY), fontBold);
             langY -= 15m;
         }
-
-        currentY -= 75m;
-
-        page.SetTextAndFillColor(0, 0, 0);
-        page.AddText("Distribution by Action Type:", 11m, new PdfPoint((double)startX, (double)currentY), fontBold);
-        page.AddText("Nature of Impacted Data:", 11m, new PdfPoint((double)(startX + 260m), (double)currentY), fontBold);
-        page.AddText("Modified Documents by Language:", 11m, new PdfPoint((double)(startX + 520m), (double)currentY), fontBold);
     }
 }
