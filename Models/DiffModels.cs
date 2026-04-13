@@ -19,15 +19,16 @@ public enum MarkupStyle
 
 /// <summary>
 /// Représente un bloc de texte comparé pour le résumé global.
-/// Utilise des propriétés 'init' pour garantir que les données ne soient pas modifiées par erreur après création.
+/// Les propriétés utilisent 'set' au lieu de 'init' pour permettre la fusion dynamique
+/// de lignes contiguës en un seul grand bloc de différence.
 /// </summary>
 public class DiffSummaryBlock
 {
-    public string ContextBefore { get; init; } = string.Empty;
-    public string OldText { get; init; } = string.Empty;
-    public string NewText { get; init; } = string.Empty;
-    public string ContextAfter { get; init; } = string.Empty;
-    public ChangeType Type { get; init; }
+    public string ContextBefore { get; set; } = string.Empty;
+    public string OldText { get; set; } = string.Empty;
+    public string NewText { get; set; } = string.Empty;
+    public string ContextAfter { get; set; } = string.Empty;
+    public ChangeType Type { get; set; }
 
     // NOUVEAU : Stockage des captures d'écran pour le rapport visuel (via PdfiumViewer)
     public byte[]? SourceImage { get; set; }

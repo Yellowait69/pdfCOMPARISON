@@ -100,6 +100,55 @@ public class PdfDrawingService : IPdfDrawingService
 
         pageBuilder.SetStrokeColor(r, g, b);
 
+        // =========================================================
+        // NOUVEAU : CALCUL DU TRAIT CONTINU DANS LA MARGE
+        // =========================================================
+        if (style == MarkupStyle.Highlight && segments.Count > 0)
+        {
+            var marginBlocks = new List<(decimal minY, decimal maxY)>();
+
+            // Initialisation avec le premier segment (Y décroissant = de haut en bas)
+            decimal currentMaxY = segments[0].baselineY + (segments[0].fontSize * 0.9m);
+            decimal currentMinY = segments[0].baselineY - (segments[0].fontSize * 0.2m);
+
+            for (int i = 1; i < segments.Count; i++)
+            {
+                var seg = segments[i];
+                decimal boxMinY = seg.baselineY - (seg.fontSize * 0.2m);
+                decimal boxMaxY = seg.baselineY + (seg.fontSize * 0.9m);
+
+                // Si l'espace entre le bas du bloc précédent et le haut du bloc courant
+                // est inférieur à 2x la taille de la police, on fusionne !
+                if (currentMinY - boxMaxY < seg.fontSize * 2.0m)
+                {
+                    currentMinY = Math.Min(currentMinY, boxMinY);
+                    currentMaxY = Math.Max(currentMaxY, boxMaxY);
+                }
+                else
+                {
+                    // L'écart est trop grand, on clôture le bloc pour en créer un nouveau
+                    marginBlocks.Add((currentMinY, currentMaxY));
+                    currentMaxY = boxMaxY;
+                    currentMinY = boxMinY;
+                }
+            }
+            marginBlocks.Add((currentMinY, currentMaxY));
+
+            // Dessin des traits continus fusionnés dans la marge
+            foreach (var mb in marginBlocks)
+            {
+                decimal marginX = 10m; // Positionnée tout à gauche
+                pageBuilder.DrawLine(
+                    new PdfPoint((double)marginX, (double)mb.minY),
+                    new PdfPoint((double)marginX, (double)mb.maxY),
+                    15.0m // Trait très épais
+                );
+            }
+        }
+
+        // =========================================================
+        // DESSIN DES CONTOURS DE MOTS
+        // =========================================================
         foreach (var seg in segments)
         {
             decimal strokeWidth = Math.Max(seg.fontSize * 0.08m, 0.75m);
@@ -119,15 +168,13 @@ public class PdfDrawingService : IPdfDrawingService
                     break;
                 case MarkupStyle.Highlight:
                     // STYLE "ÉDITEUR DE CODE MODERNE" (ex: GitHub, VS Code)
-
-                    // Calcul des dimensions de la boîte de contour
                     decimal padding = seg.fontSize * 0.15m;
                     decimal boxX = seg.minX - padding;
                     decimal boxY = seg.baselineY - (seg.fontSize * 0.2m);
                     decimal boxWidth = (seg.maxX - seg.minX) + (padding * 2);
                     decimal boxHeight = seg.fontSize * 1.1m;
 
-                    // 1. Encadrement net autour du mot
+                    // Encadrement net autour du mot
                     pageBuilder.DrawRectangle(
                         new PdfPoint((double)boxX, (double)boxY),
                         boxWidth,
@@ -135,13 +182,8 @@ public class PdfDrawingService : IPdfDrawingService
                         3.0m,     // Épaisseur du trait fin et élégant
                         false);   // false = pas de remplissage, le texte en dessous reste 100% visible !
 
-                    // 2. Barre verticale épaisse dans la marge gauche pour attirer l'œil
-                    decimal marginX = 10m; // Positionnée tout à gauche de la page
-                    pageBuilder.DrawLine(
-                        new PdfPoint((double)marginX, (double)boxY),
-                        new PdfPoint((double)marginX, (double)(boxY + boxHeight)),
-                        15.0m      // Trait très épais et visible
-                    );
+                    // NOTE: Le trait de la marge gauche n'est plus dessiné ici à l'unité.
+                    // Il est désormais géré par le système de blocs continus en amont.
                     break;
             }
         }
