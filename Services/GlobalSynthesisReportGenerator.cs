@@ -30,6 +30,10 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
     [GeneratedRegex(@"(?i)\b(prix|pénalité|pénalités|résiliation|ttc|ht|garantie|article|euro|taxe|montant|facture|price|penalty|termination|vat|warranty|tax|amount|invoice)\b")]
     private static partial Regex CriticalRegex();
 
+    // NOUVEAU : Regex ciblant uniquement les chiffres (\d+) collés à ".pdf" ou ".PDF" à la fin du nom de fichier ($)
+    [GeneratedRegex(@"(\d+)\.pdf$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex FileSuffixNumberRegex();
+
     public GlobalSynthesisReportGenerator(
         IPdfDrawingService drawingService,
         IPdfChartService chartService,
@@ -101,7 +105,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         decimal yPosition = 595m - margin;
 
         // --- 1. DESSIN DU DASHBOARD (PAGE 1) SANS CHEVAUCHEMENT ---
-        // On délègue tout le dessin de la première page à cette nouvelle méthode
         DrawDashboardPage(page, margin, yPosition, totalChanges, summaries.Count, wordBalance, criticalAlerts, totalInserts, totalDeletes, typeDates, typeNumbers, typeWords, languageFileCounts, languageDiffCounts, topModifiedFiles, font, fontBold);
 
         // --- 2. SAUT DE PAGE FORCÉ POUR LES DÉTAILS ---
@@ -116,8 +119,18 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         int maxCharsCol = 55;
         decimal drawWidth = 370m;
 
-        // --- 3. DESSIN DES DÉTAILS LIGNE PAR LIGNE ---
-        foreach (var doc in summaries.OrderBy(s => s.DocumentName))
+        // --- 3. TRI SPÉCIFIQUE SUR LE DERNIER CHIFFRE (ex: 17 dans "_17.pdf") ---
+        // Le programme extrait le groupe de chiffres juste avant ".pdf".
+        // S'il n'y en a pas, il met int.MaxValue (le fichier ira à la fin).
+        // En cas d'égalité sur ce numéro, il fait un tri alphabétique classique.
+        var sortedSummaries = summaries.OrderBy(s =>
+        {
+            var match = FileSuffixNumberRegex().Match(s.DocumentName ?? string.Empty);
+            return match.Success && int.TryParse(match.Groups[1].Value, out int num) ? num : int.MaxValue;
+        }).ThenBy(s => s.DocumentName).ToList();
+
+        // --- 4. DESSIN DES DÉTAILS LIGNE PAR LIGNE ---
+        foreach (var doc in sortedSummaries)
         {
             if (doc.Blocks.Count == 0) continue;
 
@@ -331,18 +344,18 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         {
             page.SetTextAndFillColor(80, 80, 80);
 
-            // CORRECTION: Troncature du nom de fichier pour éviter le chevauchement
+            // CORRECTION: Troncature à 60 caractères pour laisser de la place au compteur.
             string displayName = file.DocumentName;
-            if (displayName.Length > 45)
+            if (displayName.Length > 70)
             {
-                displayName = displayName.Substring(0, 42) + "...";
+                displayName = displayName.Substring(0, 57) + "...";
             }
 
             page.AddText($"• {displayName}", 10m, new PdfPoint((double)startX, (double)listY), font);
 
             page.SetTextAndFillColor(0, 50, 150);
-            // CORRECTION: Le compteur est décalé à + 330m pour garantir de l'espace
-            page.AddText($"{file.Blocks.Count} diffs", 10m, new PdfPoint((double)(startX + 330m), (double)listY), fontBold);
+            // CORRECTION: Le compteur est décalé à + 350m pour garantir de l'espace
+            page.AddText($"{file.Blocks.Count} diffs", 10m, new PdfPoint((double)(startX + 350m), (double)listY), fontBold);
             listY -= 15m;
         }
 
