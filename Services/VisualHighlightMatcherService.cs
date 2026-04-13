@@ -82,8 +82,6 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         bool[] matchedNew = new bool[insertsCount];
 
         // --- ÉTAPE A : Matcher de Phrases Entières (Déplacements de blocs) ---
-        // NOUVELLE LOGIQUE : On autorise un déplacement libre dans le document
-        // UNIQUEMENT si la séquence correspond à une phrase complète (même LineIndex du début à la fin).
         int idxDel = 0;
         while (idxDel < deletesCount)
         {
@@ -128,25 +126,29 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
                     // Si les deux phrases ont exactement le même nombre de mots, on les compare
                     if (delLen == insLen)
                     {
-                        bool isMatch = true;
-                        for (int k = 0; k < delLen; k++)
+                        // NOUVELLE RÈGLE : On accepte le déplacement du bloc UNIQUEMENT sur la même ligne ou la ligne d'après (écart <= 1)
+                        if (Math.Abs(currentLineIndex - targetLineIndex) <= 1)
                         {
-                            if (!string.Equals(globalDeletes[delStart + k].CleanText, globalInserts[insStart + k].CleanText))
-                            {
-                                isMatch = false;
-                                break;
-                            }
-                        }
-
-                        // Match parfait ! La phrase entière a été déplacée.
-                        if (isMatch)
-                        {
+                            bool isMatch = true;
                             for (int k = 0; k < delLen; k++)
                             {
-                                matchedOld[delStart + k] = true;
-                                matchedNew[insStart + k] = true;
+                                if (!string.Equals(globalDeletes[delStart + k].CleanText, globalInserts[insStart + k].CleanText))
+                                {
+                                    isMatch = false;
+                                    break;
+                                }
                             }
-                            break; // Phrase trouvée, on arrête de chercher dans les insertions
+
+                            // Match parfait ! La phrase entière a été trouvée et respecte le saut de ligne autorisé.
+                            if (isMatch)
+                            {
+                                for (int k = 0; k < delLen; k++)
+                                {
+                                    matchedOld[delStart + k] = true;
+                                    matchedNew[insStart + k] = true;
+                                }
+                                break; // Phrase trouvée, on arrête de chercher dans les insertions
+                            }
                         }
                     }
 
@@ -172,11 +174,11 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
 
                 if (string.Equals(oldWord, globalInserts[j].CleanText))
                 {
-                    // RÈGLE STRICTE : Le mot isolé DOIT obligatoirement appartenir à la même phrase
+                    // RÈGLE STRICTE : Le mot isolé DOIT obligatoirement appartenir à la même phrase (même ligne)
                     if (globalDeletes[i].LineIndex != globalInserts[j].LineIndex)
                         continue;
 
-                    // Maintien de la sécurité spatiale pour les anomalies de PDF superposés
+                    // Maintien de la sécurité spatiale pour les anomalies de PDF superposés ou décalages X
                     if (!IsLocallyClose(globalDeletes[i].Letters, globalInserts[j].Letters))
                         continue;
 
@@ -200,7 +202,7 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
 
                 if (_semanticService.AreConceptuallySimilar(oldWord, globalInserts[j].CleanText))
                 {
-                    // RÈGLE STRICTE : Une modification sémantique n'est valable que dans la même phrase
+                    // RÈGLE STRICTE : Une modification sémantique n'est valable que dans la même phrase (même ligne)
                     if (globalDeletes[i].LineIndex != globalInserts[j].LineIndex)
                         continue;
 
@@ -237,10 +239,11 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private bool IsLocallyClose(List<LetterLoc> oldLocList, List<LetterLoc> newLocList)
     {
-        // VÉRIFICATION COMPLÈTE : Même page, Axe Y < 100 pts de différence, Axe X < 50 pts de différence.
+        // VÉRIFICATION COMPLÈTE : Même page, Axe Y < 15 pts (même ligne physique garantie).
+        // On augmente l'Axe X à 250 pts pour tolérer que le mot isolé soit poussé vers la droite sur la MÊME ligne.
         return oldLocList.Count > 0 && newLocList.Count > 0 &&
                oldLocList[0].PageNumber == newLocList[0].PageNumber &&
-               Math.Abs(oldLocList[0].BaselineY - newLocList[0].BaselineY) < 100.0m &&
-               Math.Abs((decimal)oldLocList[0].BoundingBox.BottomLeft.X - (decimal)newLocList[0].BoundingBox.BottomLeft.X) < 50.0m;
+               Math.Abs(oldLocList[0].BaselineY - newLocList[0].BaselineY) < 15.0m &&
+               Math.Abs((decimal)oldLocList[0].BoundingBox.BottomLeft.X - (decimal)newLocList[0].BoundingBox.BottomLeft.X) < 250.0m;
     }
 }
