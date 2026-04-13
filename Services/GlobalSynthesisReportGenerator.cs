@@ -50,7 +50,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         var builder = new PdfDocumentBuilder();
         var (font, fontBold) = _drawingService.LoadFonts(builder);
 
-        // NOUVEAU : On retire totalModifies
         int totalInserts = 0, totalDeletes = 0;
         int typeDates = 0, typeNumbers = 0, typeWords = 0;
         int totalOldWords = 0, totalNewWords = 0, criticalAlerts = 0;
@@ -73,7 +72,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
             foreach (var block in doc.Blocks)
             {
-                // NOUVEAU : Logique purement binaire
                 if (block.Type == ChangeType.Inserted) totalInserts++;
                 else if (block.Type == ChangeType.Deleted) totalDeletes++;
 
@@ -102,32 +100,39 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         decimal margin = 40m;
         decimal yPosition = 595m - margin;
 
+        // --- 1. DESSIN DU DASHBOARD (PAGE 1) ---
         DrawDashboardLayout(page, margin, yPosition, totalChanges, summaries.Count, wordBalance, criticalAlerts, topModifiedFiles, languageDiffCounts, font, fontBold);
 
         if (totalChanges > 0)
         {
-            // NOUVEAU : On ne passe plus totalModifies au graphique
             _chartService.DrawDashboardCharts(page, margin, yPosition - 160m, totalInserts, totalDeletes, typeDates, typeNumbers, typeWords, languageFileCounts, font);
+        }
+
+        // --- CORRECTION MAJEURE : SAUT DE PAGE FORCÉ POUR LES DÉTAILS ---
+        if (summaries.Any(s => s.Blocks.Count > 0))
+        {
+            page = builder.AddPage(842, 595);
+            yPosition = 595m - margin;
         }
 
         decimal leftColumnX = margin;
         decimal rightColumnX = 430m;
         int maxCharsCol = 55;
-        decimal drawWidth = 370m; // Largeur fixe des colonnes
+        decimal drawWidth = 370m;
 
+        // --- 2. DESSIN DES DÉTAILS LIGNE PAR LIGNE ---
         foreach (var doc in summaries.OrderBy(s => s.DocumentName))
         {
             if (doc.Blocks.Count == 0) continue;
 
+            bool isFirstBlockOfDoc = true;
+
             foreach (var block in doc.Blocks)
             {
                 bool hasImages = block.SourceImage != null || block.TargetImage != null;
-
                 decimal sourceImgHeight = 0m;
                 decimal targetImgHeight = 0m;
 
-                // --- 1. CALCUL PRÉCIS DE LA HAUTEUR DE L'IMAGE ---
-                // Empêche totalement la déformation de l'image
                 if (block.SourceImage != null)
                 {
                     using var ms = new MemoryStream(block.SourceImage);
@@ -145,18 +150,39 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                 }
 
                 decimal maxImgHeight = Math.Max(sourceImgHeight, targetImgHeight);
-
-                // Calcul dynamique de l'espace requis
                 decimal estimatedHeight = hasImages ? (maxImgHeight + 90m) :
-                    (Math.Max(block.OldText.Length, block.NewText.Length) / maxCharsCol + 3) * 15m + 100m;
+                    (Math.Max(block.OldText.Length, block.NewText.Length) / maxCharsCol + 3) * 15m + 80m;
 
-                if (page == null || yPosition - estimatedHeight < margin)
+                // On prévoit plus d'espace si on doit dessiner l'en-tête du document
+                decimal requiredHeight = estimatedHeight + (isFirstBlockOfDoc ? 35m : 0m);
+
+                if (page == null || yPosition - requiredHeight < margin)
                 {
                     page = builder.AddPage(842, 595);
                     yPosition = 595m - margin;
+                    isFirstBlockOfDoc = true; // On redessine l'en-tête sur la nouvelle page
                 }
 
-                // NOUVEAU : Uniquement Ajouts et Suppressions
+                // DESSIN DE L'EN-TÊTE DU DOCUMENT (Une seule fois par document/page)
+                if (isFirstBlockOfDoc)
+                {
+                    page.SetTextAndFillColor(240, 245, 250); // Fond Gris/Bleuté très clair
+                    page.DrawRectangle(new PdfPoint((double)(margin - 5m), (double)(yPosition - 4m)), 772m, 22m, 0m, true);
+
+                    page.SetTextAndFillColor(15, 23, 42); // Noir "Slate 900"
+                    page.AddText($"Document: {doc.DocumentName}", 12m, new PdfPoint((double)margin, (double)yPosition), fontBold);
+
+                    if (!string.IsNullOrEmpty(doc.ReportFileName))
+                    {
+                        page.SetTextAndFillColor(37, 99, 235); // Bleu lien
+                        page.AddText($"► See Details in: {doc.ReportFileName}", 10m, new PdfPoint((double)(margin + 400m), (double)yPosition), fontBold);
+                    }
+
+                    yPosition -= 30m;
+                    isFirstBlockOfDoc = false;
+                }
+
+                // DESSIN DU BADGE DE TYPE DE DIFFÉRENCE
                 string changeTypeStr = block.Type switch
                 {
                     ChangeType.Inserted => "INSERTION",
@@ -164,30 +190,15 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                     _ => "CHANGE"
                 };
 
-                page.SetTextAndFillColor(71, 85, 105);
-                page.AddText($"File: {doc.DocumentName}", 11m, new PdfPoint((double)margin, (double)yPosition), fontBold);
-
-                // NOUVEAU : Uniquement Vert et Rouge
                 byte r = 0, g = 50, b = 150;
                 if (block.Type == ChangeType.Inserted) { r = 16; g = 185; b = 129; }
                 else if (block.Type == ChangeType.Deleted) { r = 239; g = 68; b = 68; }
 
                 page.SetTextAndFillColor(r, g, b);
-                page.AddText($" | Type: {changeTypeStr}", 11m, new PdfPoint((double)(margin + 280m), (double)yPosition), fontBold);
+                page.AddText($"Type: {changeTypeStr}", 10m, new PdfPoint((double)margin, (double)yPosition), fontBold);
+                yPosition -= 15m;
 
-                yPosition -= 16m;
-
-                if (!string.IsNullOrEmpty(doc.ReportFileName))
-                {
-                    page.SetTextAndFillColor(239, 246, 255);
-                    page.DrawRectangle(new PdfPoint((double)margin, (double)(yPosition - 2m)), 270m, 14m, 0m, true);
-
-                    page.SetTextAndFillColor(37, 99, 235);
-                    page.AddText($"► See Details in : {doc.ReportFileName}", 9m, new PdfPoint((double)(margin + 6m), (double)yPosition), fontBold);
-                }
-
-                yPosition -= 18m;
-
+                // EN-TÊTES DE COLONNES
                 page.SetTextAndFillColor(150, 150, 150);
                 page.AddText("Original Document (Source)", 9m, new PdfPoint((double)leftColumnX, (double)yPosition), fontBold);
                 page.AddText("Modified Document (Target)", 9m, new PdfPoint((double)rightColumnX, (double)yPosition), fontBold);
@@ -195,7 +206,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
                 if (hasImages)
                 {
-                    // --- AFFICHAGE PARFAIT DES IMAGES ---
                     if (block.SourceImage != null)
                     {
                         page.AddPng(block.SourceImage, new PdfRectangle((double)leftColumnX, (double)(yPosition - sourceImgHeight), (double)(leftColumnX + drawWidth), (double)yPosition));
@@ -216,7 +226,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                         page.AddText("(Content deleted)", 10m, new PdfPoint((double)rightColumnX, (double)(yPosition - 20m)), font);
                     }
 
-                    // On décale proprement le curseur Y sous les images
                     yPosition -= (maxImgHeight + 10m);
                 }
                 else
@@ -225,7 +234,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
                     decimal currentYLeft = yPosition;
                     if (!string.IsNullOrWhiteSpace(block.ContextBefore))
-                        currentYLeft = _drawingService.DrawTextLines(page, $"... {block.ContextBefore}", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
+                        currentYLeft = _drawingService.DrawTextLines(page, $"... {block.ContextBefore}", currentYLeft, leftColumnX, maxCharsCol, 150, 150, 150, font);
 
                     if (leftChunks.Count > 0)
                         currentYLeft = _drawingService.DrawMixedTextLines(page, leftChunks, currentYLeft, leftColumnX, drawWidth, font, fontBold);
@@ -233,11 +242,11 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                         currentYLeft = _drawingService.DrawTextLines(page, "(No original text)", currentYLeft, leftColumnX, maxCharsCol, 180, 180, 180, font);
 
                     if (!string.IsNullOrWhiteSpace(block.ContextAfter))
-                        currentYLeft = _drawingService.DrawTextLines(page, $"{block.ContextAfter} ...", currentYLeft, leftColumnX, maxCharsCol, 100, 100, 100, font);
+                        currentYLeft = _drawingService.DrawTextLines(page, $"{block.ContextAfter} ...", currentYLeft, leftColumnX, maxCharsCol, 150, 150, 150, font);
 
                     decimal currentYRight = yPosition;
                     if (!string.IsNullOrWhiteSpace(block.ContextBefore))
-                        currentYRight = _drawingService.DrawTextLines(page, $"... {block.ContextBefore}", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
+                        currentYRight = _drawingService.DrawTextLines(page, $"... {block.ContextBefore}", currentYRight, rightColumnX, maxCharsCol, 150, 150, 150, font);
 
                     if (rightChunks.Count > 0)
                         currentYRight = _drawingService.DrawMixedTextLines(page, rightChunks, currentYRight, rightColumnX, drawWidth, font, fontBold);
@@ -245,11 +254,12 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                         currentYRight = _drawingService.DrawTextLines(page, "(Text deleted)", currentYRight, rightColumnX, maxCharsCol, 180, 180, 180, font);
 
                     if (!string.IsNullOrWhiteSpace(block.ContextAfter))
-                        currentYRight = _drawingService.DrawTextLines(page, $"{block.ContextAfter} ...", currentYRight, rightColumnX, maxCharsCol, 100, 100, 100, font);
+                        currentYRight = _drawingService.DrawTextLines(page, $"{block.ContextAfter} ...", currentYRight, rightColumnX, maxCharsCol, 150, 150, 150, font);
 
                     yPosition = Math.Min(currentYLeft, currentYRight) - 10m;
                 }
 
+                // LIGNE DE SÉPARATION ENTRE LES BLOCS D'UN MÊME DOCUMENT
                 page.SetStrokeColor(220, 220, 220);
                 page.DrawLine(new PdfPoint((double)margin, (double)(yPosition + 5m)), new PdfPoint((double)(842m - margin), (double)(yPosition + 5m)), 1.0m);
                 yPosition -= 15m;
