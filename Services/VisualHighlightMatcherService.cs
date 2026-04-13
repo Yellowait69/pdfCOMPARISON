@@ -15,11 +15,9 @@ public interface IVisualHighlightMatcherService
 
 public class VisualHighlightMatcherService : IVisualHighlightMatcherService
 {
-    private readonly ISemanticSimilarityService _semanticService;
-
-    public VisualHighlightMatcherService(ISemanticSimilarityService semanticService)
+    // Le constructeur ne prend plus de ISemanticSimilarityService
+    public VisualHighlightMatcherService()
     {
-        _semanticService = semanticService ?? throw new ArgumentNullException(nameof(semanticService));
     }
 
     public VisualHighlights GenerateHighlights(
@@ -225,36 +223,7 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
             }
         }
 
-        // --- ÉTAPE C : Matcher Sémantique ---
-        for (int i = 0; i < deletesCount; i++)
-        {
-            if (matchedOld[i]) continue;
-
-            string oldWord = globalDeletes[i].CleanText;
-
-            for (int j = 0; j < insertsCount; j++)
-            {
-                if (matchedNew[j]) continue;
-
-                if (_semanticService.AreConceptuallySimilar(oldWord, globalInserts[j].CleanText))
-                {
-                    // RÈGLE STRICTE : Une modification sémantique sur un mot isolé n'est valable que sur la même ligne
-                    if (globalDeletes[i].LineIndex != globalInserts[j].LineIndex)
-                        continue;
-
-                    if (!IsLocallyClose(globalDeletes[i].Letters, globalInserts[j].Letters))
-                        continue;
-
-                    matchedOld[i] = true;
-                    matchedNew[j] = true;
-                    highlights.SourceYellow.AddRange(globalDeletes[i].Letters);
-                    highlights.TargetYellow.AddRange(globalInserts[j].Letters);
-                    break;
-                }
-            }
-        }
-
-        // --- ÉTAPE D : Reliquat absolu (Rouge et Vert) ---
+        // --- ÉTAPE FINALE : Reliquat absolu (Tout ce qui reste est classé en Ajout ou Suppression pure) ---
         for (int i = 0; i < deletesCount; i++)
         {
             if (!matchedOld[i])

@@ -50,7 +50,8 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         var builder = new PdfDocumentBuilder();
         var (font, fontBold) = _drawingService.LoadFonts(builder);
 
-        int totalInserts = 0, totalDeletes = 0, totalModifies = 0;
+        // NOUVEAU : On retire totalModifies
+        int totalInserts = 0, totalDeletes = 0;
         int typeDates = 0, typeNumbers = 0, typeWords = 0;
         int totalOldWords = 0, totalNewWords = 0, criticalAlerts = 0;
 
@@ -72,9 +73,9 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
             foreach (var block in doc.Blocks)
             {
+                // NOUVEAU : Logique purement binaire
                 if (block.Type == ChangeType.Inserted) totalInserts++;
                 else if (block.Type == ChangeType.Deleted) totalDeletes++;
-                else if (block.Type == ChangeType.Modified) totalModifies++;
 
                 string oldTxt = block.OldText ?? string.Empty;
                 string newTxt = block.NewText ?? string.Empty;
@@ -105,7 +106,8 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
         if (totalChanges > 0)
         {
-            _chartService.DrawDashboardCharts(page, margin, yPosition - 160m, totalInserts, totalDeletes, totalModifies, typeDates, typeNumbers, typeWords, languageFileCounts, font);
+            // NOUVEAU : On ne passe plus totalModifies au graphique
+            _chartService.DrawDashboardCharts(page, margin, yPosition - 160m, totalInserts, totalDeletes, typeDates, typeNumbers, typeWords, languageFileCounts, font);
         }
 
         decimal leftColumnX = margin;
@@ -154,21 +156,21 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                     yPosition = 595m - margin;
                 }
 
+                // NOUVEAU : Uniquement Ajouts et Suppressions
                 string changeTypeStr = block.Type switch
                 {
                     ChangeType.Inserted => "INSERTION",
                     ChangeType.Deleted => "DELETION",
-                    ChangeType.Modified => "MODIFICATION",
                     _ => "CHANGE"
                 };
 
                 page.SetTextAndFillColor(71, 85, 105);
                 page.AddText($"File: {doc.DocumentName}", 11m, new PdfPoint((double)margin, (double)yPosition), fontBold);
 
+                // NOUVEAU : Uniquement Vert et Rouge
                 byte r = 0, g = 50, b = 150;
                 if (block.Type == ChangeType.Inserted) { r = 16; g = 185; b = 129; }
                 else if (block.Type == ChangeType.Deleted) { r = 239; g = 68; b = 68; }
-                else if (block.Type == ChangeType.Modified) { r = 245; g = 158; b = 11; }
 
                 page.SetTextAndFillColor(r, g, b);
                 page.AddText($" | Type: {changeTypeStr}", 11m, new PdfPoint((double)(margin + 280m), (double)yPosition), fontBold);

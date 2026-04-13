@@ -9,13 +9,11 @@ namespace PDFComparison.Services;
 
 public interface ITextDiffSummaryService
 {
-    // CORRECTION : Remplacement de DiffPaneModel par SideBySideDiffModel
     (int DifferencesCount, List<DiffSummaryBlock> Blocks, SideBySideDiffModel DiffLinesModel) BuildTextSummary(string cleanSource, string cleanTarget);
 }
 
 public class TextDiffSummaryService : ITextDiffSummaryService
 {
-    // CORRECTION : Remplacement de DiffPaneModel par SideBySideDiffModel
     public (int DifferencesCount, List<DiffSummaryBlock> Blocks, SideBySideDiffModel DiffLinesModel) BuildTextSummary(string cleanSource, string cleanTarget)
     {
         var diffBuilder = new SideBySideDiffBuilder(new Differ());
@@ -24,7 +22,6 @@ public class TextDiffSummaryService : ITextDiffSummaryService
         var diffLines = diffBuilder.BuildDiffModel(cleanSource ?? string.Empty, cleanTarget ?? string.Empty);
 
         var blocks = new List<DiffSummaryBlock>();
-        int diffCount = 0;
 
         // Mise en cache de la longueur pour de meilleures performances dans les boucles
         int linesCount = diffLines.NewText.Lines.Count;
@@ -33,13 +30,13 @@ public class TextDiffSummaryService : ITextDiffSummaryService
         var sumDel = new Dictionary<string, int>(StringComparer.Ordinal);
         var sumIns = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        // 1. Première passe : Comptabiliser les insertions et suppressions
+        // 1. Première passe : Comptabiliser les insertions et suppressions (y compris celles issues de modifications)
         for (int i = 0; i < linesCount; i++)
         {
             var oldLine = diffLines.OldText.Lines[i];
             var newLine = diffLines.NewText.Lines[i];
 
-            if (oldLine.Type == ChangeType.Deleted)
+            if (oldLine.Type is ChangeType.Deleted or ChangeType.Modified)
             {
                 string t = oldLine.Text.Trim();
                 if (t.Length > 0)
@@ -49,7 +46,7 @@ public class TextDiffSummaryService : ITextDiffSummaryService
                 }
             }
 
-            if (newLine.Type == ChangeType.Inserted)
+            if (newLine.Type is ChangeType.Inserted or ChangeType.Modified)
             {
                 string t = newLine.Text.Trim();
                 if (t.Length > 0)
@@ -74,80 +71,103 @@ public class TextDiffSummaryService : ITextDiffSummaryService
             }
         }
 
-        // 3. Deuxième passe : Générer les blocs de résumé en regroupant les lignes contiguës
-        DiffSummaryBlock? currentBlock = null;
+        // 3. Deuxième passe : Générer les blocs de résumé en scindant les modifications en ajouts et suppressions purs
+        List<string> currentDel = new();
+        List<string> currentIns = new();
+        string ctxBefore = string.Empty;
+        int lastDiffIndex = -1;
 
         for (int i = 0; i < linesCount; i++)
         {
             var newLine = diffLines.NewText.Lines[i];
             var oldLine = diffLines.OldText.Lines[i];
 
+            bool isDel = oldLine.Type is ChangeType.Deleted or ChangeType.Modified;
+            bool isIns = newLine.Type is ChangeType.Inserted or ChangeType.Modified;
+
             // Ignorer les blocs identiques qui ont juste été déplacés
-            if (oldLine.Type == ChangeType.Deleted)
+            if (isDel)
             {
                 string txt = oldLine.Text.Trim();
                 if (txt.Length > 0 && skipDel.TryGetValue(txt, out int moves) && moves > 0)
                 {
                     skipDel[txt] = moves - 1;
-                    currentBlock = null; // Casse la continuité du bloc en cours
-                    continue;
+                    isDel = false; // On annule la suppression puisqu'elle a été déplacée
                 }
             }
-            else if (newLine.Type == ChangeType.Inserted)
+            if (isIns)
             {
                 string txt = newLine.Text.Trim();
                 if (txt.Length > 0 && skipIns.TryGetValue(txt, out int moves) && moves > 0)
                 {
                     skipIns[txt] = moves - 1;
-                    currentBlock = null; // Casse la continuité du bloc en cours
-                    continue;
+                    isIns = false; // On annule l'insertion puisqu'elle a été déplacée
                 }
             }
 
-            // Traitement d'une différence (Ajout, Suppression ou Modification)
-            if (newLine.Type is ChangeType.Inserted or ChangeType.Modified || oldLine.Type is ChangeType.Deleted)
+            // Traitement d'une différence validée
+            if (isDel || isIns)
             {
-                ChangeType currentType = newLine.Type is not ChangeType.Unchanged ? newLine.Type : oldLine.Type;
-
-                // NOUVELLE LOGIQUE DE FUSION : Si le bloc en cours est du même type, on fusionne les lignes
-                if (currentBlock != null && currentBlock.Type == currentType)
+                // Si on commence un nouveau bloc, on capture le contexte "Avant"
+                if (currentDel.Count == 0 && currentIns.Count == 0)
                 {
-                    if (!string.IsNullOrEmpty(oldLine.Text) && (currentType == ChangeType.Modified || currentType == ChangeType.Deleted))
-                    {
-                        currentBlock.OldText += (string.IsNullOrEmpty(currentBlock.OldText) ? "" : "\n") + oldLine.Text;
-                    }
-
-                    if (!string.IsNullOrEmpty(newLine.Text) && (currentType == ChangeType.Inserted || currentType == ChangeType.Modified))
-                    {
-                        currentBlock.NewText += (string.IsNullOrEmpty(currentBlock.NewText) ? "" : "\n") + newLine.Text;
-                    }
-
-                    // On met à jour le contexte "Après" pour qu'il reflète la fin de ce bloc fusionné
-                    currentBlock.ContextAfter = GetValidContextLine(diffLines.NewText.Lines, i, 1);
+                    ctxBefore = GetValidContextLine(diffLines.NewText.Lines, i, -1);
                 }
-                else
-                {
-                    // C'est une NOUVELLE différence, on l'ajoute au compteur et on crée un nouveau bloc
-                    diffCount++;
-                    currentBlock = new DiffSummaryBlock
-                    {
-                        Type = currentType,
-                        ContextBefore = GetValidContextLine(diffLines.NewText.Lines, i, -1),
-                        ContextAfter = GetValidContextLine(diffLines.NewText.Lines, i, 1),
-                        OldText = (currentType is ChangeType.Modified || currentType is ChangeType.Deleted) ? oldLine.Text : string.Empty,
-                        NewText = (currentType is ChangeType.Inserted || currentType is ChangeType.Modified) ? newLine.Text : string.Empty
-                    };
-                    blocks.Add(currentBlock);
-                }
+
+                if (isDel && !string.IsNullOrEmpty(oldLine.Text)) currentDel.Add(oldLine.Text);
+                if (isIns && !string.IsNullOrEmpty(newLine.Text)) currentIns.Add(newLine.Text);
+
+                lastDiffIndex = i;
             }
             else
             {
-                // Ligne inchangée : on casse la continuité pour la prochaine différence
-                currentBlock = null;
+                // Ligne inchangée : on flush (vide) les blocs accumulés avec le contexte "Après"
+                if (currentDel.Count > 0 || currentIns.Count > 0)
+                {
+                    FlushBlocks(blocks, currentDel, currentIns, ctxBefore, GetValidContextLine(diffLines.NewText.Lines, lastDiffIndex, 1));
+                    currentDel.Clear();
+                    currentIns.Clear();
+                }
             }
         }
 
-        return (diffCount, blocks, diffLines);
+        // Flush final si le document se termine par une différence
+        if (currentDel.Count > 0 || currentIns.Count > 0)
+        {
+            FlushBlocks(blocks, currentDel, currentIns, ctxBefore, string.Empty);
+        }
+
+        return (blocks.Count, blocks, diffLines);
+    }
+
+    private void FlushBlocks(List<DiffSummaryBlock> blocks, List<string> dels, List<string> ins, string ctxBefore, string ctxAfter)
+    {
+        // On scinde formellement les différences en Suppressions Pures (Rouge) et Ajouts Purs (Vert)
+        // Les modifications n'existent plus en tant que telles.
+
+        if (dels.Count > 0)
+        {
+            blocks.Add(new DiffSummaryBlock
+            {
+                Type = ChangeType.Deleted,
+                ContextBefore = ctxBefore,
+                ContextAfter = ctxAfter,
+                OldText = string.Join("\n", dels),
+                NewText = string.Empty
+            });
+        }
+
+        if (ins.Count > 0)
+        {
+            blocks.Add(new DiffSummaryBlock
+            {
+                Type = ChangeType.Inserted,
+                ContextBefore = ctxBefore,
+                ContextAfter = ctxAfter,
+                OldText = string.Empty,
+                NewText = string.Join("\n", ins)
+            });
+        }
     }
 
     private string GetValidContextLine(List<DiffPiece> lines, int currentIndex, int direction)

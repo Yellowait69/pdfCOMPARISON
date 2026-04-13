@@ -9,20 +9,19 @@ namespace PDFComparison.Services;
 
 public interface IPdfChartService
 {
-    void DrawDashboardCharts(PdfPageBuilder page, decimal startX, decimal currentY, int inserts, int deletes, int modifies, int dates, int numbers, int words, Dictionary<string, int> languageFileCounts, PdfDocumentBuilder.AddedFont font);
+    void DrawDashboardCharts(PdfPageBuilder page, decimal startX, decimal currentY, int inserts, int deletes, int dates, int numbers, int words, Dictionary<string, int> languageFileCounts, PdfDocumentBuilder.AddedFont font);
 }
 
 public class PdfChartService : IPdfChartService
 {
-    public void DrawDashboardCharts(PdfPageBuilder page, decimal startX, decimal currentY, int inserts, int deletes, int modifies, int dates, int numbers, int words, Dictionary<string, int> languageFileCounts, PdfDocumentBuilder.AddedFont font)
+    public void DrawDashboardCharts(PdfPageBuilder page, decimal startX, decimal currentY, int inserts, int deletes, int dates, int numbers, int words, Dictionary<string, int> languageFileCounts, PdfDocumentBuilder.AddedFont font)
     {
         // =========================================================
-        // GRAPHIQUE 1 : ACTIONS (Ajouts, Suppressions, Modifications)
+        // GRAPHIQUE 1 : ACTIONS (Ajouts, Suppressions purs uniquement)
         // =========================================================
         var slices1 = new List<PieSlice>();
         if (inserts > 0) slices1.Add(new PieSlice { Value = inserts, Label = $"{inserts} Ajouts", FillColor = ScottPlot.Color.FromHex("#10B981") });
         if (deletes > 0) slices1.Add(new PieSlice { Value = deletes, Label = $"{deletes} Supp.", FillColor = ScottPlot.Color.FromHex("#EF4444") });
-        if (modifies > 0) slices1.Add(new PieSlice { Value = modifies, Label = $"{modifies} Modif.", FillColor = ScottPlot.Color.FromHex("#F59E0B") });
 
         DrawPieChartOrEmptyState(page, slices1, startX, currentY, font);
 

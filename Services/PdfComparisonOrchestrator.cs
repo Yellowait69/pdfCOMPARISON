@@ -131,12 +131,11 @@ public class PdfComparisonOrchestrator
 
         var diffResult = _diffAnalyzer.AnalyzeDifferences(pair, cleanSource, cleanTarget, sourceWords, targetWords);
 
-        // NOUVEAU : Calcul exact basé sur le rendu visuel page par page
+        // NOUVEAU : Calcul exact basé sur le rendu visuel binaire (Ajouts et Suppressions uniquement)
         int visualInsertions = CountVisualSegments(diffResult.Highlights.TargetRed);
         int visualDeletions = CountVisualSegments(diffResult.Highlights.SourceRed);
-        int visualModifications = CountVisualSegments(diffResult.Highlights.TargetYellow);
 
-        int totalVisualDiffs = visualInsertions + visualDeletions + visualModifications;
+        int totalVisualDiffs = visualInsertions + visualDeletions;
 
         // On écrase le score textuel par le vrai score visuel
         diffResult.DifferencesCount = totalVisualDiffs;

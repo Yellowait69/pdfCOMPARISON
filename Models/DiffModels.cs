@@ -13,7 +13,7 @@ public enum MarkupStyle
 {
     Strikethrough, // Pour le texte supprimé (barré)
     Underline,     // Pour le texte ajouté (souligné)
-    Box,           // Pour le texte modifié (encadré)
+    Box,           // Pour le texte modifié (encadré - conservé pour rétrocompatibilité si besoin)
     Highlight      // NOUVEAU : Pour le texte avec le style "Éditeur de code"
 }
 
@@ -87,10 +87,9 @@ public readonly record struct LetterLoc(
 public class VisualHighlights
 {
     // Suppression des setters pour protéger l'intégrité des listes.
+    // Les listes Yellow (Modifications) ont été retirées. On ne garde que les Ajouts et Suppressions pures.
     public List<LetterLoc> SourceRed { get; } = new();
-    public List<LetterLoc> SourceYellow { get; } = new();
     public List<LetterLoc> TargetRed { get; } = new();
-    public List<LetterLoc> TargetYellow { get; } = new();
 }
 
 /// <summary>

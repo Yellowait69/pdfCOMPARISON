@@ -17,9 +17,8 @@ public class IndividualReportGenerator : IIndividualReportGenerator
 {
     private readonly IPdfDrawingService _drawingService;
 
-    // NOUVELLES COULEURS : Des teintes vives mais adaptées au surlignage
+    // NOUVELLES COULEURS : Des teintes vives mais adaptées au surlignage binaire
     private static readonly (byte R, byte G, byte B) ColorRedSource = (255, 99, 71);    // Rouge Tomate (Suppressions)
-    private static readonly (byte R, byte G, byte B) ColorOrange = (255, 165, 0);       // Orange (Modifications)
     private static readonly (byte R, byte G, byte B) ColorGreenTarget = (50, 205, 50);  // Vert Lime (Ajouts)
 
     public IndividualReportGenerator(IPdfDrawingService drawingService)
@@ -51,9 +50,7 @@ public class IndividualReportGenerator : IIndividualReportGenerator
         // Cela évite de rescanner toute la liste de mots pour chaque page du document.
         // =========================================================================
         var sourceRedDict = GroupHighlightsByPage(highlights.SourceRed);
-        var sourceYellowDict = GroupHighlightsByPage(highlights.SourceYellow);
         var targetRedDict = GroupHighlightsByPage(highlights.TargetRed);
-        var targetYellowDict = GroupHighlightsByPage(highlights.TargetYellow);
 
         // 4. Ouverture des documents avec ClipPaths désactivé (Plus de stabilité pour PdfPig)
         using var sourceDoc = PdfDocument.Open(sourcePath, new ParsingOptions { ClipPaths = false });
@@ -71,10 +68,7 @@ public class IndividualReportGenerator : IIndividualReportGenerator
                 if (sourceRedDict.TryGetValue(pageIndex, out var sRed))
                     _drawingService.DrawDiffMarkup(sPage, sRed, ColorRedSource.R, ColorRedSource.G, ColorRedSource.B, MarkupStyle.Highlight);
 
-                if (sourceYellowDict.TryGetValue(pageIndex, out var sYellow))
-                    _drawingService.DrawDiffMarkup(sPage, sYellow, ColorOrange.R, ColorOrange.G, ColorOrange.B, MarkupStyle.Highlight);
-
-                // CORRECTION ICI : Envoi du texte court tout en bas
+                // Envoi du texte court tout en bas
                 _drawingService.DrawPageStamp(sPage, "SOURCE", fontBold);
             }
 
@@ -86,10 +80,7 @@ public class IndividualReportGenerator : IIndividualReportGenerator
                 if (targetRedDict.TryGetValue(pageIndex, out var tRed))
                     _drawingService.DrawDiffMarkup(tPage, tRed, ColorGreenTarget.R, ColorGreenTarget.G, ColorGreenTarget.B, MarkupStyle.Highlight);
 
-                if (targetYellowDict.TryGetValue(pageIndex, out var tYellow))
-                    _drawingService.DrawDiffMarkup(tPage, tYellow, ColorOrange.R, ColorOrange.G, ColorOrange.B, MarkupStyle.Highlight);
-
-                // CORRECTION ICI : Envoi du texte court tout en bas
+                // Envoi du texte court tout en bas
                 _drawingService.DrawPageStamp(tPage, "TARGET", fontBold);
             }
         }

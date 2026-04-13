@@ -70,10 +70,11 @@ public partial class MainViewModel : ObservableObject
         );
 
         // 2. Services d'analyse et de comparaison (Diff)
-        var semanticService = new SemanticSimilarityService();
+        // SUPPRESSION : SemanticSimilarityService a été retiré de l'architecture binaire
         var layoutSanitizer = new PdfLayoutSanitizerService();
         var textSummaryService = new TextDiffSummaryService();
-        var visualMatcherService = new VisualHighlightMatcherService(semanticService);
+        // MISE À JOUR : Le constructeur ne prend plus d'arguments
+        var visualMatcherService = new VisualHighlightMatcherService();
 
         var diffAnalyzer = new PdfDiffAnalyzer(
             layoutSanitizer,
