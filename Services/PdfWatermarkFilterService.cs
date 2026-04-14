@@ -25,7 +25,6 @@ public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
     [GeneratedRegex(@"(?i)^(Q|D|P|A)0{1,3}$")]
     private static partial Regex WatermarkCodeRegex();
 
-    // NOUVEAU : Détecte les ancres de signature électronique (ex: #S01_ENDEBNP# ou #S02_CLDEEBW#)
     [GeneratedRegex(@"#[A-Z0-9_]+#", RegexOptions.IgnoreCase)]
     private static partial Regex SignatureAnchorRegex();
 
@@ -43,7 +42,6 @@ public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
     {
         if (string.IsNullOrWhiteSpace(rawText)) return string.Empty;
 
-        // NOUVEAU : Supprimer totalement les ancres de signature du texte brut
         string textWithoutAnchors = SignatureAnchorRegex().Replace(rawText, "");
         string textWithoutWatermark = WatermarkTextRegex().Replace(textWithoutAnchors, "");
         return StampRegex().Replace(textWithoutWatermark, "");
@@ -56,13 +54,10 @@ public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
         string text = word.Text.Trim();
         if (string.IsNullOrEmpty(text)) return false;
 
-        // NOUVEAU : Si c'est une balise de signature, on l'ignore directement (elle ne sera pas comparée)
         if (SignatureAnchorRegex().IsMatch(text)) return true;
 
-        // 1. Les données protégées (Nombres, devises) ne sont jamais des filigranes
         if (ProtectedDataRegex().IsMatch(text)) return false;
 
-        // OPTIMISATION : On calcule le PointSize maximum en une seule passe sans allouer de mémoire avec LINQ
         double maxPointSize = 0;
         foreach (var letter in word.Letters)
         {
@@ -72,18 +67,13 @@ public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
             }
         }
 
-        // 2. Faux positifs connus : petits bouts de mots issus de filigranes brisés
-        // Si la police est standard (<= 15), on les autorise
         if (maxPointSize <= 15.0 && SafeShortWords.Contains(text))
         {
             return false;
         }
 
-        // 3. Détection géométrique : Si c'est écrit en très gros (> 18pt), c'est un filigrane
         if (maxPointSize > 18.0) return true;
 
-        // 4. Détection textuelle : Vérification des fragments de filigranes classiques
-        // StringComparison.OrdinalIgnoreCase évite de créer un string ToUpperInvariant() en mémoire
         foreach (var fragment in WatermarkFragments)
         {
             if (text.Contains(fragment, StringComparison.OrdinalIgnoreCase))
@@ -92,7 +82,6 @@ public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
             }
         }
 
-        // 5. Détection par codes spécifiques (Q000, D00, etc.)
         if (WatermarkCodeRegex().IsMatch(text)) return true;
 
         return false;

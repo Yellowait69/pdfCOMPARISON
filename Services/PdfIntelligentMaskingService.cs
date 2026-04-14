@@ -20,7 +20,7 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
     private const string DateIgnoreMask = "[DATE_IGNORE]";
     private const string NameIgnoreMask = "[NOM_IGNORE]";
 
-    // Tolère les espaces accidentels et différents séparateurs générés par l'extraction PDF
+
     [GeneratedRegex(@"\b\d{1,2}[./\-\s]+\d{1,2}[./\-\s]+\d{2,4}\b")]
     private static partial Regex DateRegex();
 
@@ -35,10 +35,8 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
 
     public bool IsDate(string text) => DateRegex().IsMatch(text);
 
-    // Normalise une date pour un comptage fiable malgré les artefacts OCR
     private string NormalizeDateString(string date)
     {
-        // Remplace tout ce qui n'est pas un chiffre par un point
         return Regex.Replace(date, @"[^\d]+", ".");
     }
 
@@ -89,10 +87,6 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
         var normalizedHeaderDates = new HashSet<string>(headerDates.Select(NormalizeDateString), StringComparer.Ordinal);
         var dateCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        // =========================================================================
-        // NOUVELLE LOGIQUE : Reconstruction du texte complet pour contrer la découpe
-        // accidentelle des mots par PdfPig à cause des filigranes.
-        // =========================================================================
         var sb = new StringBuilder();
         var charToWord = new List<int>();
 
@@ -101,16 +95,15 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
             foreach (char c in words[i].Text)
             {
                 sb.Append(c);
-                charToWord.Add(i); // On mémorise à quel index de mot appartient chaque caractère
+                charToWord.Add(i);
             }
             sb.Append(' ');
-            charToWord.Add(-1); // Les espaces artificiels n'appartiennent à aucun mot
+            charToWord.Add(-1);
         }
 
         string fullText = sb.ToString();
         var matches = DateRegex().Matches(fullText);
 
-        // 1. Comptage des mots normalisés sur le texte global
         foreach (Match match in matches)
         {
             string norm = NormalizeDateString(match.Value);
@@ -118,7 +111,6 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
             dateCounts[norm] = count + 1;
         }
 
-        // 2. Application du masque et fusion des mots découpés
         foreach (Match match in matches)
         {
             string norm = NormalizeDateString(match.Value);
@@ -128,7 +120,6 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
                 int startWordIdx = -1;
                 int endWordIdx = -1;
 
-                // Retrouver quels mots exacts de PdfPig contiennent cette date
                 for (int c = match.Index; c < match.Index + match.Length; c++)
                 {
                     int wIdx = charToWord[c];
@@ -141,10 +132,8 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
 
                 if (startWordIdx != -1 && endWordIdx != -1)
                 {
-                    // Si le mot est déjà masqué, on l'ignore pour éviter les conflits
                     if (words[startWordIdx].Text == DateIgnoreMask) continue;
 
-                    // Fusionner les coordonnées (Letters) de tous les fragments de la date
                     var combinedLetters = new List<Letter>();
                     for (int k = startWordIdx; k <= endWordIdx; k++)
                     {
@@ -153,23 +142,19 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
                             combinedLetters.AddRange(words[k].Letters);
                         }
 
-                        // On vide les fragments suivants (ils seront supprimés plus bas)
                         if (k > startWordIdx)
                         {
                             words[k] = new PdfWordInfo { Text = string.Empty, Letters = new List<Letter>(), PageNumber = words[k].PageNumber };
                         }
                     }
 
-                    // On place le Masque sur le premier fragment avec les coordonnées fusionnées
                     words[startWordIdx] = new PdfWordInfo { Text = DateIgnoreMask, Letters = combinedLetters, PageNumber = words[startWordIdx].PageNumber };
                 }
             }
         }
 
-        // Nettoyage des mots vidés par la fusion des dates
         words.RemoveAll(w => string.IsNullOrEmpty(w.Text));
 
-        // --- 3. DÉTECTION STRICTE DU PREMIER NOM ---
         string[] targetNameParts = Array.Empty<string>();
 
         for (int i = 0; i < words.Count; i++)
@@ -241,7 +226,6 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
             }
         }
 
-        // --- 4. MASQUAGE UNIVERSEL DANS TOUT LE DOCUMENT ---
         if (targetNameParts.Length > 0)
         {
             for (int i = 0; i < words.Count; i++)

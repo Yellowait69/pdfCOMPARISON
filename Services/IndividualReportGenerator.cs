@@ -17,9 +17,9 @@ public class IndividualReportGenerator : IIndividualReportGenerator
 {
     private readonly IPdfDrawingService _drawingService;
 
-    // NOUVELLES COULEURS : Des teintes vives mais adaptées au surlignage binaire
-    private static readonly (byte R, byte G, byte B) ColorRedSource = (255, 99, 71);    // Rouge Tomate (Suppressions)
-    private static readonly (byte R, byte G, byte B) ColorGreenTarget = (50, 205, 50);  // Vert Lime (Ajouts)
+
+    private static readonly (byte R, byte G, byte B) ColorRedSource = (255, 99, 71);
+    private static readonly (byte R, byte G, byte B) ColorGreenTarget = (50, 205, 50);
 
     public IndividualReportGenerator(IPdfDrawingService drawingService)
     {
@@ -28,13 +28,11 @@ public class IndividualReportGenerator : IIndividualReportGenerator
 
     public void GenerateIndividualReport(string sourcePath, string targetPath, string reportPath, VisualHighlights highlights)
     {
-        // 1. Validation stricte des entrées
         if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentException("Le chemin source est invalide.", nameof(sourcePath));
         if (string.IsNullOrWhiteSpace(targetPath)) throw new ArgumentException("Le chemin cible est invalide.", nameof(targetPath));
         if (string.IsNullOrWhiteSpace(reportPath)) throw new ArgumentException("Le chemin du rapport est invalide.", nameof(reportPath));
         if (highlights == null) throw new ArgumentNullException(nameof(highlights));
 
-        // 2. Préparation du dossier de destination
         string? directory = Path.GetDirectoryName(reportPath);
         if (!string.IsNullOrEmpty(directory))
         {
@@ -44,15 +42,9 @@ public class IndividualReportGenerator : IIndividualReportGenerator
         var builder = new PdfDocumentBuilder();
         var (font, fontBold) = _drawingService.LoadFonts(builder);
 
-        // =========================================================================
-        // 3. OPTIMISATION MAJEURE (Gain de perf x10 sur les gros documents)
-        // Grouper les surbrillances par numéro de page en amont avec des dictionnaires (O(N)).
-        // Cela évite de rescanner toute la liste de mots pour chaque page du document.
-        // =========================================================================
         var sourceRedDict = GroupHighlightsByPage(highlights.SourceRed);
         var targetRedDict = GroupHighlightsByPage(highlights.TargetRed);
 
-        // 4. Ouverture des documents avec ClipPaths désactivé (Plus de stabilité pour PdfPig)
         using var sourceDoc = PdfDocument.Open(sourcePath, new ParsingOptions { ClipPaths = false });
         using var targetDoc = PdfDocument.Open(targetPath, new ParsingOptions { ClipPaths = false });
 
@@ -60,7 +52,6 @@ public class IndividualReportGenerator : IIndividualReportGenerator
 
         for (int pageIndex = 1; pageIndex <= maxPages; pageIndex++)
         {
-            // === TRAITEMENT DE LA PAGE DU DOCUMENT SOURCE ===
             if (pageIndex <= sourceDoc.NumberOfPages)
             {
                 var sPage = builder.AddPage(sourceDoc, pageIndex);
@@ -68,11 +59,9 @@ public class IndividualReportGenerator : IIndividualReportGenerator
                 if (sourceRedDict.TryGetValue(pageIndex, out var sRed))
                     _drawingService.DrawDiffMarkup(sPage, sRed, ColorRedSource.R, ColorRedSource.G, ColorRedSource.B, MarkupStyle.Highlight);
 
-                // Envoi du texte court tout en bas
                 _drawingService.DrawPageStamp(sPage, "SOURCE", fontBold);
             }
 
-            // === TRAITEMENT DE LA PAGE DU DOCUMENT CIBLE ===
             if (pageIndex <= targetDoc.NumberOfPages)
             {
                 var tPage = builder.AddPage(targetDoc, pageIndex);
@@ -80,12 +69,10 @@ public class IndividualReportGenerator : IIndividualReportGenerator
                 if (targetRedDict.TryGetValue(pageIndex, out var tRed))
                     _drawingService.DrawDiffMarkup(tPage, tRed, ColorGreenTarget.R, ColorGreenTarget.G, ColorGreenTarget.B, MarkupStyle.Highlight);
 
-                // Envoi du texte court tout en bas
                 _drawingService.DrawPageStamp(tPage, "TARGET", fontBold);
             }
         }
 
-        // 5. Sauvegarde finale
         File.WriteAllBytes(reportPath, builder.Build());
     }
 

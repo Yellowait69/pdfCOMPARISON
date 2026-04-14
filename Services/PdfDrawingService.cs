@@ -23,7 +23,6 @@ public interface IPdfDrawingService
 
 public class PdfDrawingService : IPdfDrawingService
 {
-    // Constantes de mise en page pour éviter les "Magic Numbers"
     private const decimal DefaultFontSize = 10m;
     private const decimal LineHeight = 13m;
     private const decimal AlignmentTolerance = 5.0m;
@@ -32,7 +31,6 @@ public class PdfDrawingService : IPdfDrawingService
     {
         try
         {
-            // Tentative de chargement des polices système (Windows)
             string fontsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
             string arialPath = Path.Combine(fontsFolder, "arial.ttf");
             string arialBoldPath = Path.Combine(fontsFolder, "arialbd.ttf");
@@ -45,11 +43,9 @@ public class PdfDrawingService : IPdfDrawingService
         }
         catch
         {
-            // Ignorer silencieusement les erreurs d'accès aux dossiers système
+
         }
 
-        // FALLBACK SÉCURISÉ : Utilisation des polices natives PDF (Standard 14)
-        // Garantit que l'application ne crashera pas sur Linux/Mac ou si Arial est absent.
         var fallbackFont = builder.AddStandard14Font(Standard14Font.Helvetica);
         var fallbackFontBold = builder.AddStandard14Font(Standard14Font.HelveticaBold);
 
@@ -100,14 +96,10 @@ public class PdfDrawingService : IPdfDrawingService
 
         pageBuilder.SetStrokeColor(r, g, b);
 
-        // =========================================================
-        // NOUVEAU : CALCUL DU TRAIT CONTINU DANS LA MARGE
-        // =========================================================
         if (style == MarkupStyle.Highlight && segments.Count > 0)
         {
             var marginBlocks = new List<(decimal minY, decimal maxY)>();
 
-            // Initialisation avec le premier segment (Y décroissant = de haut en bas)
             decimal currentMaxY = segments[0].baselineY + (segments[0].fontSize * 0.9m);
             decimal currentMinY = segments[0].baselineY - (segments[0].fontSize * 0.2m);
 
@@ -117,8 +109,6 @@ public class PdfDrawingService : IPdfDrawingService
                 decimal boxMinY = seg.baselineY - (seg.fontSize * 0.2m);
                 decimal boxMaxY = seg.baselineY + (seg.fontSize * 0.9m);
 
-                // Si l'espace entre le bas du bloc précédent et le haut du bloc courant
-                // est inférieur à 2x la taille de la police, on fusionne !
                 if (currentMinY - boxMaxY < seg.fontSize * 2.0m)
                 {
                     currentMinY = Math.Min(currentMinY, boxMinY);
@@ -126,7 +116,6 @@ public class PdfDrawingService : IPdfDrawingService
                 }
                 else
                 {
-                    // L'écart est trop grand, on clôture le bloc pour en créer un nouveau
                     marginBlocks.Add((currentMinY, currentMaxY));
                     currentMaxY = boxMaxY;
                     currentMinY = boxMinY;
@@ -134,21 +123,17 @@ public class PdfDrawingService : IPdfDrawingService
             }
             marginBlocks.Add((currentMinY, currentMaxY));
 
-            // Dessin des traits continus fusionnés dans la marge
             foreach (var mb in marginBlocks)
             {
-                decimal marginX = 10m; // Positionnée tout à gauche
+                decimal marginX = 10m;
                 pageBuilder.DrawLine(
                     new PdfPoint((double)marginX, (double)mb.minY),
                     new PdfPoint((double)marginX, (double)mb.maxY),
-                    15.0m // Trait très épais
+                    15.0m
                 );
             }
         }
 
-        // =========================================================
-        // DESSIN DES CONTOURS DE MOTS
-        // =========================================================
         foreach (var seg in segments)
         {
             decimal strokeWidth = Math.Max(seg.fontSize * 0.08m, 0.75m);
@@ -167,23 +152,19 @@ public class PdfDrawingService : IPdfDrawingService
                     pageBuilder.DrawRectangle(new PdfPoint((double)(seg.minX - paddingX), (double)(seg.baselineY - (seg.fontSize * 0.15m))), width + (paddingX * 2), seg.fontSize * 0.9m, strokeWidth, false);
                     break;
                 case MarkupStyle.Highlight:
-                    // STYLE "ÉDITEUR DE CODE MODERNE" (ex: GitHub, VS Code)
                     decimal padding = seg.fontSize * 0.15m;
                     decimal boxX = seg.minX - padding;
                     decimal boxY = seg.baselineY - (seg.fontSize * 0.2m);
                     decimal boxWidth = (seg.maxX - seg.minX) + (padding * 2);
                     decimal boxHeight = seg.fontSize * 1.1m;
 
-                    // Encadrement net autour du mot
                     pageBuilder.DrawRectangle(
                         new PdfPoint((double)boxX, (double)boxY),
                         boxWidth,
                         boxHeight,
-                        3.0m,     // Épaisseur du trait fin et élégant
-                        false);   // false = pas de remplissage, le texte en dessous reste 100% visible !
+                        3.0m,
+                        false);
 
-                    // NOTE: Le trait de la marge gauche n'est plus dessiné ici à l'unité.
-                    // Il est désormais géré par le système de blocs continus en amont.
                     break;
             }
         }
@@ -191,13 +172,10 @@ public class PdfDrawingService : IPdfDrawingService
 
     public void DrawPageStamp(PdfPageBuilder pageBuilder, string text, PdfDocumentBuilder.AddedFont fontBold)
     {
-        // Position tout en bas (y = 10) et totalement à gauche (x = 10)
+
         decimal xPosition = 10m;
         decimal yPosition = 10m;
 
-        // On supprime totalement le rectangle blanc pour ne plus rogner le texte
-
-        // On écrit uniquement le texte en Bleu standard
         pageBuilder.SetTextAndFillColor(0, 50, 150);
         pageBuilder.AddText(text, 14m, new PdfPoint((double)xPosition, (double)yPosition), fontBold);
     }
@@ -207,7 +185,6 @@ public class PdfDrawingService : IPdfDrawingService
         decimal currentY = startY;
         page.SetTextAndFillColor(r, g, b);
 
-        // Utilisation du nouvel algorithme de WrapText
         foreach (var line in WrapText(text, maxChars))
         {
             page.AddText(line, DefaultFontSize, new PdfPoint((double)startX, (double)currentY), fontToUse);
@@ -235,13 +212,12 @@ public class PdfDrawingService : IPdfDrawingService
 
                 decimal wordWidth = MeasureStringWidth(word, DefaultFontSize, chunk.isBold);
 
-                // Retour à la ligne si on dépasse la largeur max
                 if (currentX + wordWidth > startX + maxWidth && currentX > startX)
                 {
                     currentY -= LineHeight;
                     currentX = startX;
 
-                    if (string.IsNullOrWhiteSpace(word)) continue; // Ignore les espaces en début de ligne
+                    if (string.IsNullOrWhiteSpace(word)) continue;
                 }
 
                 page.SetTextAndFillColor(chunk.r, chunk.g, chunk.b);
@@ -266,9 +242,6 @@ public class PdfDrawingService : IPdfDrawingService
         page.AddText(value, 18m, new PdfPoint((double)(x + 10m), (double)(y - 18m)), fontBold);
     }
 
-    // ==========================================
-    // MÉTHODES UTILITAIRES PRIVÉES
-    // ==========================================
 
     private decimal MeasureStringWidth(string text, decimal fontSize, bool isBold)
     {
@@ -297,7 +270,6 @@ public class PdfDrawingService : IPdfDrawingService
 
         foreach (var word in words)
         {
-            // Vérifie si l'ajout du mot dépasse la limite
             if (currentLine.Length + word.Length + 1 > maxLength && currentLine.Length > 0)
             {
                 yield return currentLine.ToString();

@@ -30,7 +30,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
     [GeneratedRegex(@"(?i)\b(prix|pénalité|pénalités|résiliation|ttc|ht|garantie|article|euro|taxe|montant|facture|price|penalty|termination|vat|warranty|tax|amount|invoice)\b")]
     private static partial Regex CriticalRegex();
 
-    // NOUVEAU : Regex ciblant uniquement les chiffres (\d+) collés à ".pdf" ou ".PDF" à la fin du nom de fichier ($)
     [GeneratedRegex(@"(\d+)\.pdf$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex FileSuffixNumberRegex();
 
@@ -100,14 +99,12 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         int wordBalance = totalNewWords - totalOldWords;
         var topModifiedFiles = summaries.OrderByDescending(s => s.Blocks.Count).Take(3).ToList();
 
-        PdfPageBuilder page = builder.AddPage(842, 595); // Paysage (A4)
+        PdfPageBuilder page = builder.AddPage(842, 595);
         decimal margin = 40m;
         decimal yPosition = 595m - margin;
 
-        // --- 1. DESSIN DU DASHBOARD (PAGE 1) SANS CHEVAUCHEMENT ---
         DrawDashboardPage(page, margin, yPosition, totalChanges, summaries.Count, wordBalance, criticalAlerts, totalInserts, totalDeletes, typeDates, typeNumbers, typeWords, languageFileCounts, languageDiffCounts, topModifiedFiles, font, fontBold);
 
-        // --- 2. SAUT DE PAGE FORCÉ POUR LES DÉTAILS ---
         if (summaries.Any(s => s.Blocks.Count > 0))
         {
             page = builder.AddPage(842, 595);
@@ -119,17 +116,12 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         int maxCharsCol = 55;
         decimal drawWidth = 370m;
 
-        // --- 3. TRI SPÉCIFIQUE SUR LE DERNIER CHIFFRE (ex: 17 dans "_17.pdf") ---
-        // Le programme extrait le groupe de chiffres juste avant ".pdf".
-        // S'il n'y en a pas, il met int.MaxValue (le fichier ira à la fin).
-        // En cas d'égalité sur ce numéro, il fait un tri alphabétique classique.
         var sortedSummaries = summaries.OrderBy(s =>
         {
             var match = FileSuffixNumberRegex().Match(s.DocumentName ?? string.Empty);
             return match.Success && int.TryParse(match.Groups[1].Value, out int num) ? num : int.MaxValue;
         }).ThenBy(s => s.DocumentName).ToList();
 
-        // --- 4. DESSIN DES DÉTAILS LIGNE PAR LIGNE ---
         foreach (var doc in sortedSummaries)
         {
             if (doc.Blocks.Count == 0) continue;
@@ -171,7 +163,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                     isFirstBlockOfDoc = true;
                 }
 
-                // DESSIN DE L'EN-TÊTE DU DOCUMENT
                 if (isFirstBlockOfDoc)
                 {
                     page.SetTextAndFillColor(240, 245, 250);
@@ -294,16 +285,14 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
     {
         decimal currentY = startY;
 
-        // --- 1. TITRE ET DATE ---
         page.SetTextAndFillColor(0, 50, 150);
         page.AddText("GLOBAL SYNTHESIS REPORT", 18m, new PdfPoint((double)startX, (double)currentY), fontBold);
 
         page.SetTextAndFillColor(100, 100, 100);
         page.AddText($"Generated on {DateTime.Now:dd/MM/yyyy at HH:mm} • Automated document comparison.", 10m, new PdfPoint((double)startX, (double)(currentY - 18m)), font);
 
-        currentY -= 65m; // Descente sous le titre
+        currentY -= 65m;
 
-        // --- 2. BOÎTES DE STATISTIQUES ---
         string balanceText = wordBalance > 0 ? $"+ {wordBalance} words" : $"{wordBalance} words";
 
         _drawingService.DrawStatBox(page, startX, currentY, "Impacted Files", totalFiles.ToString(), font, fontBold, 0, 50, 150);
@@ -311,7 +300,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         _drawingService.DrawStatBox(page, startX + 310m, currentY, "Net Balance (Volume)", balanceText, font, fontBold, wordBalance < 0 ? (byte)220 : (byte)16, wordBalance < 0 ? (byte)20 : (byte)185, wordBalance < 0 ? (byte)20 : (byte)129);
         _drawingService.DrawStatBox(page, startX + 465m, currentY, "Sensitive Words", criticalAlerts.ToString(), font, fontBold, criticalAlerts > 0 ? (byte)255 : (byte)0, criticalAlerts > 0 ? (byte)140 : (byte)50, criticalAlerts > 0 ? (byte)0 : (byte)150);
 
-        currentY -= 60m; // Descente sous les boîtes de stats
+        currentY -= 60m;
 
         if (totalChanges == 0)
         {
@@ -320,21 +309,17 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
             return;
         }
 
-        // --- 3. TITRES DES GRAPHIQUES ---
         page.SetTextAndFillColor(0, 0, 0);
         page.AddText("Distribution by Action Type:", 11m, new PdfPoint((double)startX, (double)currentY), fontBold);
         page.AddText("Nature of Impacted Data:", 11m, new PdfPoint((double)(startX + 260m), (double)currentY), fontBold);
         page.AddText("Modified Documents by Language:", 11m, new PdfPoint((double)(startX + 520m), (double)currentY), fontBold);
 
-        currentY -= 15m; // Descente juste sous le titre des graphiques
+        currentY -= 15m;
 
-        // --- 4. GRAPHIQUES (CAMEMBERTS) ---
-        // Le chartService dessine le camembert de currentY vers le bas (hauteur de 200px)
         _chartService.DrawDashboardCharts(page, startX, currentY, totalInserts, totalDeletes, typeDates, typeNumbers, typeWords, languageFileCounts, font);
 
-        currentY -= 210m; // On saute l'espace visuel pris par les graphiques (200px + 10px de marge)
+        currentY -= 210m;
 
-        // --- 5. LISTES DES FICHIERS ET LANGUES ---
         page.SetTextAndFillColor(0, 0, 0);
         page.AddText("Top 3 Most Modified Files:", 12m, new PdfPoint((double)startX, (double)currentY), fontBold);
         page.AddText("Differences Volume by Language:", 12m, new PdfPoint((double)(startX + 400m), (double)currentY), fontBold);
@@ -344,7 +329,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         {
             page.SetTextAndFillColor(80, 80, 80);
 
-            // CORRECTION: Troncature à 60 caractères pour laisser de la place au compteur.
             string displayName = file.DocumentName;
             if (displayName.Length > 70)
             {
@@ -354,7 +338,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
             page.AddText($"• {displayName}", 10m, new PdfPoint((double)startX, (double)listY), font);
 
             page.SetTextAndFillColor(0, 50, 150);
-            // CORRECTION: Le compteur est décalé à + 350m pour garantir de l'espace
             page.AddText($"{file.Blocks.Count} diffs", 10m, new PdfPoint((double)(startX + 350m), (double)listY), fontBold);
             listY -= 15m;
         }

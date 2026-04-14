@@ -16,7 +16,6 @@ using System.Windows;
 
 namespace PDFComparison.ViewModels;
 
-// Local class to structure save data
 public class AppSessionData
 {
     public string SourceDirectory { get; set; } = string.Empty;
@@ -30,14 +29,13 @@ public partial class MainViewModel : ObservableObject
     private readonly PdfFileService _fileService;
     private readonly PdfComparisonOrchestrator _orchestrator;
 
-    private readonly string _sessionFilePath; // Path of the save file
-    private CancellationTokenSource? _cancellationTokenSource; // Pour annuler le traitement
+    private readonly string _sessionFilePath;
+    private CancellationTokenSource? _cancellationTokenSource;
 
     [ObservableProperty] private string _sourceDirectory = string.Empty;
     [ObservableProperty] private string _targetDirectory = string.Empty;
     [ObservableProperty] private string _outputDirectory = string.Empty;
 
-    // Automatically notifies the UI to recalculate "IsNotProcessing" when "IsProcessing" changes
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsNotProcessing))]
     private bool _isProcessing;
@@ -54,11 +52,7 @@ public partial class MainViewModel : ObservableObject
     {
         _fileService = new PdfFileService();
 
-        // ==============================================================
-        // ASSEMBLAGE DE LA NOUVELLE ARCHITECTURE MODULAIRE
-        // ==============================================================
 
-        // 1. Services d'extraction de données et de nettoyage
         var textNormalizer = new PdfTextNormalizerService();
         var watermarkFilter = new PdfWatermarkFilterService();
         var intelligentMasking = new PdfIntelligentMaskingService();
@@ -69,11 +63,9 @@ public partial class MainViewModel : ObservableObject
             textNormalizer
         );
 
-        // 2. Services d'analyse et de comparaison (Diff)
         var layoutSanitizer = new PdfLayoutSanitizerService();
         var textSummaryService = new TextDiffSummaryService();
 
-        // CORRECTION : Le SemanticSimilarityService n'est plus requis dans la nouvelle architecture
         var visualMatcherService = new VisualHighlightMatcherService();
 
         var diffAnalyzer = new PdfDiffAnalyzer(
@@ -82,7 +74,6 @@ public partial class MainViewModel : ObservableObject
             visualMatcherService
         );
 
-        // 3. NOUVEAU : Services de génération de rapports découpés
         var drawingService = new PdfDrawingService();
         var chartService = new PdfChartService();
         var inlineDiffService = new InlineDiffService();
@@ -90,31 +81,24 @@ public partial class MainViewModel : ObservableObject
         var individualReportGen = new IndividualReportGenerator(drawingService);
         var globalReportGen = new GlobalSynthesisReportGenerator(drawingService, chartService, inlineDiffService);
 
-        // 4. Orchestrateur principal mis à jour
         _orchestrator = new PdfComparisonOrchestrator(
             extractionService,
             diffAnalyzer,
             individualReportGen,
             globalReportGen
         );
-        // ==============================================================
 
-        // Save folder in "AppData/Roaming/PDFComparisonPro"
+
         string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         string appFolder = Path.Combine(appData, "PDFComparisonPro");
         Directory.CreateDirectory(appFolder);
         _sessionFilePath = Path.Combine(appFolder, "last_session.json");
 
-        // Default output directory on the Desktop
         OutputDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "PDF_DiffReports");
 
-        // Attempt to load previous session on startup
         LoadSession();
     }
 
-    // ==========================================
-    // SAVE AND LOAD METHODS
-    // ==========================================
     private void SaveSession()
     {
         try
@@ -129,8 +113,6 @@ public partial class MainViewModel : ObservableObject
 
             string json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
 
-            // AMÉLIORATION : Sauvegarde atomique
-            // On écrit dans un fichier temporaire puis on le déplace pour éviter toute corruption en cas de crash
             string tempPath = _sessionFilePath + ".tmp";
             File.WriteAllText(tempPath, json);
             File.Move(tempPath, _sessionFilePath, overwrite: true);
@@ -180,7 +162,7 @@ public partial class MainViewModel : ObservableObject
             Debug.WriteLine($"Load error: {ex.Message}");
         }
     }
-    // ==========================================
+
 
     [RelayCommand]
     private void OpenReport(DocumentPair pair)
@@ -189,7 +171,6 @@ public partial class MainViewModel : ObservableObject
         {
             try
             {
-                // Opens the PDF file with the computer's default reader
                 Process.Start(new ProcessStartInfo(pair.ReportPath) { UseShellExecute = true });
             }
             catch (Exception ex)
@@ -199,7 +180,6 @@ public partial class MainViewModel : ObservableObject
         }
         else if (pair != null && !File.Exists(pair.ReportPath))
         {
-            // Security added if the file was deleted or moved between two sessions
             MessageBox.Show("The report file has been moved or deleted since the last session.", "File not found", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -211,7 +191,7 @@ public partial class MainViewModel : ObservableObject
         if (dialog.ShowDialog() == true)
         {
             SourceDirectory = dialog.FolderName;
-            SaveSession(); // Saves the path as soon as it is modified
+            SaveSession();
         }
     }
 
@@ -222,24 +202,20 @@ public partial class MainViewModel : ObservableObject
         if (dialog.ShowDialog() == true)
         {
             TargetDirectory = dialog.FolderName;
-            SaveSession(); // Saves the path as soon as it is modified
+            SaveSession();
         }
     }
 
-    // ==========================================
-    // NEW COMMANDS FOR OUTPUT FOLDER
-    // ==========================================
     [RelayCommand]
     private void OpenOutputDirectory()
     {
-        // Target the merged document generated by the new synthesis method
+
         string globalReportPath = Path.Combine(OutputDirectory, "Global_Synthesis_Report.pdf");
 
         if (File.Exists(globalReportPath))
         {
             try
             {
-                // Open the grand synthesis PDF directly
                 Process.Start(new ProcessStartInfo(globalReportPath) { UseShellExecute = true });
             }
             catch (Exception ex)
@@ -249,7 +225,6 @@ public partial class MainViewModel : ObservableObject
         }
         else if (Directory.Exists(OutputDirectory))
         {
-            // Security fallback: if the grand report doesn't exist yet, open the folder instead
             Process.Start(new ProcessStartInfo(OutputDirectory) { UseShellExecute = true });
         }
         else
@@ -266,7 +241,6 @@ public partial class MainViewModel : ObservableObject
             string subject = "PDF Comparison Reports";
             string body = $"Hello,\n\nThe PDF comparison reports have been generated.\nYou can access them in the following directory:\n{OutputDirectory}\n\nBest regards.";
 
-            // mailto: creates a draft in Outlook (or default mail client) with pre-filled text
             string mailtoUri = $"mailto:?subject={Uri.EscapeDataString(subject)}&body={Uri.EscapeDataString(body)}";
 
             Process.Start(new ProcessStartInfo(mailtoUri) { UseShellExecute = true });
@@ -276,7 +250,6 @@ public partial class MainViewModel : ObservableObject
             MessageBox.Show($"Cannot open the default mail client: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
-    // ==========================================
 
     [RelayCommand]
     private void CancelComparison()
@@ -291,7 +264,6 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task StartComparisonAsync()
     {
-        // 1. Basic checks
         if (string.IsNullOrWhiteSpace(SourceDirectory) || string.IsNullOrWhiteSpace(TargetDirectory))
         {
             MessageBox.Show("Please specify the source and target directories.", "Missing Directories", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -304,28 +276,23 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        // 2. State initialization
         IsProcessing = true;
         Pairs.Clear();
         ProgressValue = 0;
 
-        // Initialisation du token d'annulation pour cette session de traitement
         _cancellationTokenSource = new CancellationTokenSource();
 
         try
         {
             StatusMessage = "Analyzing and pairing files...";
 
-            // Appel au nouveau PdfFileService pour le matching
             var matchedPairs = await Task.Run(() => _fileService.MatchFiles(SourceDirectory, TargetDirectory), _cancellationTokenSource.Token);
 
-            // Update the UI list
             foreach (var pair in matchedPairs)
             {
                 Pairs.Add(pair);
             }
 
-            // Process only those that have a target file
             var pairsToProcess = matchedPairs.Where(p => p.Status != CompareStatus.MissingInTarget).ToList();
             ProgressMax = pairsToProcess.Count;
 
@@ -335,7 +302,6 @@ public partial class MainViewModel : ObservableObject
                 return;
             }
 
-            // Clearer display of the start of comparison
             StatusMessage = $"Comparing {ProgressMax} documents...";
 
             var progress = new Progress<int>(value =>
@@ -344,12 +310,8 @@ public partial class MainViewModel : ObservableObject
                 StatusMessage = $"Analyzing: document {value} of {ProgressMax}";
             });
 
-            // 3. Appel au nouvel Orchestrateur en passant le jeton d'annulation
             await _orchestrator.ProcessPairsAsync(pairsToProcess, OutputDirectory, progress, _cancellationTokenSource.Token);
 
-            // ==========================================
-            // AUTOMATIC SORTING OF RESULTS
-            // ==========================================
             StatusMessage = "Sorting results...";
 
             var sortedPairs = Pairs.OrderByDescending(p => p.DiffCount).ToList();

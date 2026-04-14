@@ -18,7 +18,6 @@ public class PdfComparisonOrchestrator
     private readonly IIndividualReportGenerator _individualReportGenerator;
     private readonly IGlobalSynthesisReportGenerator _globalReportGenerator;
 
-    // Injection de dépendances sécurisée et alignée avec la nouvelle architecture
     public PdfComparisonOrchestrator(
         PdfExtractionService extractionService,
         PdfDiffAnalyzer diffAnalyzer,
@@ -38,7 +37,6 @@ public class PdfComparisonOrchestrator
         int completed = 0;
         var allSummaries = new ConcurrentBag<DocumentDiffSummary>();
 
-        // AMÉLIORATION : Limitation stricte du parallélisme pour éviter le OutOfMemoryException (OOM)
         var parallelOptions = new ParallelOptions
         {
             MaxDegreeOfParallelism = Math.Max(1, Math.Min(Environment.ProcessorCount, 16)),
@@ -54,7 +52,6 @@ public class PdfComparisonOrchestrator
                 var sourceText = _extractionService.ExtractTextFast(pair.SourcePath);
                 var targetText = _extractionService.ExtractTextFast(pair.TargetPath!);
 
-                // AMÉLIORATION : Détection des PDF scannés (sans texte / OCR requis)
                 if (string.IsNullOrWhiteSpace(sourceText) && string.IsNullOrWhiteSpace(targetText))
                 {
                     UpdatePairStatus(pair, CompareStatus.Error, "Unreadable files (Scanned/OCR required)", -1);
@@ -77,7 +74,7 @@ public class PdfComparisonOrchestrator
             {
                 UpdatePairStatus(pair, CompareStatus.Pending, "Cancelled by user", pair.DiffCount);
             }
-            catch (IOException ex) // Capture spécifiquement les erreurs de fichiers (ex: fichier ouvert)
+            catch (IOException ex)
             {
                 UpdatePairStatus(pair, CompareStatus.Error, $"File access error (is it open?): {ex.Message}", -1);
             }
@@ -94,7 +91,6 @@ public class PdfComparisonOrchestrator
             return ValueTask.CompletedTask;
         });
 
-        // Génération du rapport de synthèse global en tâche de fond pour ne pas figer l'UI
         if (!allSummaries.IsEmpty)
         {
             await Task.Run(() =>
@@ -131,13 +127,11 @@ public class PdfComparisonOrchestrator
 
         var diffResult = _diffAnalyzer.AnalyzeDifferences(pair, cleanSource, cleanTarget, sourceWords, targetWords);
 
-        // NOUVEAU : Calcul exact basé sur le rendu visuel binaire (Ajouts et Suppressions uniquement)
         int visualInsertions = CountVisualSegments(diffResult.Highlights.TargetRed);
         int visualDeletions = CountVisualSegments(diffResult.Highlights.SourceRed);
 
         int totalVisualDiffs = visualInsertions + visualDeletions;
 
-        // On écrase le score textuel par le vrai score visuel
         diffResult.DifferencesCount = totalVisualDiffs;
 
         if (totalVisualDiffs > 0)
@@ -180,7 +174,6 @@ public class PdfComparisonOrchestrator
 
         int totalBlocksCount = 0;
 
-        // ÉTAPE 1 : Séparation stricte par numéro de page
         var lettersByPage = letters.GroupBy(l => l.PageNumber);
 
         foreach (var pageGroup in lettersByPage)
@@ -193,7 +186,6 @@ public class PdfComparisonOrchestrator
 
             if (sorted.Count == 0) continue;
 
-            // ÉTAPE 2 : Création des segments horizontaux (lignes)
             var segments = new List<(decimal minX, decimal maxX, decimal baselineY, decimal fontSize)>();
             var first = sorted[0];
 
@@ -227,7 +219,6 @@ public class PdfComparisonOrchestrator
             }
             segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
 
-            // ÉTAPE 3 : Fusion verticale des blocs proches (comme pour la barre de marge dans PdfDrawingService)
             if (segments.Count > 0)
             {
                 int pageBlocksCount = 0;
@@ -240,7 +231,6 @@ public class PdfComparisonOrchestrator
                     decimal boxMinY = seg.baselineY - (seg.fontSize * 0.2m);
                     decimal boxMaxY = seg.baselineY + (seg.fontSize * 0.9m);
 
-                    // Si l'espace est inférieur à 2x la taille de la police, on fusionne !
                     if (currentMinY - boxMaxY < seg.fontSize * 2.0m)
                     {
                         currentMinY = Math.Min(currentMinY, boxMinY);
@@ -248,14 +238,12 @@ public class PdfComparisonOrchestrator
                     }
                     else
                     {
-                        // L'écart est grand, on valide le bloc précédent
                         pageBlocksCount++;
                         currentMaxY = boxMaxY;
                         currentMinY = boxMinY;
                     }
                 }
 
-                // Ne pas oublier le tout dernier bloc de la page
                 pageBlocksCount++;
 
                 totalBlocksCount += pageBlocksCount;
@@ -265,9 +253,6 @@ public class PdfComparisonOrchestrator
         return totalBlocksCount;
     }
 
-    // ==========================================
-    // MÉTHODES UTILITAIRES (Thread-Safety WPF)
-    // ==========================================
 
     private void UpdatePairStatus(DocumentPair pair, CompareStatus status, string errorMessage, int diffCount, int insertions = 0, int deletions = 0)
     {
