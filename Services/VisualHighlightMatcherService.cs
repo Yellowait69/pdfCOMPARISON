@@ -15,9 +15,6 @@ public interface IVisualHighlightMatcherService
 
 public class VisualHighlightMatcherService : IVisualHighlightMatcherService
 {
-    public VisualHighlightMatcherService()
-    {
-    }
 
     public VisualHighlights GenerateHighlights(
         SideBySideDiffModel diffLinesModel,
@@ -151,7 +148,6 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
             {
                 if (matchedNew[j]) continue;
 
-
                 if (Math.Abs(globalDeletes[i].LineIndex - globalInserts[j].LineIndex) > 1)
                     continue;
 
@@ -227,7 +223,6 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private bool IsLocallyClose(List<LetterLoc> oldLocList, List<LetterLoc> newLocList)
     {
-
         return oldLocList.Count > 0 && newLocList.Count > 0 &&
                oldLocList[0].PageNumber == newLocList[0].PageNumber &&
                Math.Abs(oldLocList[0].BaselineY - newLocList[0].BaselineY) < 15.0m &&

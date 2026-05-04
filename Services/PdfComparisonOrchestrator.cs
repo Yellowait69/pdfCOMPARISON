@@ -164,95 +164,21 @@ public class PdfComparisonOrchestrator
         }
     }
 
-    /// <summary>
-    /// Reproduit très exactement la logique de regroupement géométrique et de fusion du PdfDrawingService.
-    /// Garantit que le compteur de l'UI correspond à 100% au nombre de blocs visuels générés dans le PDF.
-    /// </summary>
     private int CountVisualSegments(IEnumerable<LetterLoc> letters)
     {
         if (letters == null || !letters.Any()) return 0;
 
         int totalBlocksCount = 0;
-
         var lettersByPage = letters.GroupBy(l => l.PageNumber);
 
         foreach (var pageGroup in lettersByPage)
         {
-            const decimal AlignmentTolerance = 5.0m;
-            var sorted = pageGroup
-                .OrderByDescending(l => Math.Round(l.BaselineY / AlignmentTolerance) * AlignmentTolerance)
-                .ThenBy(l => l.BoundingBox.BottomLeft.X)
-                .ToList();
-
-            if (sorted.Count == 0) continue;
-
-            var segments = new List<(decimal minX, decimal maxX, decimal baselineY, decimal fontSize)>();
-            var first = sorted[0];
-
-            decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X;
-            decimal cMaxX = (decimal)first.BoundingBox.TopRight.X;
-            decimal cBaseline = first.BaselineY;
-            decimal cFontSize = first.FontSize;
-
-            for (int i = 1; i < sorted.Count; i++)
-            {
-                var loc = sorted[i];
-                decimal x = (decimal)loc.BoundingBox.BottomLeft.X;
-                decimal y = loc.BaselineY;
-
-                bool isSameLine = Math.Abs(Math.Round(y / AlignmentTolerance) * AlignmentTolerance - Math.Round(cBaseline / AlignmentTolerance) * AlignmentTolerance) < 1m;
-                decimal maxGap = Math.Max(15m, cFontSize * 1.5m);
-
-                if (isSameLine && (x - cMaxX) < maxGap && x >= cMinX - 5m)
-                {
-                    cMaxX = Math.Max(cMaxX, (decimal)loc.BoundingBox.TopRight.X);
-                    cFontSize = Math.Max(cFontSize, loc.FontSize);
-                }
-                else
-                {
-                    segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
-                    cMinX = x;
-                    cMaxX = (decimal)loc.BoundingBox.TopRight.X;
-                    cBaseline = y;
-                    cFontSize = loc.FontSize;
-                }
-            }
-            segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
-
-            if (segments.Count > 0)
-            {
-                int pageBlocksCount = 0;
-                decimal currentMaxY = segments[0].baselineY + (segments[0].fontSize * 0.9m);
-                decimal currentMinY = segments[0].baselineY - (segments[0].fontSize * 0.2m);
-
-                for (int i = 1; i < segments.Count; i++)
-                {
-                    var seg = segments[i];
-                    decimal boxMinY = seg.baselineY - (seg.fontSize * 0.2m);
-                    decimal boxMaxY = seg.baselineY + (seg.fontSize * 0.9m);
-
-                    if (currentMinY - boxMaxY < seg.fontSize * 2.0m)
-                    {
-                        currentMinY = Math.Min(currentMinY, boxMinY);
-                        currentMaxY = Math.Max(currentMaxY, boxMaxY);
-                    }
-                    else
-                    {
-                        pageBlocksCount++;
-                        currentMaxY = boxMaxY;
-                        currentMinY = boxMinY;
-                    }
-                }
-
-                pageBlocksCount++;
-
-                totalBlocksCount += pageBlocksCount;
-            }
+            var segments = VisualSegmentHelper.GetSegments(pageGroup);
+            totalBlocksCount += VisualSegmentHelper.CountBlocks(segments);
         }
 
         return totalBlocksCount;
     }
-
 
     private void UpdatePairStatus(DocumentPair pair, CompareStatus status, string errorMessage, int diffCount, int insertions = 0, int deletions = 0)
     {

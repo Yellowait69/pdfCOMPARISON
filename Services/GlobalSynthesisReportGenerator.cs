@@ -272,10 +272,6 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         }
     }
 
-    /// <summary>
-    /// Nouvelle méthode gérant le dessin complet et séquentiel de la page 1 (Dashboard).
-    /// Chaque élément descend proprement le curseur (currentY) pour empêcher tout chevauchement.
-    /// </summary>
     private void DrawDashboardPage(
         PdfPageBuilder page, decimal startX, decimal startY, int totalChanges, int totalFiles,
         int wordBalance, int criticalAlerts, int totalInserts, int totalDeletes, int typeDates,

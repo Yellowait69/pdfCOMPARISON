@@ -40,16 +40,10 @@ public partial class DocumentPair : ObservableObject
     [JsonIgnore]
     public bool HasReport => !string.IsNullOrEmpty(ReportPath);
 
-    /// <summary>
-    /// Constructeur vide requis par le désérialiseur JSON
-    /// </summary>
     public DocumentPair()
     {
     }
 
-    /// <summary>
-    /// Constructeur principal utilisé par le PdfFileService lors du matching
-    /// </summary>
     public DocumentPair(string matchKey, string sourcePath, string? targetPath)
     {
         MatchKey = matchKey;

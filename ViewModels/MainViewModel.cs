@@ -6,6 +6,7 @@ using PDFComparison.Services;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -15,6 +16,22 @@ using System.Threading.Tasks;
 using System.Windows;
 
 namespace PDFComparison.ViewModels;
+
+public class ObservableRangeCollection<T> : ObservableCollection<T>
+{
+    public void ReplaceRange(IEnumerable<T> collection)
+    {
+        if (collection == null) throw new ArgumentNullException(nameof(collection));
+
+        Items.Clear();
+        foreach (var item in collection)
+        {
+            Items.Add(item);
+        }
+
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
+}
 
 public class AppSessionData
 {
@@ -46,12 +63,11 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private int _progressMax;
     [ObservableProperty] private string _statusMessage = "Ready. Please select the directories.";
 
-    public ObservableCollection<DocumentPair> Pairs { get; } = new();
+    public ObservableRangeCollection<DocumentPair> Pairs { get; } = new();
 
     public MainViewModel()
     {
         _fileService = new PdfFileService();
-
 
         var textNormalizer = new PdfTextNormalizerService();
         var watermarkFilter = new PdfWatermarkFilterService();
@@ -87,7 +103,6 @@ public partial class MainViewModel : ObservableObject
             individualReportGen,
             globalReportGen
         );
-
 
         string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         string appFolder = Path.Combine(appData, "PDFComparisonPro");
@@ -142,13 +157,9 @@ public partial class MainViewModel : ObservableObject
                     OutputDirectory = data.OutputDirectory;
                 }
 
-                Pairs.Clear();
                 if (data.Pairs != null)
                 {
-                    foreach (var pair in data.Pairs)
-                    {
-                        Pairs.Add(pair);
-                    }
+                    Pairs.ReplaceRange(data.Pairs);
 
                     if (Pairs.Count > 0)
                     {
@@ -162,7 +173,6 @@ public partial class MainViewModel : ObservableObject
             Debug.WriteLine($"Load error: {ex.Message}");
         }
     }
-
 
     [RelayCommand]
     private void OpenReport(DocumentPair pair)
@@ -209,7 +219,6 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenOutputDirectory()
     {
-
         string globalReportPath = Path.Combine(OutputDirectory, "Global_Synthesis_Report.pdf");
 
         if (File.Exists(globalReportPath))
@@ -288,10 +297,7 @@ public partial class MainViewModel : ObservableObject
 
             var matchedPairs = await Task.Run(() => _fileService.MatchFiles(SourceDirectory, TargetDirectory), _cancellationTokenSource.Token);
 
-            foreach (var pair in matchedPairs)
-            {
-                Pairs.Add(pair);
-            }
+            Pairs.ReplaceRange(matchedPairs);
 
             var pairsToProcess = matchedPairs.Where(p => p.Status != CompareStatus.MissingInTarget).ToList();
             ProgressMax = pairsToProcess.Count;
@@ -316,11 +322,7 @@ public partial class MainViewModel : ObservableObject
 
             var sortedPairs = Pairs.OrderByDescending(p => p.DiffCount).ToList();
 
-            Pairs.Clear();
-            foreach (var p in sortedPairs)
-            {
-                Pairs.Add(p);
-            }
+            Pairs.ReplaceRange(sortedPairs);
 
             StatusMessage = "Processing completed successfully!";
             SaveSession();
@@ -347,3 +349,4 @@ public partial class MainViewModel : ObservableObject
         }
     }
 }
+```</T></T>

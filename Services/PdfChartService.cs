@@ -45,9 +45,6 @@ public class PdfChartService : IPdfChartService
         DrawPieChartOrEmptyState(page, slices3, startX + 520m, currentY, font);
     }
 
-    /// <summary>
-    /// Méthode utilitaire générique pour dessiner un camembert ScottPlot ou afficher un texte de secours si aucune donnée n'est présente.
-    /// </summary>
     private void DrawPieChartOrEmptyState(PdfPageBuilder page, List<PieSlice> slices, decimal startX, decimal currentY, PdfDocumentBuilder.AddedFont font)
     {
         if (slices.Count > 0)

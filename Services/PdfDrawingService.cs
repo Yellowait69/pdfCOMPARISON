@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using PDFComparison.Models;
@@ -25,7 +24,6 @@ public class PdfDrawingService : IPdfDrawingService
 {
     private const decimal DefaultFontSize = 10m;
     private const decimal LineHeight = 13m;
-    private const decimal AlignmentTolerance = 5.0m;
 
     public (PdfDocumentBuilder.AddedFont Font, PdfDocumentBuilder.AddedFont FontBold) LoadFonts(PdfDocumentBuilder builder)
     {
@@ -43,7 +41,7 @@ public class PdfDrawingService : IPdfDrawingService
         }
         catch
         {
-
+            // Fallback silencieux vers les polices standard
         }
 
         var fallbackFont = builder.AddStandard14Font(Standard14Font.Helvetica);
@@ -54,52 +52,14 @@ public class PdfDrawingService : IPdfDrawingService
 
     public void DrawDiffMarkup(PdfPageBuilder pageBuilder, IEnumerable<LetterLoc> letters, byte r, byte g, byte b, MarkupStyle style)
     {
-        var sorted = letters
-            .OrderByDescending(l => Math.Round(l.BaselineY / AlignmentTolerance) * AlignmentTolerance)
-            .ThenBy(l => l.BoundingBox.BottomLeft.X)
-            .ToList();
-
-        if (sorted.Count == 0) return;
-
-        var segments = new List<(decimal minX, decimal maxX, decimal baselineY, decimal fontSize)>();
-        var first = sorted[0];
-
-        decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X;
-        decimal cMaxX = (decimal)first.BoundingBox.TopRight.X;
-        decimal cBaseline = first.BaselineY;
-        decimal cFontSize = first.FontSize;
-
-        for (int i = 1; i < sorted.Count; i++)
-        {
-            var loc = sorted[i];
-            decimal x = (decimal)loc.BoundingBox.BottomLeft.X;
-            decimal y = loc.BaselineY;
-
-            bool isSameLine = Math.Abs(Math.Round(y / AlignmentTolerance) * AlignmentTolerance - Math.Round(cBaseline / AlignmentTolerance) * AlignmentTolerance) < 1m;
-            decimal maxGap = Math.Max(15m, cFontSize * 1.5m);
-
-            if (isSameLine && (x - cMaxX) < maxGap && x >= cMinX - 5m)
-            {
-                cMaxX = Math.Max(cMaxX, (decimal)loc.BoundingBox.TopRight.X);
-                cFontSize = Math.Max(cFontSize, loc.FontSize);
-            }
-            else
-            {
-                segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
-                cMinX = x;
-                cMaxX = (decimal)loc.BoundingBox.TopRight.X;
-                cBaseline = y;
-                cFontSize = loc.FontSize;
-            }
-        }
-        segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
+        var segments = VisualSegmentHelper.GetSegments(letters);
+        if (segments.Count == 0) return;
 
         pageBuilder.SetStrokeColor(r, g, b);
 
-        if (style == MarkupStyle.Highlight && segments.Count > 0)
+        if (style == MarkupStyle.Highlight)
         {
             var marginBlocks = new List<(decimal minY, decimal maxY)>();
-
             decimal currentMaxY = segments[0].baselineY + (segments[0].fontSize * 0.9m);
             decimal currentMinY = segments[0].baselineY - (segments[0].fontSize * 0.2m);
 
@@ -164,7 +124,6 @@ public class PdfDrawingService : IPdfDrawingService
                         boxHeight,
                         3.0m,
                         false);
-
                     break;
             }
         }
@@ -172,7 +131,6 @@ public class PdfDrawingService : IPdfDrawingService
 
     public void DrawPageStamp(PdfPageBuilder pageBuilder, string text, PdfDocumentBuilder.AddedFont fontBold)
     {
-
         decimal xPosition = 10m;
         decimal yPosition = 10m;
 
@@ -242,7 +200,6 @@ public class PdfDrawingService : IPdfDrawingService
         page.AddText(value, 18m, new PdfPoint((double)(x + 10m), (double)(y - 18m)), fontBold);
     }
 
-
     private decimal MeasureStringWidth(string text, decimal fontSize, bool isBold)
     {
         decimal width = 0m;
@@ -258,9 +215,6 @@ public class PdfDrawingService : IPdfDrawingService
         return width * fontSize * (isBold ? 1.05m : 1.0m);
     }
 
-    /// <summary>
-    /// Découpe un texte proprement en respectant les mots entiers (Word-Wrap).
-    /// </summary>
     private IEnumerable<string> WrapText(string text, int maxLength)
     {
         if (string.IsNullOrEmpty(text)) yield break;

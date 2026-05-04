@@ -76,10 +76,6 @@ public class IndividualReportGenerator : IIndividualReportGenerator
         File.WriteAllBytes(reportPath, builder.Build());
     }
 
-    /// <summary>
-    /// Utilitaire qui convertit une liste plate de LetterLoc en un dictionnaire indexé par page.
-    /// Accès en temps constant O(1) lors de la construction du rapport.
-    /// </summary>
     private Dictionary<int, List<LetterLoc>> GroupHighlightsByPage(IEnumerable<LetterLoc> letters)
     {
         return letters

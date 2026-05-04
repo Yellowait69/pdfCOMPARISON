@@ -24,13 +24,9 @@ public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
         {
             if (c == '\u00AD') continue;
 
-            char normalized = c;
+            char normalized = NormalizeSpecialCharacters(c);
 
-
-            if (c == '\u00A0') normalized = ' ';
-            else if (c == '–' || c == '—' || c == '−') normalized = '-';
-            else if (c == '’' || c == '‘' || c == '´' || c == '`') normalized = '\'';
-            else if (c == '“' || c == '”' || c == '«' || c == '»') normalized = '"';
+            if (normalized == '\u00A0') normalized = ' ';
 
             sb.Append(normalized);
         }
@@ -49,18 +45,23 @@ public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
             if (char.IsControl(c) || char.IsWhiteSpace(c)) continue;
             if (c == '\u00A0' || c == '\u200B' || c == '\u200C' || c == '\u200D' || c == '\uFEFF' || c == '\u00AD') continue;
 
-            char normalized = c;
+            char normalized = NormalizeSpecialCharacters(c);
 
-
-            if (c == '–' || c == '—' || c == '−') normalized = '-';
-            else if (c == '’' || c == '‘' || c == '´' || c == '`') normalized = '\'';
-            else if (c == '“' || c == '”' || c == '«' || c == '»') normalized = '"';
-            else if (c == ',') normalized = '.';
+            if (normalized == ',') normalized = '.';
 
             sb.Append(char.ToLowerInvariant(normalized));
         }
 
         return sb.ToString().Normalize(NormalizationForm.FormKC);
+    }
+
+    private char NormalizeSpecialCharacters(char c)
+    {
+        if (c == '–' || c == '—' || c == '−') return '-';
+        if (c == '’' || c == '‘' || c == '´' || c == '`') return '\'';
+        if (c == '“' || c == '”' || c == '«' || c == '»') return '"';
+
+        return c;
     }
 
     public List<List<(string CleanText, List<LetterLoc> Letters)>> GroupIntoLines(IReadOnlyList<PdfWordInfo> words)

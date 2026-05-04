@@ -17,11 +17,8 @@ public class TextDiffSummaryService : ITextDiffSummaryService
     public (int DifferencesCount, List<DiffSummaryBlock> Blocks, SideBySideDiffModel DiffLinesModel) BuildTextSummary(string cleanSource, string cleanTarget)
     {
         var diffBuilder = new SideBySideDiffBuilder(new Differ());
-
         var diffLines = diffBuilder.BuildDiffModel(cleanSource ?? string.Empty, cleanTarget ?? string.Empty);
-
         var blocks = new List<DiffSummaryBlock>();
-
         int linesCount = diffLines.NewText.Lines.Count;
 
         var sumDel = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -32,24 +29,14 @@ public class TextDiffSummaryService : ITextDiffSummaryService
             var oldLine = diffLines.OldText.Lines[i];
             var newLine = diffLines.NewText.Lines[i];
 
-            if (oldLine.Type is ChangeType.Deleted or ChangeType.Modified)
+            if (oldLine.Type is ChangeType.Deleted or ChangeType.Modified && oldLine.Text.Trim() is { Length: > 0 } oldTxt)
             {
-                string t = oldLine.Text.Trim();
-                if (t.Length > 0)
-                {
-                    sumDel.TryGetValue(t, out int count);
-                    sumDel[t] = count + 1;
-                }
+                sumDel[oldTxt] = sumDel.GetValueOrDefault(oldTxt) + 1;
             }
 
-            if (newLine.Type is ChangeType.Inserted or ChangeType.Modified)
+            if (newLine.Type is ChangeType.Inserted or ChangeType.Modified && newLine.Text.Trim() is { Length: > 0 } newTxt)
             {
-                string t = newLine.Text.Trim();
-                if (t.Length > 0)
-                {
-                    sumIns.TryGetValue(t, out int count);
-                    sumIns[t] = count + 1;
-                }
+                sumIns[newTxt] = sumIns.GetValueOrDefault(newTxt) + 1;
             }
         }
 
@@ -79,25 +66,17 @@ public class TextDiffSummaryService : ITextDiffSummaryService
             bool isDel = oldLine.Type is ChangeType.Deleted or ChangeType.Modified;
             bool isIns = newLine.Type is ChangeType.Inserted or ChangeType.Modified;
 
-            if (isDel)
+            if (isDel && oldLine.Text.Trim() is { Length: > 0 } txtDel && skipDel.GetValueOrDefault(txtDel) > 0)
             {
-                string txt = oldLine.Text.Trim();
-                if (txt.Length > 0 && skipDel.TryGetValue(txt, out int moves) && moves > 0)
-                {
-                    skipDel[txt] = moves - 1;
-                    isDel = false;
-                }
-            }
-            if (isIns)
-            {
-                string txt = newLine.Text.Trim();
-                if (txt.Length > 0 && skipIns.TryGetValue(txt, out int moves) && moves > 0)
-                {
-                    skipIns[txt] = moves - 1;
-                    isIns = false;
-                }
+                skipDel[txtDel]--;
+                isDel = false;
             }
 
+            if (isIns && newLine.Text.Trim() is { Length: > 0 } txtIns && skipIns.GetValueOrDefault(txtIns) > 0)
+            {
+                skipIns[txtIns]--;
+                isIns = false;
+            }
 
             if (isDel || isIns)
             {
@@ -111,14 +90,11 @@ public class TextDiffSummaryService : ITextDiffSummaryService
 
                 lastDiffIndex = i;
             }
-            else
+            else if (currentDel.Count > 0 || currentIns.Count > 0)
             {
-                if (currentDel.Count > 0 || currentIns.Count > 0)
-                {
-                    FlushBlocks(blocks, currentDel, currentIns, ctxBefore, GetValidContextLine(diffLines.NewText.Lines, lastDiffIndex, 1));
-                    currentDel.Clear();
-                    currentIns.Clear();
-                }
+                FlushBlocks(blocks, currentDel, currentIns, ctxBefore, GetValidContextLine(diffLines.NewText.Lines, lastDiffIndex, 1));
+                currentDel.Clear();
+                currentIns.Clear();
             }
         }
 
@@ -132,7 +108,6 @@ public class TextDiffSummaryService : ITextDiffSummaryService
 
     private void FlushBlocks(List<DiffSummaryBlock> blocks, List<string> dels, List<string> ins, string ctxBefore, string ctxAfter)
     {
-
         if (dels.Count > 0)
         {
             blocks.Add(new DiffSummaryBlock
