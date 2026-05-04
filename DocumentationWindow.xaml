@@ -82,18 +82,12 @@
                 <DropShadowEffect Color="#0F172A" Opacity="0.05" BlurRadius="10" ShadowDepth="2"/>
             </Border.Effect>
 
-            <!-- Le composant Magique MdXaml -->
-            <md:MarkdownScrollViewer Markdown="{Binding MarkdownContent}">
-                <!-- Personnalisation du rendu Markdown pour correspondre à ton thème -->
-                <md:MarkdownScrollViewer.DocumentStyle>
-                    <Style TargetType="FlowDocument">
-                        <Setter Property="FontFamily" Value="Segoe UI"/>
-                        <Setter Property="FontSize" Value="14"/>
-                        <Setter Property="TextAlignment" Value="Left"/>
-                        <Setter Property="Foreground" Value="#334155"/>
-                    </Style>
-                </md:MarkdownScrollViewer.DocumentStyle>
-            </md:MarkdownScrollViewer>
+            <!-- Le composant Magique MdXaml mis à jour -->
+            <md:MarkdownScrollViewer Markdown="{Binding MarkdownContent}"
+                                     FontFamily="Segoe UI"
+                                     FontSize="14"
+                                     Foreground="#334155"
+                                     MarkdownStyleName="GithubLike" />
         </Border>
     </Grid>
 </Window>
