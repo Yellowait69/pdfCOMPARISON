@@ -14,21 +14,55 @@ public interface IPdfLayoutSanitizerService
 
 public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
 {
+    private string NormalizeLigaturesAndBullets(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return input;
+
+        var sb = new StringBuilder(input.Length + 5);
+        foreach (char c in input)
+        {
+            switch (c)
+            {
+                case 'ﬁ': sb.Append("fi"); break;
+                case 'ﬂ': sb.Append("fl"); break;
+                case 'ﬀ': sb.Append("ff"); break;
+                case 'ﬃ': sb.Append("ffi"); break;
+                case 'ﬄ': sb.Append("ffl"); break;
+                case 'œ': sb.Append("oe"); break;
+                case 'æ': sb.Append("ae"); break;
+                case 'Œ': sb.Append("OE"); break;
+                case 'Æ': sb.Append("AE"); break;
+
+                case '•': case '·': case '▪': case '●': case '○': case '\uF0A7': case '\u2023': case '\u2043':
+                    sb.Append('-'); break;
+
+                case '–': case '—': case '−':
+                    sb.Append('-'); break;
+
+                case '’': case '‘': case '´': case '`':
+                    sb.Append('\''); break;
+                case '“': case '”': case '«': case '»':
+                    sb.Append('"'); break;
+
+                default:
+                    sb.Append(c); break;
+            }
+        }
+        return sb.ToString();
+    }
+
     public string CleanLineForDiff(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return string.Empty;
 
-        var sb = new StringBuilder(input.Length);
+        string normalizedStr = NormalizeLigaturesAndBullets(input);
+        var sb = new StringBuilder(normalizedStr.Length);
 
-        foreach (char c in input)
+        foreach (char c in normalizedStr)
         {
             if (c == '\u00AD') continue;
-
-            char normalized = NormalizeSpecialCharacters(c);
-
-            if (normalized == '\u00A0') normalized = ' ';
-
-            sb.Append(normalized);
+            if (c == '\u00A0') sb.Append(' ');
+            else sb.Append(c);
         }
 
         return sb.ToString().Normalize(NormalizationForm.FormKC);
@@ -38,30 +72,21 @@ public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
     {
         if (string.IsNullOrWhiteSpace(input)) return string.Empty;
 
-        var sb = new StringBuilder(input.Length);
+        string normalizedStr = NormalizeLigaturesAndBullets(input);
+        var sb = new StringBuilder(normalizedStr.Length);
 
-        foreach (char c in input)
+        foreach (char c in normalizedStr)
         {
             if (char.IsControl(c) || char.IsWhiteSpace(c)) continue;
             if (c == '\u00A0' || c == '\u200B' || c == '\u200C' || c == '\u200D' || c == '\uFEFF' || c == '\u00AD') continue;
 
-            char normalized = NormalizeSpecialCharacters(c);
+            char finalChar = c;
+            if (finalChar == ',') finalChar = '.';
 
-            if (normalized == ',') normalized = '.';
-
-            sb.Append(char.ToLowerInvariant(normalized));
+            sb.Append(char.ToLowerInvariant(finalChar));
         }
 
         return sb.ToString().Normalize(NormalizationForm.FormKC);
-    }
-
-    private char NormalizeSpecialCharacters(char c)
-    {
-        if (c == '–' || c == '—' || c == '−') return '-';
-        if (c == '’' || c == '‘' || c == '´' || c == '`') return '\'';
-        if (c == '“' || c == '”' || c == '«' || c == '»') return '"';
-
-        return c;
     }
 
     public List<List<(string CleanText, List<LetterLoc> Letters)>> GroupIntoLines(IReadOnlyList<PdfWordInfo> words)

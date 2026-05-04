@@ -38,7 +38,8 @@ public class PdfTextNormalizerService : IPdfTextNormalizerService
         sb.Replace("? ", "?\n");
         sb.Replace("! ", "!\n");
         sb.Replace(": ", ":\n");
-        sb.Replace("•", "\n• ");
+        sb.Replace(" • ", "\n• ");
+        sb.Replace(" - ", "\n- ");
         sb.Replace(" o ", "\n o ");
 
         var lines = sb.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

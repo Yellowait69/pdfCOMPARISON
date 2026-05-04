@@ -103,12 +103,24 @@
                 <TextBlock Text="Automated document comparison and visual diff report generation" FontSize="14" Foreground="#64748B" Margin="38,4,0,0"/>
             </StackPanel>
 
-            <Button Command="{Binding StartComparisonCommand}" Style="{StaticResource ModernPrimaryButton}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,5,0,0" IsEnabled="{Binding IsNotProcessing}">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="&#xE768;" FontFamily="Segoe MDL2 Assets" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="Start Comparison" FontSize="15" VerticalAlignment="Center"/>
-                </StackPanel>
-            </Button>
+            <!-- Ajout du conteneur de boutons en haut à droite -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,5,0,0">
+                <!-- Nouveau Bouton de Documentation -->
+                <Button Command="{Binding OpenDocumentationCommand}" Style="{StaticResource ModernSecondaryButton}" ToolTip="Lire la documentation du code" Margin="0,0,15,0">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="Doc Interne" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+
+                <!-- Bouton d'origine Start Comparison -->
+                <Button Command="{Binding StartComparisonCommand}" Style="{StaticResource ModernPrimaryButton}" IsEnabled="{Binding IsNotProcessing}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE768;" FontFamily="Segoe MDL2 Assets" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="Start Comparison" FontSize="15" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
         </DockPanel>
 
         <Border Grid.Row="1" Background="White" CornerRadius="12" Padding="25" Margin="0,0,0,25">

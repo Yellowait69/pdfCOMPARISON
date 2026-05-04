@@ -174,6 +174,24 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    // --- NOUVELLE COMMANDE POUR LA DOCUMENTATION ---
+    [RelayCommand]
+    private void OpenDocumentation()
+    {
+        try
+        {
+            // Assurez-vous d'avoir créé le dossier Views et la fenêtre DocumentationWindow.xaml
+            var docWindow = new Views.DocumentationWindow();
+
+            // Show() permet à l'utilisateur de garder la doc ouverte tout en utilisant l'application
+            docWindow.Show();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Impossible d'ouvrir la documentation : {ex.Message}\n\nAvez-vous bien installé le package NuGet 'MdXaml' ?", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     [RelayCommand]
     private void OpenReport(DocumentPair pair)
     {
@@ -349,4 +367,3 @@ public partial class MainViewModel : ObservableObject
         }
     }
 }
-```</T></T>
