@@ -41,7 +41,7 @@
                         <GroupStyle>
                             <GroupStyle.HeaderTemplate>
                                 <DataTemplate>
-                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="#94A3B8" Margin="5,15,0,5" FontSize="11" TextTransform="Uppercase"/>
+                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="#94A3B8" Margin="5,15,0,5" FontSize="11" />
                                 </DataTemplate>
                             </GroupStyle.HeaderTemplate>
                         </GroupStyle>
@@ -103,4 +103,3 @@
         </Border>
     </Grid>
 </Window>
-```</ListBox.GroupStyle>
