@@ -30,12 +30,24 @@
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
-                <TextBlock Text="Services &amp; Modèles" FontWeight="Bold" FontSize="16" Foreground="#1E293B" Margin="0,0,0,10"/>
+                <TextBlock Text="Documentation" FontWeight="Bold" FontSize="16" Foreground="#1E293B" Margin="0,0,0,10"/>
 
-                <ListBox Grid.Row="1" ItemsSource="{Binding Documents}" SelectedItem="{Binding SelectedDocument}"
+                <!-- On utilise GroupedDocuments -->
+                <ListBox Grid.Row="1" ItemsSource="{Binding GroupedDocuments}" SelectedItem="{Binding SelectedDocument}"
                          BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
 
-                    <!-- Style personnalisé pour moderniser la sélection (fini le carré bleu par défaut de WPF) -->
+                    <!-- Style des en-têtes de groupes (Catégories) -->
+                    <ListBox.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="#94A3B8" Margin="5,15,0,5" FontSize="11" TextTransform="Uppercase"/>
+                                </DataTemplate>
+                            </GroupStyle.HeaderTemplate>
+                        </GroupStyle>
+                    </ListBox.GroupStyle>
+
+                    <!-- Style personnalisé pour moderniser la sélection -->
                     <ListBox.ItemContainerStyle>
                         <Style TargetType="ListBoxItem">
                             <Setter Property="Padding" Value="8,6"/>
@@ -82,7 +94,7 @@
                 <DropShadowEffect Color="#0F172A" Opacity="0.05" BlurRadius="10" ShadowDepth="2"/>
             </Border.Effect>
 
-            <!-- Le composant Magique MdXaml mis à jour -->
+            <!-- Le composant MdXaml -->
             <md:MarkdownScrollViewer Markdown="{Binding MarkdownContent}"
                                      FontFamily="Segoe UI"
                                      FontSize="14"
@@ -91,3 +103,4 @@
         </Border>
     </Grid>
 </Window>
+```</ListBox.GroupStyle>
