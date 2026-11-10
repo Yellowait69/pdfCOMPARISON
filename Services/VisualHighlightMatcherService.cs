@@ -15,6 +15,14 @@ public interface IVisualHighlightMatcherService
 
 public class VisualHighlightMatcherService : IVisualHighlightMatcherService
 {
+    private readonly IConfigurationService? _configService;
+
+    public VisualHighlightMatcherService(IConfigurationService? configService = null)
+    {
+        _configService = configService;
+    }
+
+    private ComparisonProfile? Profile => _configService?.ActiveProfile;
 
     public VisualHighlights GenerateHighlights(
         SideBySideDiffModel diffLinesModel,
@@ -25,9 +33,15 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         if (sourceLinesList == null) throw new ArgumentNullException(nameof(sourceLinesList));
         if (targetLinesList == null) throw new ArgumentNullException(nameof(targetLinesList));
 
+        int maxLineShiftFullLine = Profile?.MaxLineShiftForFullLine ?? 12;
+        int maxLineShiftSequence = Profile?.MaxLineShiftForSequence ?? 10;
+        int maxLineShiftSingleWord = Profile?.MaxLineShiftForSingleWord ?? 3;
+        decimal maxProximityX = Profile?.LocalProximityMaxX ?? 480.0m;
+        decimal minProximityY = Profile?.LocalProximityMinY ?? 36.0m;
+
         var highlights = new VisualHighlights();
 
-        int estimatedDiffs = diffLinesModel.NewText.Lines.Count / 4;
+        int estimatedDiffs = Math.Max(16, diffLinesModel.NewText.Lines.Count / 4);
 
         var globalDeletes = new List<(string CleanText, List<LetterLoc> Letters, int LineIndex)>(estimatedDiffs);
         var globalInserts = new List<(string CleanText, List<LetterLoc> Letters, int LineIndex)>(estimatedDiffs);
@@ -71,6 +85,10 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         bool[] matchedOld = new bool[deletesCount];
         bool[] matchedNew = new bool[insertsCount];
 
+        // Passe 0 : Dé-césure automatique (ex: "rembour-" + "sement" en fin de ligne vs "remboursement")
+        ReconcileHyphenatedAndSplitWords(globalDeletes, globalInserts, matchedOld, matchedNew, maxLineShiftSequence);
+
+        // Passe 1 : Réconciliation de lignes entières déplacées
         int idxDel = 0;
         while (idxDel < deletesCount)
         {
@@ -109,29 +127,26 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
                         insLen++;
                     }
 
-                    if (delLen == insLen)
+                    if (delLen == insLen && Math.Abs(currentLineIndex - targetLineIndex) <= maxLineShiftFullLine)
                     {
-                        if (Math.Abs(currentLineIndex - targetLineIndex) <= 1)
+                        bool isMatch = true;
+                        for (int k = 0; k < delLen; k++)
                         {
-                            bool isMatch = true;
-                            for (int k = 0; k < delLen; k++)
+                            if (!string.Equals(globalDeletes[delStart + k].CleanText, globalInserts[insStart + k].CleanText, StringComparison.Ordinal))
                             {
-                                if (!string.Equals(globalDeletes[delStart + k].CleanText, globalInserts[insStart + k].CleanText))
-                                {
-                                    isMatch = false;
-                                    break;
-                                }
-                            }
-
-                            if (isMatch)
-                            {
-                                for (int k = 0; k < delLen; k++)
-                                {
-                                    matchedOld[delStart + k] = true;
-                                    matchedNew[insStart + k] = true;
-                                }
+                                isMatch = false;
                                 break;
                             }
+                        }
+
+                        if (isMatch)
+                        {
+                            for (int k = 0; k < delLen; k++)
+                            {
+                                matchedOld[delStart + k] = true;
+                                matchedNew[insStart + k] = true;
+                            }
+                            break;
                         }
                     }
                     idxIns += insLen;
@@ -140,6 +155,7 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
             idxDel += delLen;
         }
 
+        // Passe 2 : Réconciliation des séquences de >= 2 mots (absorbe les retours à la ligne / word-wrap reflow)
         for (int i = 0; i < deletesCount; i++)
         {
             if (matchedOld[i]) continue;
@@ -148,10 +164,10 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
             {
                 if (matchedNew[j]) continue;
 
-                if (Math.Abs(globalDeletes[i].LineIndex - globalInserts[j].LineIndex) > 1)
+                if (Math.Abs(globalDeletes[i].LineIndex - globalInserts[j].LineIndex) > maxLineShiftSequence)
                     continue;
 
-                if (string.Equals(globalDeletes[i].CleanText, globalInserts[j].CleanText))
+                if (string.Equals(globalDeletes[i].CleanText, globalInserts[j].CleanText, StringComparison.Ordinal))
                 {
                     int seqLen = 1;
 
@@ -159,9 +175,9 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
                     {
                         if (matchedOld[i + seqLen] || matchedNew[j + seqLen]) break;
 
-                        if (Math.Abs(globalDeletes[i + seqLen].LineIndex - globalInserts[j + seqLen].LineIndex) > 1) break;
+                        if (Math.Abs(globalDeletes[i + seqLen].LineIndex - globalInserts[j + seqLen].LineIndex) > maxLineShiftSequence) break;
 
-                        if (!string.Equals(globalDeletes[i + seqLen].CleanText, globalInserts[j + seqLen].CleanText)) break;
+                        if (!string.Equals(globalDeletes[i + seqLen].CleanText, globalInserts[j + seqLen].CleanText, StringComparison.Ordinal)) break;
 
                         seqLen++;
                     }
@@ -180,6 +196,7 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
             }
         }
 
+        // Passe 3 : Réconciliation des mots isolés proches géométriquement
         for (int i = 0; i < deletesCount; i++)
         {
             if (matchedOld[i]) continue;
@@ -190,12 +207,12 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
             {
                 if (matchedNew[j]) continue;
 
-                if (string.Equals(oldWord, globalInserts[j].CleanText))
+                if (string.Equals(oldWord, globalInserts[j].CleanText, StringComparison.Ordinal))
                 {
-                    if (globalDeletes[i].LineIndex != globalInserts[j].LineIndex)
+                    if (Math.Abs(globalDeletes[i].LineIndex - globalInserts[j].LineIndex) > maxLineShiftSingleWord)
                         continue;
 
-                    if (!IsLocallyClose(globalDeletes[i].Letters, globalInserts[j].Letters))
+                    if (!IsLocallyClose(globalDeletes[i].Letters, globalInserts[j].Letters, minProximityY, maxProximityX))
                         continue;
 
                     matchedOld[i] = true;
@@ -220,12 +237,81 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         return highlights;
     }
 
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    private bool IsLocallyClose(List<LetterLoc> oldLocList, List<LetterLoc> newLocList)
+    /// <summary>
+    /// Réconcilie les mots coupés par une césure en fin de ligne ("rembour-" + "sement" == "remboursement")
+    /// ou scindés en deux par un écart de kerning entre Source et Target.
+    /// </summary>
+    private static void ReconcileHyphenatedAndSplitWords(
+        List<(string CleanText, List<LetterLoc> Letters, int LineIndex)> globalDeletes,
+        List<(string CleanText, List<LetterLoc> Letters, int LineIndex)> globalInserts,
+        bool[] matchedOld,
+        bool[] matchedNew,
+        int maxLineShift)
     {
-        return oldLocList.Count > 0 && newLocList.Count > 0 &&
-               oldLocList[0].PageNumber == newLocList[0].PageNumber &&
-               Math.Abs(oldLocList[0].BaselineY - newLocList[0].BaselineY) < 15.0m &&
-               Math.Abs((decimal)oldLocList[0].BoundingBox.BottomLeft.X - (decimal)newLocList[0].BoundingBox.BottomLeft.X) < 300.0m;
+        int delCount = globalDeletes.Count;
+        int insCount = globalInserts.Count;
+
+        // Cas A : 2 fragments dans Source == 1 mot complet dans Target
+        for (int i = 0; i < delCount - 1; i++)
+        {
+            if (matchedOld[i] || matchedOld[i + 1]) continue;
+
+            string part1 = globalDeletes[i].CleanText.TrimEnd('-');
+            string part2 = globalDeletes[i + 1].CleanText;
+            if (part1.Length == 0 || part2.Length == 0) continue;
+
+            string combinedDel = part1 + part2;
+
+            for (int j = 0; j < insCount; j++)
+            {
+                if (matchedNew[j]) continue;
+                if (Math.Abs(globalDeletes[i].LineIndex - globalInserts[j].LineIndex) > maxLineShift) continue;
+
+                if (string.Equals(combinedDel, globalInserts[j].CleanText, StringComparison.Ordinal))
+                {
+                    matchedOld[i] = true;
+                    matchedOld[i + 1] = true;
+                    matchedNew[j] = true;
+                    break;
+                }
+            }
+        }
+
+        // Cas B : 1 mot complet dans Source == 2 fragments dans Target
+        for (int j = 0; j < insCount - 1; j++)
+        {
+            if (matchedNew[j] || matchedNew[j + 1]) continue;
+
+            string part1 = globalInserts[j].CleanText.TrimEnd('-');
+            string part2 = globalInserts[j + 1].CleanText;
+            if (part1.Length == 0 || part2.Length == 0) continue;
+
+            string combinedIns = part1 + part2;
+
+            for (int i = 0; i < delCount; i++)
+            {
+                if (matchedOld[i]) continue;
+                if (Math.Abs(globalDeletes[i].LineIndex - globalInserts[j].LineIndex) > maxLineShift) continue;
+
+                if (string.Equals(globalDeletes[i].CleanText, combinedIns, StringComparison.Ordinal))
+                {
+                    matchedOld[i] = true;
+                    matchedNew[j] = true;
+                    matchedNew[j + 1] = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private bool IsLocallyClose(List<LetterLoc> oldLocList, List<LetterLoc> newLocList, decimal minVerticalTolerance, decimal maxHorizontalTolerance)
+    {
+        if (oldLocList.Count == 0 || newLocList.Count == 0) return false;
+        if (oldLocList[0].PageNumber != newLocList[0].PageNumber) return false;
+
+        decimal verticalTolerance = Math.Max(minVerticalTolerance, oldLocList[0].FontSize * 3.0m);
+        return Math.Abs(oldLocList[0].BaselineY - newLocList[0].BaselineY) < verticalTolerance &&
+               Math.Abs((decimal)oldLocList[0].BoundingBox.BottomLeft.X - (decimal)newLocList[0].BoundingBox.BottomLeft.X) < maxHorizontalTolerance;
     }
 }

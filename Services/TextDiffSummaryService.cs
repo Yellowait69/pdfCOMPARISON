@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text.RegularExpressions;
 using DiffPlex;
 using DiffPlex.DiffBuilder;
 using DiffPlex.DiffBuilder.Model;
@@ -10,10 +13,39 @@ namespace PDFComparison.Services;
 public interface ITextDiffSummaryService
 {
     (int DifferencesCount, List<DiffSummaryBlock> Blocks, SideBySideDiffModel DiffLinesModel) BuildTextSummary(string cleanSource, string cleanTarget);
+
+    List<DiffSummaryBlock> BuildVerifiedSummaryBlocks(
+        string cleanSource,
+        string cleanTarget,
+        List<List<(string CleanText, List<LetterLoc> Letters)>> sourceLinesList,
+        List<List<(string CleanText, List<LetterLoc> Letters)>> targetLinesList,
+        VisualHighlights confirmedHighlights);
 }
 
-public class TextDiffSummaryService : ITextDiffSummaryService
+public partial class TextDiffSummaryService : ITextDiffSummaryService
 {
+    private readonly IConfigurationService? _configService;
+
+    [GeneratedRegex(@"\d+(?:[.,]\d+)?|\b(?:€|\$|£|%|eur|usd)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex AmountOrNumberRegex();
+
+    [GeneratedRegex(@"-?\d{1,3}(?:[\s\u00A0\u202F.]\d{3})*(?:[.,]\d+)?|-?\d+(?:[.,]\d+)?")]
+    private static partial Regex NumericValueExtractorRegex();
+
+    [GeneratedRegex(@"\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}\b")]
+    private static partial Regex DatePatternRegex();
+
+    [GeneratedRegex(@"(?i)\b(prix|pénalité|pénalités|résiliation|ttc|ht|garantie|article|euro|taxe|montant|facture|price|penalty|termination|vat|warranty|tax|amount|invoice)\b")]
+    private static partial Regex DefaultCriticalKeywordRegex();
+
+    [GeneratedRegex(@"[\p{L}\p{N}]+")]
+    private static partial Regex WordTokenRegex();
+
+    public TextDiffSummaryService(IConfigurationService? configService = null)
+    {
+        _configService = configService;
+    }
+
     public (int DifferencesCount, List<DiffSummaryBlock> Blocks, SideBySideDiffModel DiffLinesModel) BuildTextSummary(string cleanSource, string cleanTarget)
     {
         var diffBuilder = new SideBySideDiffBuilder(new Differ());
@@ -92,7 +124,7 @@ public class TextDiffSummaryService : ITextDiffSummaryService
             }
             else if (currentDel.Count > 0 || currentIns.Count > 0)
             {
-                FlushBlocks(blocks, currentDel, currentIns, ctxBefore, GetValidContextLine(diffLines.NewText.Lines, lastDiffIndex, 1));
+                FlushBlocks(blocks, currentDel, currentIns, ctxBefore, GetValidContextLine(diffLines.NewText.Lines, lastDiffIndex, 1), 1);
                 currentDel.Clear();
                 currentIns.Clear();
             }
@@ -100,37 +132,326 @@ public class TextDiffSummaryService : ITextDiffSummaryService
 
         if (currentDel.Count > 0 || currentIns.Count > 0)
         {
-            FlushBlocks(blocks, currentDel, currentIns, ctxBefore, string.Empty);
+            FlushBlocks(blocks, currentDel, currentIns, ctxBefore, string.Empty, 1);
         }
 
         return (blocks.Count, blocks, diffLines);
     }
 
-    private void FlushBlocks(List<DiffSummaryBlock> blocks, List<string> dels, List<string> ins, string ctxBefore, string ctxAfter)
+    public List<DiffSummaryBlock> BuildVerifiedSummaryBlocks(
+        string cleanSource,
+        string cleanTarget,
+        List<List<(string CleanText, List<LetterLoc> Letters)>> sourceLinesList,
+        List<List<(string CleanText, List<LetterLoc> Letters)>> targetLinesList,
+        VisualHighlights confirmedHighlights)
     {
+        var (_, candidateBlocks, _) = BuildTextSummary(cleanSource, cleanTarget);
+
+        var confirmedSrcSet = new HashSet<LetterLoc>(confirmedHighlights.SourceRed);
+        var confirmedTrgSet = new HashSet<LetterLoc>(confirmedHighlights.TargetRed);
+
+        var confirmedTokensToPage = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var line in sourceLinesList)
+        {
+            foreach (var word in line)
+            {
+                if (word.Letters.Any(l => confirmedSrcSet.Contains(l)))
+                {
+                    foreach (Match m in WordTokenRegex().Matches(word.CleanText))
+                    {
+                        confirmedTokensToPage.TryAdd(m.Value, word.Letters[0].PageNumber);
+                    }
+                }
+            }
+        }
+
+        foreach (var line in targetLinesList)
+        {
+            foreach (var word in line)
+            {
+                if (word.Letters.Any(l => confirmedTrgSet.Contains(l)))
+                {
+                    foreach (Match m in WordTokenRegex().Matches(word.CleanText))
+                    {
+                        confirmedTokensToPage.TryAdd(m.Value, word.Letters[0].PageNumber);
+                    }
+                }
+            }
+        }
+
+        if (confirmedTokensToPage.Count == 0)
+        {
+            return new List<DiffSummaryBlock>();
+        }
+
+        var verifiedBlocks = new List<DiffSummaryBlock>();
+        int defaultPage = confirmedHighlights.TargetRed.FirstOrDefault().PageNumber;
+        if (defaultPage <= 0) defaultPage = confirmedHighlights.SourceRed.FirstOrDefault().PageNumber;
+        if (defaultPage <= 0) defaultPage = 1;
+
+        foreach (var block in candidateBlocks)
+        {
+            var diffWords = ExtractActuallyChangedTokens(block.OldText, block.NewText);
+            if (diffWords.Count == 0) continue;
+
+            int matchedPage = 0;
+            foreach (var token in diffWords)
+            {
+                if (confirmedTokensToPage.TryGetValue(token, out int page))
+                {
+                    matchedPage = page;
+                    break;
+                }
+            }
+
+            if (matchedPage > 0)
+            {
+                block.PageNumber = matchedPage;
+                ClassifyBlockSeverityAndCategory(block, diffWords);
+                verifiedBlocks.Add(block);
+            }
+        }
+
+        if (verifiedBlocks.Count == 0 && (confirmedHighlights.SourceRed.Count > 0 || confirmedHighlights.TargetRed.Count > 0))
+        {
+            string oldFallback = string.Join(" ", sourceLinesList
+                .SelectMany(l => l)
+                .Where(w => w.Letters.Any(loc => confirmedSrcSet.Contains(loc)))
+                .Select(w => w.CleanText));
+
+            string newFallback = string.Join(" ", targetLinesList
+                .SelectMany(l => l)
+                .Where(w => w.Letters.Any(loc => confirmedTrgSet.Contains(loc)))
+                .Select(w => w.CleanText));
+
+            var fallbackBlock = new DiffSummaryBlock
+            {
+                PageNumber = defaultPage,
+                Type = (!string.IsNullOrEmpty(oldFallback) && !string.IsNullOrEmpty(newFallback))
+                    ? ChangeType.Modified
+                    : (!string.IsNullOrEmpty(newFallback) ? ChangeType.Inserted : ChangeType.Deleted),
+                OldText = oldFallback,
+                NewText = newFallback
+            };
+            ClassifyBlockSeverityAndCategory(fallbackBlock, ExtractActuallyChangedTokens(oldFallback, newFallback));
+            verifiedBlocks.Add(fallbackBlock);
+        }
+
+        return verifiedBlocks;
+    }
+
+    private static List<string> ExtractActuallyChangedTokens(string oldText, string newText)
+    {
+        var oldTokens = WordTokenRegex().Matches(oldText ?? string.Empty).Select(m => m.Value.ToLowerInvariant()).ToList();
+        var newTokens = WordTokenRegex().Matches(newText ?? string.Empty).Select(m => m.Value.ToLowerInvariant()).ToList();
+
+        var oldCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in oldTokens) oldCounts[t] = oldCounts.GetValueOrDefault(t) + 1;
+
+        var newCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in newTokens) newCounts[t] = newCounts.GetValueOrDefault(t) + 1;
+
+        var changed = new List<string>();
+        foreach (var kvp in oldCounts)
+        {
+            if (newCounts.GetValueOrDefault(kvp.Key) != kvp.Value)
+                changed.Add(kvp.Key);
+        }
+        foreach (var kvp in newCounts)
+        {
+            if (oldCounts.GetValueOrDefault(kvp.Key) != kvp.Value && !changed.Contains(kvp.Key))
+                changed.Add(kvp.Key);
+        }
+
+        return changed;
+    }
+
+    private void FlushBlocks(List<DiffSummaryBlock> blocks, List<string> dels, List<string> ins, string ctxBefore, string ctxAfter, int pageNumber)
+    {
+        if (dels.Count > 0 && ins.Count > 0)
+        {
+            string oldStr = string.Join("\n", dels);
+            string newStr = string.Join("\n", ins);
+
+            var modBlock = new DiffSummaryBlock
+            {
+                PageNumber = pageNumber,
+                Type = ChangeType.Modified,
+                ContextBefore = ctxBefore,
+                ContextAfter = ctxAfter,
+                OldText = oldStr,
+                NewText = newStr
+            };
+            ClassifyBlockSeverityAndCategory(modBlock, ExtractActuallyChangedTokens(oldStr, newStr));
+            blocks.Add(modBlock);
+            return;
+        }
+
         if (dels.Count > 0)
         {
-            blocks.Add(new DiffSummaryBlock
+            string oldStr = string.Join("\n", dels);
+            var delBlock = new DiffSummaryBlock
             {
+                PageNumber = pageNumber,
                 Type = ChangeType.Deleted,
                 ContextBefore = ctxBefore,
                 ContextAfter = ctxAfter,
-                OldText = string.Join("\n", dels),
+                OldText = oldStr,
                 NewText = string.Empty
-            });
+            };
+            ClassifyBlockSeverityAndCategory(delBlock, ExtractActuallyChangedTokens(oldStr, string.Empty));
+            blocks.Add(delBlock);
         }
 
         if (ins.Count > 0)
         {
-            blocks.Add(new DiffSummaryBlock
+            string newStr = string.Join("\n", ins);
+            var insBlock = new DiffSummaryBlock
             {
+                PageNumber = pageNumber,
                 Type = ChangeType.Inserted,
                 ContextBefore = ctxBefore,
                 ContextAfter = ctxAfter,
                 OldText = string.Empty,
-                NewText = string.Join("\n", ins)
-            });
+                NewText = newStr
+            };
+            ClassifyBlockSeverityAndCategory(insBlock, ExtractActuallyChangedTokens(string.Empty, newStr));
+            blocks.Add(insBlock);
         }
+    }
+
+    private void ClassifyBlockSeverityAndCategory(DiffSummaryBlock block, List<string> changedTokens)
+    {
+        string combinedChanged = string.Join(" ", changedTokens);
+        string fullText = $"{block.OldText} {block.NewText}";
+
+        Regex criticalRegex = (_configService != null && !string.IsNullOrWhiteSpace(_configService.ActiveProfile.CriticalKeywordsRegex))
+            ? (_configService.TryGetCompiledRegex(_configService.ActiveProfile.CriticalKeywordsRegex, ignoreCase: true) ?? DefaultCriticalKeywordRegex())
+            : DefaultCriticalKeywordRegex();
+
+        if (DatePatternRegex().IsMatch(combinedChanged) || DatePatternRegex().IsMatch(fullText))
+        {
+            block.Category = "Date";
+            block.Severity = DiffSeverity.Critical;
+        }
+        else if (AmountOrNumberRegex().IsMatch(combinedChanged))
+        {
+            if (TryComputeFinancialDelta(block.OldText, block.NewText, out decimal deltaVal, out string deltaFormatted, out bool isSameNumericValue))
+            {
+                block.FinancialDelta = deltaFormatted;
+                if (isSameNumericValue)
+                {
+                    block.Category = "Formatage Numérique";
+                    block.Severity = DiffSeverity.Minor;
+                    return;
+                }
+            }
+
+            block.Category = "Montant / Chiffre";
+            block.Severity = DiffSeverity.Critical;
+        }
+        else if (criticalRegex.IsMatch(combinedChanged) || criticalRegex.IsMatch(fullText))
+        {
+            block.Category = "Clause Critique";
+            block.Severity = DiffSeverity.Critical;
+        }
+        else if (changedTokens.Count > 0)
+        {
+            block.Category = "Texte";
+            block.Severity = DiffSeverity.Major;
+        }
+        else
+        {
+            block.Category = "Formatage";
+            block.Severity = DiffSeverity.Minor;
+        }
+    }
+
+    private static bool TryComputeFinancialDelta(
+        string? oldText,
+        string? newText,
+        out decimal delta,
+        out string formattedDelta,
+        out bool isSameNumericValue)
+    {
+        delta = 0m;
+        formattedDelta = string.Empty;
+        isSameNumericValue = false;
+
+        if (string.IsNullOrWhiteSpace(oldText) || string.IsNullOrWhiteSpace(newText))
+            return false;
+
+        var oldNums = ExtractDecimals(oldText);
+        var newNums = ExtractDecimals(newText);
+
+        if (oldNums.Count == 0 || newNums.Count == 0)
+            return false;
+
+        // Trouve la première paire de nombres à la même position qui diffère (ou la dernière paire si tous sont égaux)
+        int count = Math.Min(oldNums.Count, newNums.Count);
+        decimal oldVal = oldNums[^1];
+        decimal newVal = newNums[^1];
+
+        for (int i = 0; i < count; i++)
+        {
+            if (Math.Abs(oldNums[i] - newNums[i]) >= 0.0001m)
+            {
+                oldVal = oldNums[i];
+                newVal = newNums[i];
+                break;
+            }
+        }
+
+        delta = newVal - oldVal;
+        if (Math.Abs(delta) < 0.0001m)
+        {
+            isSameNumericValue = true;
+            formattedDelta = "Δ 0.00 (Valeur égale)";
+            return true;
+        }
+
+        string sign = delta > 0 ? "+" : "";
+        if (Math.Abs(oldVal) >= 0.0001m)
+        {
+            decimal pct = (delta / Math.Abs(oldVal)) * 100m;
+            formattedDelta = string.Create(CultureInfo.InvariantCulture, $"Δ {sign}{delta:0.##} ({sign}{pct:0.1}%)");
+        }
+        else
+        {
+            formattedDelta = string.Create(CultureInfo.InvariantCulture, $"Δ {sign}{delta:0.##}");
+        }
+
+        return true;
+    }
+
+    private static List<decimal> ExtractDecimals(string text)
+    {
+        var list = new List<decimal>();
+        foreach (Match m in NumericValueExtractorRegex().Matches(text))
+        {
+            string raw = m.Value.Replace(" ", "").Replace("\u00A0", "").Replace("\u202F", "");
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+
+            // Gestion normalisée des séparateurs décimaux FR (,) et EN (.)
+            int lastComma = raw.LastIndexOf(',');
+            int lastDot = raw.LastIndexOf('.');
+
+            if (lastComma > lastDot)
+            {
+                raw = raw.Replace(".", "").Replace(',', '.');
+            }
+            else if (lastDot > lastComma && lastComma != -1)
+            {
+                raw = raw.Replace(",", "");
+            }
+
+            if (decimal.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal val))
+            {
+                list.Add(val);
+            }
+        }
+        return list;
     }
 
     private string GetValidContextLine(List<DiffPiece> lines, int currentIndex, int direction)

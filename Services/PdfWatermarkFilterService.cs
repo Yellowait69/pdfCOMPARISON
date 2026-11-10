@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
+using PDFComparison.Models;
 using UglyToad.PdfPig.Content;
 
 namespace PDFComparison.Services;
@@ -13,8 +15,10 @@ public interface IPdfWatermarkFilterService
 
 public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
 {
-    [GeneratedRegex(@"(?i)(specimen|cimen|speci|men|test|totein|ecimien|Q000|D000|P000|A000)")]
-    private static partial Regex WatermarkTextRegex();
+    private readonly IConfigurationService? _configService;
+
+    [GeneratedRegex(@"\b(?i)(specimen|specimens|ecimien|totein|Q000|D000|P000|A000)\b")]
+    private static partial Regex DefaultWatermarkTextRegex();
 
     [GeneratedRegex(@"\[\s*DOCUMENT\s+(SOURCE|CIBLE).*?\]", RegexOptions.IgnoreCase)]
     private static partial Regex StampRegex();
@@ -28,22 +32,43 @@ public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
     [GeneratedRegex(@"#[A-Z0-9_]+#", RegexOptions.IgnoreCase)]
     private static partial Regex SignatureAnchorRegex();
 
-    private static readonly HashSet<string> SafeShortWords = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly string[] DefaultExactWatermarkWords =
     {
-        "EN", "S", "P", "E", "C", "I", "M", "N", "Q", "D", "MEN", "SP", "SPE", "SPEC"
+        "SPECIMEN", "SPECIMENS", "SPECIME", "SPECIM", "PECIMEN", "ECIMEN", "TOTEIN", "ECIMIEN"
     };
 
-    private static readonly string[] WatermarkFragments =
+    private static readonly string[] DefaultLargeWatermarkFragments =
     {
         "SPECIMEN", "SPECIME", "SPECIM", "PECIMEN", "ECIMEN", "CIMEN", "SPECI", "IMEN", "TOTEIN", "TEST", "ECIMIEN"
     };
+
+    public PdfWatermarkFilterService(IConfigurationService? configService = null)
+    {
+        _configService = configService;
+    }
+
+    private ComparisonProfile? Profile => _configService?.ActiveProfile;
 
     public string CleanRawText(string rawText)
     {
         if (string.IsNullOrWhiteSpace(rawText)) return string.Empty;
 
         string textWithoutAnchors = SignatureAnchorRegex().Replace(rawText, "");
-        string textWithoutWatermark = WatermarkTextRegex().Replace(textWithoutAnchors, "");
+
+        var exactWords = GetExactWatermarkWords();
+        string textWithoutWatermark;
+
+        if (exactWords.Count > 0 && _configService != null)
+        {
+            string pattern = $@"\b(?:{string.Join("|", exactWords.Select(Regex.Escape))}|Q000|D000|P000|A000)\b";
+            var dynamicRegex = _configService.TryGetCompiledRegex(pattern, ignoreCase: true) ?? DefaultWatermarkTextRegex();
+            textWithoutWatermark = dynamicRegex.Replace(textWithoutAnchors, "");
+        }
+        else
+        {
+            textWithoutWatermark = DefaultWatermarkTextRegex().Replace(textWithoutAnchors, "");
+        }
+
         return StampRegex().Replace(textWithoutWatermark, "");
     }
 
@@ -58,6 +83,11 @@ public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
 
         if (ProtectedDataRegex().IsMatch(text)) return false;
 
+        if (WatermarkCodeRegex().IsMatch(text)) return true;
+
+        var exactWords = GetExactWatermarkWords();
+        if (exactWords.Contains(text)) return true;
+
         double maxPointSize = 0;
         foreach (var letter in word.Letters)
         {
@@ -67,23 +97,46 @@ public partial class PdfWatermarkFilterService : IPdfWatermarkFilterService
             }
         }
 
-        if (maxPointSize <= 15.0 && SafeShortWords.Contains(text))
-        {
-            return false;
-        }
+        double minFragmentFontSize = Profile?.WatermarkFragmentMinFontSizePt ?? 16.0;
+        double maxAllowedFontSize = Profile?.MaxAllowedFontSizePt ?? 42.0;
 
-        if (maxPointSize > 18.0) return true;
-
-        foreach (var fragment in WatermarkFragments)
+        if (maxPointSize >= minFragmentFontSize)
         {
-            if (text.Contains(fragment, StringComparison.OrdinalIgnoreCase))
+            foreach (var fragment in GetLargeWatermarkFragments())
             {
-                return true;
+                if (text.Contains(fragment, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
             }
         }
 
-        if (WatermarkCodeRegex().IsMatch(text)) return true;
+        if (maxPointSize > maxAllowedFontSize) return true;
 
         return false;
+    }
+
+    private HashSet<string> GetExactWatermarkWords()
+    {
+        string? csv = Profile?.ExactWatermarkWordsCsv;
+        if (string.IsNullOrWhiteSpace(csv))
+        {
+            return new HashSet<string>(DefaultExactWatermarkWords, StringComparer.OrdinalIgnoreCase);
+        }
+
+        return new HashSet<string>(
+            csv.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private string[] GetLargeWatermarkFragments()
+    {
+        string? csv = Profile?.LargeWatermarkFragmentsCsv;
+        if (string.IsNullOrWhiteSpace(csv))
+        {
+            return DefaultLargeWatermarkFragments;
+        }
+
+        return csv.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 }

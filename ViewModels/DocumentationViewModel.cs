@@ -69,10 +69,10 @@ public partial class DocumentationViewModel : ObservableObject
         if (fileName.EndsWith("Window") || fileName.EndsWith("View") || fileName.EndsWith("MainWindow"))
             return "Vues (UI)";
 
-        if (fileName.EndsWith("Converter"))
+        if (fileName.EndsWith("Converter") || fileName.EndsWith("Behavior"))
             return "Convertisseurs (WPF)";
 
-        if (fileName == "DocItem" || fileName == "DocumentPair" || fileName == "CompareStatus" || fileName == "DiffModels" || fileName == "Models")
+        if (fileName == "DocItem" || fileName == "DocumentPair" || fileName == "CompareStatus" || fileName == "DiffModels" || fileName == "Models" || fileName == "ComparisonProfile")
             return "Modèles (Données)";
 
         return "Général";

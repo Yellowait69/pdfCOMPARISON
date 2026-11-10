@@ -7,50 +7,85 @@ namespace PDFComparison.Services;
 
 public static class VisualSegmentHelper
 {
-    private const decimal AlignmentTolerance = 5.0m;
+    private const decimal DefaultAlignmentTolerance = 4.5m;
 
     public static List<(decimal minX, decimal maxX, decimal baselineY, decimal fontSize)> GetSegments(IEnumerable<LetterLoc> letters)
     {
         var segments = new List<(decimal minX, decimal maxX, decimal baselineY, decimal fontSize)>();
-        if (letters == null || !letters.Any()) return segments;
+        if (letters == null) return segments;
 
-        var sorted = letters
-            .OrderByDescending(l => Math.Round(l.BaselineY / AlignmentTolerance) * AlignmentTolerance)
-            .ThenBy(l => l.BoundingBox.BottomLeft.X)
-            .ToList();
+        var rawList = letters as IList<LetterLoc> ?? letters.ToList();
+        if (rawList.Count == 0) return segments;
 
-        if (sorted.Count == 0) return segments;
+        // Regroupement adaptatif par ligne (moyenne glissante sur BaselineY) pour éviter l'effet de seuil de Math.Round
+        var byY = rawList.OrderByDescending(l => l.BaselineY).ToList();
+        var lineClusters = new List<(decimal ReferenceY, List<LetterLoc> Items)>();
 
-        var first = sorted[0];
-        decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X;
-        decimal cMaxX = (decimal)first.BoundingBox.TopRight.X;
-        decimal cBaseline = first.BaselineY;
-        decimal cFontSize = first.FontSize;
-
-        for (int i = 1; i < sorted.Count; i++)
+        foreach (var loc in byY)
         {
-            var loc = sorted[i];
-            decimal x = (decimal)loc.BoundingBox.BottomLeft.X;
-            decimal y = loc.BaselineY;
+            decimal tol = Math.Max(DefaultAlignmentTolerance, loc.FontSize * 0.45m);
+            int bestIdx = -1;
+            decimal bestDelta = decimal.MaxValue;
 
-            bool isSameLine = Math.Abs(Math.Round(y / AlignmentTolerance) * AlignmentTolerance - Math.Round(cBaseline / AlignmentTolerance) * AlignmentTolerance) < 1m;
-            decimal maxGap = Math.Max(15m, cFontSize * 1.5m);
-
-            if (isSameLine && (x - cMaxX) < maxGap && x >= cMinX - 5m)
+            for (int i = 0; i < lineClusters.Count; i++)
             {
-                cMaxX = Math.Max(cMaxX, (decimal)loc.BoundingBox.TopRight.X);
-                cFontSize = Math.Max(cFontSize, loc.FontSize);
+                decimal delta = Math.Abs(lineClusters[i].ReferenceY - loc.BaselineY);
+                if (delta <= tol && delta < bestDelta)
+                {
+                    bestDelta = delta;
+                    bestIdx = i;
+                }
+            }
+
+            if (bestIdx == -1)
+            {
+                lineClusters.Add((loc.BaselineY, new List<LetterLoc> { loc }));
             }
             else
             {
-                segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
-                cMinX = x;
-                cMaxX = (decimal)loc.BoundingBox.TopRight.X;
-                cBaseline = y;
-                cFontSize = loc.FontSize;
+                var cluster = lineClusters[bestIdx];
+                int count = cluster.Items.Count;
+                decimal updatedRefY = ((cluster.ReferenceY * count) + loc.BaselineY) / (count + 1);
+                cluster.Items.Add(loc);
+                lineClusters[bestIdx] = (updatedRefY, cluster.Items);
             }
         }
-        segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
+
+        foreach (var cluster in lineClusters.OrderByDescending(c => c.ReferenceY))
+        {
+            var sortedLine = cluster.Items.OrderBy(l => l.BoundingBox.BottomLeft.X).ToList();
+            if (sortedLine.Count == 0) continue;
+
+            var first = sortedLine[0];
+            decimal cMinX = (decimal)first.BoundingBox.BottomLeft.X;
+            decimal cMaxX = (decimal)first.BoundingBox.TopRight.X;
+            decimal cBaseline = cluster.ReferenceY;
+            decimal cFontSize = first.FontSize;
+
+            for (int i = 1; i < sortedLine.Count; i++)
+            {
+                var loc = sortedLine[i];
+                decimal x = (decimal)loc.BoundingBox.BottomLeft.X;
+                decimal rightX = (decimal)loc.BoundingBox.TopRight.X;
+                decimal maxGap = Math.Max(15m, cFontSize * 1.5m);
+
+                if ((x - cMaxX) <= maxGap && x >= cMinX - 5m)
+                {
+                    cMaxX = Math.Max(cMaxX, rightX);
+                    cFontSize = Math.Max(cFontSize, loc.FontSize);
+                }
+                else
+                {
+                    segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
+                    cMinX = x;
+                    cMaxX = rightX;
+                    cBaseline = loc.BaselineY;
+                    cFontSize = loc.FontSize;
+                }
+            }
+
+            segments.Add((cMinX, cMaxX, cBaseline, cFontSize));
+        }
 
         return segments;
     }

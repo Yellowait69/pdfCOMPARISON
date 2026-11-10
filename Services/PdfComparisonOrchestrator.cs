@@ -7,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using PDFComparison.Models;
-using DiffPlex.DiffBuilder.Model;
 
 namespace PDFComparison.Services;
 
@@ -49,38 +48,45 @@ public class PdfComparisonOrchestrator
             {
                 ct.ThrowIfCancellationRequested();
 
-                var sourceText = _extractionService.ExtractTextFast(pair.SourcePath);
-                var targetText = _extractionService.ExtractTextFast(pair.TargetPath!);
+                var (sourceText, sourceWords, sourceImagesCount, sourceImagesHash) = _extractionService.ExtractDocumentFullData(pair.SourcePath);
+                var (targetText, targetWords, targetImagesCount, targetImagesHash) = _extractionService.ExtractDocumentFullData(pair.TargetPath!);
 
-                if (string.IsNullOrWhiteSpace(sourceText) && string.IsNullOrWhiteSpace(targetText))
+                bool isScannedPdf = sourceWords.Count == 0 && targetWords.Count == 0 && (sourceImagesCount > 0 || targetImagesCount > 0);
+
+                if (string.IsNullOrWhiteSpace(sourceText) && string.IsNullOrWhiteSpace(targetText) &&
+                    sourceWords.Count == 0 && targetWords.Count == 0 &&
+                    sourceImagesCount == 0 && targetImagesCount == 0)
                 {
-                    UpdatePairStatus(pair, CompareStatus.Error, "Unreadable files (Scanned/OCR required)", -1);
+                    UpdatePairStatus(pair, CompareStatus.Error, "Unreadable / Empty PDF files", -1, 0, 0, 0.0, DiffSeverity.None, 0, null);
                 }
-                else if (string.Equals(sourceText, targetText, StringComparison.Ordinal))
+                else if (isScannedPdf && sourceImagesHash == targetImagesHash)
                 {
-                    UpdatePairStatus(pair, CompareStatus.Identical, "Identical (No differences)", 0);
+                    UpdatePairStatus(pair, CompareStatus.Identical, "PDF Scanné • Conforme (SSIM 100%)", 0, 0, 0, 100.0, DiffSeverity.None, 0, null);
+                }
+                else if (!isScannedPdf &&
+                         string.Equals(sourceText, targetText, StringComparison.Ordinal) &&
+                         sourceImagesHash == targetImagesHash)
+                {
+                    UpdatePairStatus(pair, CompareStatus.Identical, "Identical (No differences)", 0, 0, 0, 100.0, DiffSeverity.None, 0, null);
                 }
                 else
                 {
-                    ProcessSinglePair(pair, sourceText, targetText, outputDiffDir, allSummaries, ct);
+                    ProcessSinglePair(pair, sourceText, targetText, sourceWords, targetWords, isScannedPdf, outputDiffDir, allSummaries, ct);
                 }
 
-                if (Application.Current != null)
-                {
-                    Application.Current.Dispatcher.Invoke(() => pair.CompletedTime = DateTime.Now);
-                }
+                RunOnUiThread(() => pair.CompletedTime = DateTime.Now);
             }
             catch (OperationCanceledException)
             {
-                UpdatePairStatus(pair, CompareStatus.Pending, "Cancelled by user", pair.DiffCount);
+                UpdatePairStatus(pair, CompareStatus.Pending, "Cancelled by user", pair.DiffCount, pair.InsertionsCount, pair.DeletionsCount, pair.SsimScore, pair.MaxSeverity, pair.CriticalCount, null);
             }
             catch (IOException ex)
             {
-                UpdatePairStatus(pair, CompareStatus.Error, $"File access error (is it open?): {ex.Message}", -1);
+                UpdatePairStatus(pair, CompareStatus.Error, $"File access error (is it open?): {ex.Message}", -1, 0, 0, 0.0, DiffSeverity.None, 0, null);
             }
             catch (Exception ex)
             {
-                UpdatePairStatus(pair, CompareStatus.Error, $"Error: {ex.Message}", -1);
+                UpdatePairStatus(pair, CompareStatus.Error, $"Error: {ex.Message}", -1, 0, 0, 0.0, DiffSeverity.None, 0, null);
             }
             finally
             {
@@ -111,6 +117,9 @@ public class PdfComparisonOrchestrator
         DocumentPair pair,
         string sourceText,
         string targetText,
+        IReadOnlyList<PdfWordInfo> sourceWords,
+        IReadOnlyList<PdfWordInfo> targetWords,
+        bool isScannedPdf,
         string outputDiffDir,
         ConcurrentBag<DocumentDiffSummary> summariesBag,
         CancellationToken ct)
@@ -120,9 +129,6 @@ public class PdfComparisonOrchestrator
         string cleanSource = _extractionService.NormalizePdfText(sourceText);
         string cleanTarget = _extractionService.NormalizePdfText(targetText);
 
-        var sourceWords = _extractionService.ExtractWords(pair.SourcePath);
-        var targetWords = _extractionService.ExtractWords(pair.TargetPath!);
-
         ct.ThrowIfCancellationRequested();
 
         var diffResult = _diffAnalyzer.AnalyzeDifferences(pair, cleanSource, cleanTarget, sourceWords, targetWords);
@@ -130,9 +136,12 @@ public class PdfComparisonOrchestrator
         int visualInsertions = CountVisualSegments(diffResult.Highlights.TargetRed);
         int visualDeletions = CountVisualSegments(diffResult.Highlights.SourceRed);
 
-        int totalVisualDiffs = visualInsertions + visualDeletions;
+        int totalVisualDiffs = diffResult.Summary.Blocks.Count > 0
+            ? diffResult.Summary.Blocks.Count
+            : (visualInsertions + visualDeletions + diffResult.VisualRegions.Count);
 
         diffResult.DifferencesCount = totalVisualDiffs;
+        double ssimPercent = Math.Round(diffResult.OverallSsimScore * 100.0, 2);
 
         if (totalVisualDiffs > 0)
         {
@@ -140,27 +149,56 @@ public class PdfComparisonOrchestrator
 
             ct.ThrowIfCancellationRequested();
 
+            string statusDetail = isScannedPdf
+                ? $"PDF Scanné • {totalVisualDiffs} écart(s) visuel(s)"
+                : $"{totalVisualDiffs} diff(s) • {diffResult.Summary.CriticalAlertsCount} critique(s)";
+
             try
             {
-                _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, reportPath, diffResult.Highlights);
+                _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, reportPath, diffResult.Highlights, diffResult.VisualRegions);
+                diffResult.Summary.ReportFileName = Path.GetFileName(reportPath);
                 SetReportPath(pair, reportPath);
 
-                UpdatePairStatus(pair, CompareStatus.Different, $"{totalVisualDiffs} difference(s) detected", totalVisualDiffs, visualInsertions, visualDeletions);
+                UpdatePairStatus(
+                    pair,
+                    CompareStatus.Different,
+                    statusDetail,
+                    totalVisualDiffs,
+                    visualInsertions,
+                    visualDeletions,
+                    ssimPercent,
+                    diffResult.Summary.MaxSeverity,
+                    diffResult.Summary.CriticalAlertsCount,
+                    diffResult.Summary.Blocks);
             }
             catch (IOException)
             {
                 string fallbackPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{pair.MatchKey}_{DateTime.Now:HHmmss}.pdf");
-                _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, fallbackPath, diffResult.Highlights);
+                _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, fallbackPath, diffResult.Highlights, diffResult.VisualRegions);
+                diffResult.Summary.ReportFileName = Path.GetFileName(fallbackPath);
                 SetReportPath(pair, fallbackPath);
 
-                UpdatePairStatus(pair, CompareStatus.Different, $"{totalVisualDiffs} difference(s) (Saved as new version)", totalVisualDiffs, visualInsertions, visualDeletions);
+                UpdatePairStatus(
+                    pair,
+                    CompareStatus.Different,
+                    $"{statusDetail} (New file)",
+                    totalVisualDiffs,
+                    visualInsertions,
+                    visualDeletions,
+                    ssimPercent,
+                    diffResult.Summary.MaxSeverity,
+                    diffResult.Summary.CriticalAlertsCount,
+                    diffResult.Summary.Blocks);
             }
 
             summariesBag.Add(diffResult.Summary);
         }
         else
         {
-            UpdatePairStatus(pair, CompareStatus.Identical, "False positives ignored", 0);
+            string okMessage = isScannedPdf
+                ? $"PDF Scanné • Conforme (SSIM {ssimPercent:0.0}%)"
+                : "False positives ignored (SSIM & Reflow verified)";
+            UpdatePairStatus(pair, CompareStatus.Identical, okMessage, 0, 0, 0, ssimPercent, DiffSeverity.None, 0, null);
         }
     }
 
@@ -180,39 +218,56 @@ public class PdfComparisonOrchestrator
         return totalBlocksCount;
     }
 
-    private void UpdatePairStatus(DocumentPair pair, CompareStatus status, string errorMessage, int diffCount, int insertions = 0, int deletions = 0)
+    private void UpdatePairStatus(
+        DocumentPair pair,
+        CompareStatus status,
+        string errorMessage,
+        int diffCount,
+        int insertions,
+        int deletions,
+        double ssimScore,
+        DiffSeverity maxSeverity,
+        int criticalCount,
+        IReadOnlyList<DiffSummaryBlock>? blocks)
     {
-        if (Application.Current != null && Application.Current.Dispatcher != null)
-        {
-            Application.Current.Dispatcher.Invoke(() =>
-            {
-                pair.Status = status;
-                pair.ErrorMessage = errorMessage;
-                if (diffCount != pair.DiffCount) pair.DiffCount = diffCount;
-
-                pair.InsertionsCount = insertions;
-                pair.DeletionsCount = deletions;
-            });
-        }
-        else
+        RunOnUiThread(() =>
         {
             pair.Status = status;
             pair.ErrorMessage = errorMessage;
-            pair.DiffCount = diffCount;
+            if (diffCount != pair.DiffCount) pair.DiffCount = diffCount;
+
             pair.InsertionsCount = insertions;
             pair.DeletionsCount = deletions;
-        }
+            pair.SsimScore = ssimScore;
+            pair.MaxSeverity = maxSeverity;
+            pair.CriticalCount = criticalCount;
+
+            pair.DiffBlocks.Clear();
+            if (blocks != null)
+            {
+                foreach (var b in blocks)
+                {
+                    pair.DiffBlocks.Add(b);
+                }
+            }
+        });
     }
 
     private void SetReportPath(DocumentPair pair, string reportPath)
     {
-        if (Application.Current != null && Application.Current.Dispatcher != null)
+        RunOnUiThread(() => pair.ReportPath = reportPath);
+    }
+
+    private static void RunOnUiThread(Action action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess())
         {
-            Application.Current.Dispatcher.Invoke(() => pair.ReportPath = reportPath);
+            action();
         }
         else
         {
-            pair.ReportPath = reportPath;
+            dispatcher.InvokeAsync(action);
         }
     }
 }

@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using System;
+using System.Collections.ObjectModel;
 using System.Text.Json.Serialization;
 
 namespace PDFComparison.Models;
@@ -31,11 +32,22 @@ public partial class DocumentPair : ObservableObject
     private int _deletionsCount;
 
     [ObservableProperty]
+    private int _criticalCount;
+
+    [ObservableProperty]
+    private DiffSeverity _maxSeverity = DiffSeverity.None;
+
+    [ObservableProperty]
+    private double _ssimScore = 100.0;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasReport))]
     private string _reportPath = string.Empty;
 
     [ObservableProperty]
     private DateTime? _completedTime;
+
+    public ObservableCollection<DiffSummaryBlock> DiffBlocks { get; set; } = new();
 
     [JsonIgnore]
     public bool HasReport => !string.IsNullOrEmpty(ReportPath);
@@ -55,6 +67,7 @@ public partial class DocumentPair : ObservableObject
             Status = CompareStatus.MissingInTarget;
             ErrorMessage = "Missing target file";
             DiffCount = -1;
+            SsimScore = 0.0;
         }
     }
 }
