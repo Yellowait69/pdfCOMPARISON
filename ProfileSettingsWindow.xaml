@@ -1,0 +1,523 @@
+<Window x:Class="PDFComparison.Views.ProfileSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:PDFComparison.ViewModels"
+        Title="Configuration Dynamique des Exclusions &amp; Tolérances"
+        Height="820" Width="1220"
+        WindowStartupLocation="CenterOwner"
+        Background="#F8FAFC"
+        FontFamily="Segoe UI Variable, Segoe UI"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType">
+
+    <Window.Resources>
+        <Style TargetType="Button" x:Key="PrimaryBtn">
+            <Setter Property="Background" Value="#2563EB"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="18,9"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#1D4ED8"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Button" x:Key="SecondaryBtn" BasedOn="{StaticResource PrimaryBtn}">
+            <Setter Property="Background" Value="#E2E8F0"/>
+            <Setter Property="Foreground" Value="#1E293B"/>
+            <Setter Property="Padding" Value="14,7"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#CBD5E1"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="Button" x:Key="DangerBtn" BasedOn="{StaticResource PrimaryBtn}">
+            <Setter Property="Background" Value="#FEE2E2"/>
+            <Setter Property="Foreground" Value="#DC2626"/>
+            <Setter Property="Padding" Value="14,7"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#FECACA"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="BorderBrush" Value="#CBD5E1"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="#0F172A"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- En-tête + Actions de Profil JSON -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,18">
+            <StackPanel Orientation="Vertical">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="24" Foreground="#2563EB" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <TextBlock Text="Exclusions Dynamiques &amp; Règles Métier" FontSize="22" FontWeight="Bold" Foreground="#0F172A" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="34,4,0,0">
+                    <TextBlock Text="Profil actif :" Foreground="#64748B" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox Text="{Binding Profile.ProfileName, UpdateSourceTrigger=PropertyChanged}" Width="240" FontWeight="SemiBold"/>
+                </StackPanel>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Button Content="Importer JSON..." Command="{Binding ImportProfileCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,0,8,0"/>
+                <Button Content="Exporter JSON..." Command="{Binding ExportProfileCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,0,8,0"/>
+                <Button Content="Valeurs par défaut" Command="{Binding ResetProfileCommand}" Style="{StaticResource DangerBtn}" Margin="0,0,12,0"/>
+                <Button Content="Enregistrer &amp; Appliquer" Command="{Binding SaveProfileCommand}" Style="{StaticResource PrimaryBtn}"/>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- Onglets de Configuration -->
+        <TabControl Grid.Row="1" BorderThickness="0" Background="Transparent">
+
+            <!-- ONGLET 1 : ZONES D'EXCLUSION GEOMETRIQUES (X/Y) & EDITEUR VISUEL -->
+            <TabItem Header="  1. Zones d'Exclusion Géométriques (X / Y &amp; Dessin Souris)  " FontSize="13" FontWeight="SemiBold">
+                <Border Background="White" CornerRadius="10" Padding="18" Margin="0,8,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="20"/>
+                            <ColumnDefinition Width="450"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Liste & Édition des Zones -->
+                        <Grid Grid.Column="0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <DockPanel Grid.Row="0" Margin="0,0,0,10">
+                                <TextBlock Text="Zones d'exclusion configurées" FontSize="15" FontWeight="Bold" Foreground="#1E293B" VerticalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Button Content="+ Ajouter une zone" Command="{Binding AddZoneCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,0,8,0"/>
+                                    <Button Content="Supprimer la zone" Command="{Binding RemoveZoneCommand}" Style="{StaticResource DangerBtn}"/>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <DataGrid Grid.Row="1" ItemsSource="{Binding Profile.ExclusionZones}"
+                                      SelectedItem="{Binding SelectedZone}"
+                                      AutoGenerateColumns="False" CanUserAddRows="False"
+                                      RowBackground="White" AlternatingRowBackground="#F8FAFC"
+                                      BorderBrush="#E2E8F0" BorderThickness="1" RowHeight="36">
+                                <DataGrid.Columns>
+                                    <DataGridCheckBoxColumn Header="Actif" Binding="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" Width="50"/>
+                                    <DataGridTextColumn Header="Nom de la zone" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                                    <DataGridComboBoxColumn Header="Pages" SelectedItemBinding="{Binding Scope, UpdateSourceTrigger=PropertyChanged}" Width="115">
+                                        <DataGridComboBoxColumn.ElementStyle>
+                                            <Style TargetType="ComboBox">
+                                                <Setter Property="ItemsSource" Value="{Binding DataContext.PageScopes, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            </Style>
+                                        </DataGridComboBoxColumn.ElementStyle>
+                                        <DataGridComboBoxColumn.EditingElementStyle>
+                                            <Style TargetType="ComboBox">
+                                                <Setter Property="ItemsSource" Value="{Binding DataContext.PageScopes, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            </Style>
+                                        </DataGridComboBoxColumn.EditingElementStyle>
+                                    </DataGridComboBoxColumn>
+                                    <DataGridComboBoxColumn Header="Origine" SelectedItemBinding="{Binding Origin, UpdateSourceTrigger=PropertyChanged}" Width="95">
+                                        <DataGridComboBoxColumn.ElementStyle>
+                                            <Style TargetType="ComboBox">
+                                                <Setter Property="ItemsSource" Value="{Binding DataContext.ZoneOrigins, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            </Style>
+                                        </DataGridComboBoxColumn.ElementStyle>
+                                        <DataGridComboBoxColumn.EditingElementStyle>
+                                            <Style TargetType="ComboBox">
+                                                <Setter Property="ItemsSource" Value="{Binding DataContext.ZoneOrigins, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            </Style>
+                                        </DataGridComboBoxColumn.EditingElementStyle>
+                                    </DataGridComboBoxColumn>
+                                    <DataGridTextColumn Header="X" Binding="{Binding X, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
+                                    <DataGridTextColumn Header="Y" Binding="{Binding Y, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
+                                    <DataGridTextColumn Header="Largeur" Binding="{Binding Width, UpdateSourceTrigger=PropertyChanged}" Width="65"/>
+                                    <DataGridTextColumn Header="Hauteur" Binding="{Binding Height, UpdateSourceTrigger=PropertyChanged}" Width="65"/>
+                                    <DataGridCheckBoxColumn Header="Dates En-tête" Binding="{Binding CollectDatesInZone, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <Border Grid.Row="2" Background="#EFF6FF" CornerRadius="8" Padding="12" Margin="0,12,0,0">
+                                <TextBlock Foreground="#1E40AF" FontSize="12" TextWrapping="Wrap"
+                                           Text="Astuce : Vous pouvez soit saisir les coordonnées X/Y directement dans le tableau, soit tracer un rectangle avec le clic gauche de la souris sur l'aperçu de page à droite pour créer automatiquement une zone d'exclusion."/>
+                            </Border>
+                        </Grid>
+
+                        <!-- Éditeur Visuel Interactif sur Page PDF -->
+                        <Border Grid.Column="2" Background="#F1F5F9" CornerRadius="8" Padding="12">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                                    <Button Content="Charger un PDF témoin..." Command="{Binding LoadSamplePdfCommand}" Style="{StaticResource SecondaryBtn}"/>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                        <Button Content="◄" Command="{Binding PreviousPreviewPageCommand}" Style="{StaticResource SecondaryBtn}" Padding="8,4"/>
+                                        <TextBlock VerticalAlignment="Center" Margin="8,0" FontWeight="SemiBold" Foreground="#334155">
+                                            <TextBlock.Text>
+                                                <MultiBinding StringFormat="Page {0} / {1}">
+                                                    <Binding Path="CurrentPreviewPage"/>
+                                                    <Binding Path="TotalPreviewPages"/>
+                                                </MultiBinding>
+                                            </TextBlock.Text>
+                                        </TextBlock>
+                                        <Button Content="►" Command="{Binding NextPreviewPageCommand}" Style="{StaticResource SecondaryBtn}" Padding="8,4"/>
+                                    </StackPanel>
+                                </DockPanel>
+
+                                <!-- Feuille A4 interactive -->
+                                <Border Grid.Row="1" Width="420" Height="594" Background="White" BorderBrush="#94A3B8" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center" ClipToBounds="True">
+                                    <Grid>
+                                        <!-- Mots extraits du PDF témoin (Vert = conservé, Rouge = exclu par une zone) -->
+                                        <ItemsControl ItemsSource="{Binding PreviewWords}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <Canvas Background="Transparent"/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemContainerStyle>
+                                                <Style TargetType="ContentPresenter">
+                                                    <Setter Property="Canvas.Left" Value="{Binding CanvasLeft}"/>
+                                                    <Setter Property="Canvas.Top" Value="{Binding CanvasTop}"/>
+                                                </Style>
+                                            </ItemsControl.ItemContainerStyle>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border x:Name="WordRect" Width="{Binding CanvasWidth}" Height="{Binding CanvasHeight}"
+                                                            Background="#3310B981" BorderBrush="#10B981" BorderThickness="0.5"
+                                                            ToolTip="{Binding Text}"/>
+                                                    <DataTemplate.Triggers>
+                                                        <DataTrigger Binding="{Binding IsExcluded}" Value="True">
+                                                            <Setter TargetName="WordRect" Property="Background" Value="#55EF4444"/>
+                                                            <Setter TargetName="WordRect" Property="BorderBrush" Value="#DC2626"/>
+                                                        </DataTrigger>
+                                                    </DataTemplate.Triggers>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <!-- Zones d'exclusion actives superposées -->
+                                        <ItemsControl ItemsSource="{Binding PreviewZones}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <Canvas Background="Transparent"/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemContainerStyle>
+                                                <Style TargetType="ContentPresenter">
+                                                    <Setter Property="Canvas.Left" Value="{Binding CanvasLeft}"/>
+                                                    <Setter Property="Canvas.Top" Value="{Binding CanvasTop}"/>
+                                                </Style>
+                                            </ItemsControl.ItemContainerStyle>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Width="{Binding CanvasWidth}" Height="{Binding CanvasHeight}"
+                                                            Background="#30EF4444" BorderBrush="#DC2626" BorderThickness="1.5">
+                                                        <TextBlock Text="{Binding Name}" Background="#CCDC2626" Foreground="White"
+                                                                   FontSize="9" Padding="3,1" HorizontalAlignment="Left" VerticalAlignment="Top"/>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <!-- Surface de dessin Lasso à la souris -->
+                                        <Canvas x:Name="LassoCanvas" Background="#01FFFFFF" Cursor="Cross"
+                                                MouseLeftButtonDown="OnLassoMouseDown"
+                                                MouseMove="OnLassoMouseMove"
+                                                MouseLeftButtonUp="OnLassoMouseUp">
+                                            <Rectangle x:Name="LassoSelectionBox" Stroke="#2563EB" StrokeThickness="2"
+                                                       StrokeDashArray="4 2" Fill="#332563EB" Visibility="Collapsed"/>
+                                        </Canvas>
+                                    </Grid>
+                                </Border>
+
+                                <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,0">
+                                    <TextBlock Foreground="#059669" FontWeight="SemiBold" FontSize="12" Margin="0,0,15,0">
+                                        <Run Text="● Mots conservés : "/>
+                                        <Run Text="{Binding KeptWordsCount, Mode=OneWay}"/>
+                                    </TextBlock>
+                                    <TextBlock Foreground="#DC2626" FontWeight="SemiBold" FontSize="12">
+                                        <Run Text="● Mots exclus : "/>
+                                        <Run Text="{Binding ExcludedWordsCount, Mode=OneWay}"/>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+            </TabItem>
+
+            <!-- ONGLET 2 : MASQUAGE PAR EXPRESSIONS REGULIERES (REGEX) -->
+            <TabItem Header="  2. Masquage Dynamique par Regex (Dates, Factures, Références)  " FontSize="13" FontWeight="SemiBold">
+                <Border Background="White" CornerRadius="10" Padding="18" Margin="0,8,0,0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="200"/>
+                        </Grid.RowDefinitions>
+
+                        <DockPanel Grid.Row="0" Margin="0,0,0,10">
+                            <TextBlock Text="Règles de masquage par Expressions Régulières" FontSize="15" FontWeight="Bold" Foreground="#1E293B" VerticalAlignment="Center"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button Content="+ Ajouter une règle Regex" Command="{Binding AddRegexRuleCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,0,8,0"/>
+                                <Button Content="Supprimer la règle" Command="{Binding RemoveRegexRuleCommand}" Style="{StaticResource DangerBtn}"/>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <DataGrid Grid.Row="1" ItemsSource="{Binding Profile.RegexRules}"
+                                  SelectedItem="{Binding SelectedRegexRule}"
+                                  AutoGenerateColumns="False" CanUserAddRows="False"
+                                  RowBackground="White" AlternatingRowBackground="#F8FAFC"
+                                  BorderBrush="#E2E8F0" BorderThickness="1" RowHeight="36">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="Actif" Binding="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
+                                <DataGridTextColumn Header="Description de la règle" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="220"/>
+                                <DataGridTextColumn Header="Expression Régulière (Pattern)" Binding="{Binding Pattern, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                                <DataGridTextColumn Header="Jeton de remplacement" Binding="{Binding ReplacementMask, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+                                <DataGridTextColumn Header="Occurrences min." Binding="{Binding MinOccurrences, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
+                                <DataGridCheckBoxColumn Header="Ignorer casse" Binding="{Binding IgnoreCase, UpdateSourceTrigger=PropertyChanged}" Width="95"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <!-- Masquage dynamique des noms de clients -->
+                        <Border Grid.Row="2" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="250"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <CheckBox Content="Masquer automatiquement les noms de clients (Souscripteur / Auftraggeber)"
+                                          IsChecked="{Binding Profile.EnableDynamicClientNameMasking}"
+                                          VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#334155" Margin="0,0,20,0"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="Jeton :" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#64748B"/>
+                                    <TextBox Text="{Binding Profile.ClientNameReplacementMask, UpdateSourceTrigger=PropertyChanged}" Width="140"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="Regex mots-clés client :" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#64748B"/>
+                                    <TextBox Text="{Binding Profile.ClientKeywordsPattern, UpdateSourceTrigger=PropertyChanged}" Width="350"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Testeur de Regex en temps réel -->
+                        <Grid Grid.Row="3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <DockPanel Margin="0,0,0,6">
+                                    <TextBlock Text="Banc de test : Texte d'entrée (Source / Target)" FontWeight="Bold" Foreground="#334155"/>
+                                    <Button Content="Tester les règles" Command="{Binding RunRegexPreviewCommand}" Style="{StaticResource SecondaryBtn}" HorizontalAlignment="Right" Padding="10,3"/>
+                                </DockPanel>
+                                <TextBox Text="{Binding SampleTestInput, UpdateSourceTrigger=PropertyChanged}"
+                                         AcceptsReturn="True" Height="150" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Résultat après application des masques dynamiques :" FontWeight="Bold" Foreground="#059669" Margin="0,0,0,6"/>
+                                <TextBox Text="{Binding SampleTestOutput, Mode=OneWay}" IsReadOnly="True" Background="#F0FDF4"
+                                         AcceptsReturn="True" Height="150" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </TabItem>
+
+            <!-- ONGLET 3 : REGRESSION VISUELLE SSIM, TOLERANCES, FILIGRANES & APPAIRAGE -->
+            <TabItem Header="  3. Moteur Visuel SSIM, Anti-Aliasing, Filigranes &amp; Tolérances  " FontSize="13" FontWeight="SemiBold">
+                <Border Background="White" CornerRadius="10" Padding="22" Margin="0,8,0,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <!-- NOUVELLE SECTION : MOTEUR DE REGRESSION VISUELLE PERCEPTUELLE (SSIM + YIQ + ANTI-ALIASING) -->
+                            <TextBlock Text="Moteur de Régression Visuelle Perceptuelle (SSIM, YIQ &amp; Anti-Aliasing)" FontSize="16" FontWeight="Bold" Foreground="#0F172A" Margin="0,0,0,12"/>
+
+                            <Grid Margin="0,0,0,20">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="380"/>
+                                    <ColumnDefinition Width="140"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="36"/>
+                                    <RowDefinition Height="36"/>
+                                    <RowDefinition Height="36"/>
+                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="40"/>
+                                </Grid.RowDefinitions>
+
+                                <CheckBox Grid.Row="0" Grid.ColumnSpan="3"
+                                          Content="Activer le moteur de validation visuelle SSIM &amp; détection des changements graphiques (images, logos, signatures)"
+                                          IsChecked="{Binding Profile.EnableVisualSsimEngine}" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#1E293B"/>
+
+                                <CheckBox Grid.Row="1" Grid.ColumnSpan="3"
+                                          Content="Ignorer automatiquement l'anti-aliasing des polices et courbes (Algorithme de Vysniauskas / Pixelmatch)"
+                                          IsChecked="{Binding Profile.IgnoreAntiAliasingPixels}" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#334155"/>
+
+                                <CheckBox Grid.Row="2" Grid.ColumnSpan="3"
+                                          Content="Activer le recalage automatique par translation (dx, dy) &amp; générer les captures visuelles dans le Rapport Global"
+                                          IsChecked="{Binding Profile.GenerateVisualSnapshotsInGlobalReport}" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#334155"/>
+
+                                <TextBlock Grid.Row="3" Text="Seuil de similarité structurelle SSIM [0.0 .. 1.0] :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Profile.SsimSimilarityThreshold, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="3" Grid.Column="2" Text="0.94 recommandé. Plus la valeur est basse, plus le moteur est tolérant aux variations de rendu." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
+
+                                <TextBlock Grid.Row="4" Text="Seuil de tolérance colorimétrique perceptuelle YIQ [0.0 .. 1.0] :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Profile.PerceptualYiqThreshold, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="4" Grid.Column="2" Text="0.10 recommandé. Ignore les écarts de compression/couleur imperceptibles à l'œil humain." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
+
+                                <TextBlock Grid.Row="5" Text="Décalage maximal d'auto-alignement (en pixels) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Profile.MaxAutoAlignmentShiftPx, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="5" Grid.Column="2" Text="Compense les micro-décalages globaux de marges entre Source et Target." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
+
+                                <TextBlock Grid.Row="6" Text="Surface minimale d'un cluster de différence (en pixels²) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding Profile.MinVisualClusterAreaPx, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="6" Grid.Column="2" Text="Élimine les poussières ou artefacts isolés de quelques pixels." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
+
+                                <TextBlock Grid.Row="7" Text="Résolution de rastérisation visuelle (DPI) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Profile.VisualRenderDpi, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="7" Grid.Column="2" Text="120 DPI recommandé (équilibre optimal entre vitesse d'exécution et précision)." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
+                            </Grid>
+
+                            <Separator Background="#E2E8F0" Margin="0,5,0,15"/>
+
+                            <TextBlock Text="Tolérances Structurelles &amp; Anti-Faux-Positifs (Reflow / Alignement)" FontSize="16" FontWeight="Bold" Foreground="#0F172A" Margin="0,0,0,12"/>
+
+                            <Grid Margin="0,0,0,20">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="380"/>
+                                    <ColumnDefinition Width="140"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="40"/>
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Text="Tolérance de décalage de lignes entières (nb lignes) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Profile.MaxLineShiftForFullLine, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="Absorbe l'insertion d'un bloc plus haut dans la page sans marquer le reste en faux positif." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
+
+                                <TextBlock Grid.Row="1" Text="Tolérance de décalage pour les séquences de mots :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Profile.MaxLineShiftForSequence, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="Absorbe les différences de retour à la ligne automatique (word-wrap reflow)." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
+
+                                <TextBlock Grid.Row="2" Text="Tolérance de décalage pour un mot isolé :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Profile.MaxLineShiftForSingleWord, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="2" Grid.Column="2" Text="Réconcilie un mot ayant basculé de la fin de la ligne N au début de la ligne N+1." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
+
+                                <TextBlock Grid.Row="3" Text="Proximité verticale minimale (en points PDF) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Profile.LocalProximityMinY, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+
+                                <TextBlock Grid.Row="4" Text="Proximité horizontale maximale (en points PDF) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Profile.LocalProximityMaxX, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                            </Grid>
+
+                            <Separator Background="#E2E8F0" Margin="0,5,0,15"/>
+
+                            <TextBlock Text="Filtrage des Filigranes (Watermarks) &amp; Tailles de Police" FontSize="16" FontWeight="Bold" Foreground="#0F172A" Margin="0,0,0,12"/>
+
+                            <Grid Margin="0,0,0,20">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="380"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="40"/>
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Text="Mots de filigrane exacts (séparés par des virgules) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Profile.ExactWatermarkWordsCsv, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+
+                                <TextBlock Grid.Row="1" Text="Fragments de filigrane grande police :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Profile.LargeWatermarkFragmentsCsv, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+
+                                <TextBlock Grid.Row="2" Text="Taille de police min. des fragments de filigrane (pt) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Profile.WatermarkFragmentMinFontSizePt, UpdateSourceTrigger=PropertyChanged}" Width="140" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+
+                                <TextBlock Grid.Row="3" Text="Taille de police max. autorisée avant exclusion (pt) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Profile.MaxAllowedFontSizePt, UpdateSourceTrigger=PropertyChanged}" Width="140" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+
+                                <CheckBox Grid.Row="4" Grid.Column="1" Content="Ignorer les textes invisibles écrits en blanc sur fond blanc (RGB >= 0.98)"
+                                          IsChecked="{Binding Profile.IgnoreWhiteOnWhiteText}" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#334155"/>
+                            </Grid>
+
+                            <Separator Background="#E2E8F0" Margin="0,5,0,15"/>
+
+                            <TextBlock Text="Appairage des Fichiers &amp; Alertes Mots Sensibles" FontSize="16" FontWeight="Bold" Foreground="#0F172A" Margin="0,0,0,12"/>
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="380"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="40"/>
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Text="Regex d'extraction de clé de fichier PDF :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Profile.FileMatchingRegex, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+
+                                <TextBlock Grid.Row="1" Text="Regex des mots critiques (Rapport Global) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Profile.CriticalKeywordsRegex, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                            </Grid>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </TabItem>
+        </TabControl>
+
+        <!-- Barre de statut inférieure -->
+        <Border Grid.Row="2" Background="#EFF6FF" CornerRadius="8" Padding="14,10" Margin="0,14,0,0">
+            <DockPanel>
+                <TextBlock Text="{Binding StatusBannerText}" Foreground="#1E40AF" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <Button Content="Fermer" Click="OnCloseClick" Style="{StaticResource SecondaryBtn}" HorizontalAlignment="Right"/>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>
