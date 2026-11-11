@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("PDFComparison")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8a789f09bba892e154fcd2591d30ea40d00e9bd1")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2e57926d71f270aece5c0931b3beb5610cc571d5")]
 [assembly: System.Reflection.AssemblyProductAttribute("PDFComparison")]
 [assembly: System.Reflection.AssemblyTitleAttribute("PDFComparison")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

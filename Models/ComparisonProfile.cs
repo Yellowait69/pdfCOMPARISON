@@ -144,7 +144,7 @@ public partial class ComparisonProfile : ObservableObject
     public ObservableCollection<RegexMaskingRule> RegexRules { get; set; } = new();
 
     // --- 3. Masquage intelligent des noms de clients ---
-    [ObservableProperty] private bool _enableDynamicClientNameMasking = true;
+    [ObservableProperty] private bool _enableDynamicClientNameMasking = false;
     [ObservableProperty] private string _clientKeywordsPattern = @"^([Aa]uftraggeber|[Oo]pdrachtgever|[Ss]ouscripteur|Client|Customer):?$";
     [ObservableProperty] private string _clientNameReplacementMask = "[NOM_IGNORE]";
 
@@ -176,7 +176,7 @@ public partial class ComparisonProfile : ObservableObject
 
     // --- 7. Appairage de fichiers & Mots-clés critiques ---
     [ObservableProperty] private string _fileMatchingRegex = @"([A-Z]{2}_\d+_\d+)\.pdf$";
-    [ObservableProperty] private string _criticalKeywordsRegex = @"(?i)\b(prix|pénalité|pénalités|résiliation|ttc|ht|garantie|article|euro|taxe|montant|facture|price|penalty|termination|vat|warranty|tax|amount|invoice)\b";
+    [ObservableProperty] private string _criticalKeywordsRegex = @"(?i)\b(prix|pénalité|pénalités|résiliation|ttc|ht|garantie|article|euro|eur|taxe|montant|facture|prime|capital|rachat|versement|taux|frais|rente|police|bénéficiaire|iban|bic|price|penalty|termination|vat|warranty|tax|amount|invoice|bedrag|premie|totaal|kapitaal|kosten|afkoop|storting|overdracht|betaling|rekening|polis|begunstigde|waarborg|belasting|taks|intrest|rendement)\b";
 
     public static ComparisonProfile CreateDefault()
     {

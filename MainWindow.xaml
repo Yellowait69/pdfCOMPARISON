@@ -214,6 +214,20 @@
                     </StackPanel>
                 </Button>
 
+                <!-- Bouton Campagne Rapide Équipe Testing TIDES (\\sppdfc01\TIDES\Life) -->
+                <Button Command="{Binding OpenTidesCampaignCommand}"
+                        Style="{StaticResource ModernPrimaryButton}"
+                        Background="#059669"
+                        Padding="14,9"
+                        Margin="0,0,8,0"
+                        IsEnabled="{Binding IsNotProcessing}"
+                        ToolTip="Ouvrir la Campagne Rapide Testing TIDES Life (\\sppdfc01\TIDES\Life : Bank puis Broker, Source vs 2026_Rmois)">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE945;" FontFamily="Segoe MDL2 Assets" FontSize="13.5" Margin="0,0,7,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="Campagne Testing TIDES" FontSize="13" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+
                 <!-- Bouton Annuler (visible pendant le traitement) -->
                 <Button Command="{Binding CancelComparisonCommand}"
                         Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibilityConverter}}"
@@ -576,7 +590,27 @@
                     </DataGrid.Resources>
 
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="ID" Binding="{Binding MatchKey}" Width="120" FontWeight="Bold"/>
+                        <DataGridTemplateColumn Header="Canal / Produit" Width="135">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Border x:Name="ProdBadge" Padding="8,3" CornerRadius="6" HorizontalAlignment="Left" Background="#F1F5F9">
+                                        <TextBlock x:Name="ProdText" Text="{Binding DisplayProductBadge}" FontWeight="Bold" FontSize="11" Foreground="#475569"/>
+                                    </Border>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding Channel}" Value="Bank">
+                                            <Setter TargetName="ProdBadge" Property="Background" Value="#DBEAFE"/>
+                                            <Setter TargetName="ProdText" Property="Foreground" Value="#1D4ED8"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Channel}" Value="Broker">
+                                            <Setter TargetName="ProdBadge" Property="Background" Value="#EDE9FE"/>
+                                            <Setter TargetName="ProdText" Property="Foreground" Value="#6D28D9"/>
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <DataGridTextColumn Header="Document / ID" Binding="{Binding MatchKey}" Width="210" FontWeight="Bold"/>
 
                         <DataGridTemplateColumn Header="Document Source / Note" Width="*">
                             <DataGridTemplateColumn.CellTemplate>
@@ -700,7 +734,7 @@
                         <TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="28" Foreground="#3B82F6" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <TextBlock Text="Aucun document comparé pour le moment" FontSize="16" FontWeight="Bold" Foreground="#1E293B" HorizontalAlignment="Center" Margin="0,0,0,6"/>
-                    <TextBlock Text="Glissez-déposez deux dossiers ou deux fichiers PDF unitaires ci-dessus, puis cliquez sur « Lancer Comparaison »."
+                    <TextBlock Text="Glissez-déposez deux dossiers/fichiers PDF ci-dessus, ou cliquez sur « Campagne Testing TIDES » pour automatiser Bank &amp; Broker."
                                FontSize="13" Foreground="#64748B" HorizontalAlignment="Center"/>
                 </StackPanel>
             </Grid>

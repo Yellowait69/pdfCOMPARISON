@@ -263,40 +263,6 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
                     }
                 }
             }
-
-            var match1 = UpperWordRegex().Match(words[i].Text);
-            if (match1.Success && detectedClientNames.Count == 0)
-            {
-                string word1 = match1.Groups[1].Value;
-                bool hasComma1 = match1.Groups[2].Value == ",";
-
-                if (hasComma1)
-                {
-                    detectedClientNames.Add(new[] { word1 });
-                    continue;
-                }
-
-                if (i + 1 < words.Count)
-                {
-                    if (words[i + 1].Text == ",")
-                    {
-                        detectedClientNames.Add(new[] { word1 });
-                        continue;
-                    }
-
-                    var match2 = UpperWordRegex().Match(words[i + 1].Text);
-                    if (match2.Success)
-                    {
-                        string word2 = match2.Groups[1].Value;
-                        bool hasComma2 = match2.Groups[2].Value == ",";
-
-                        if (hasComma2 || (i + 2 < words.Count && words[i + 2].Text == ","))
-                        {
-                            detectedClientNames.Add(new[] { word1, word2 });
-                        }
-                    }
-                }
-            }
         }
 
         foreach (var targetNameParts in detectedClientNames)
@@ -337,7 +303,7 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
 
     private IReadOnlyList<RegexMaskingRule> GetActiveRegexRules()
     {
-        if (Profile != null && Profile.RegexRules.Count > 0)
+        if (Profile != null)
         {
             return Profile.RegexRules.Where(r => r.IsEnabled && !string.IsNullOrWhiteSpace(r.Pattern)).ToList();
         }

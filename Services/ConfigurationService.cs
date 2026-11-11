@@ -17,6 +17,7 @@ public interface IConfigurationService
     void SaveActiveProfile();
     void ResetToDefault();
     void ApplyPreset(string presetName);
+    void ApplyTidesTestingProfile(bool ignoreRepeatingDates, bool ignoreHeaderFooterZones);
     void AddQuickIgnoreRegexRule(string rawTextToIgnore, string? customRuleName = null);
     void ExportProfile(string filePath);
     bool ImportProfile(string filePath, out string errorMessage);
@@ -25,6 +26,7 @@ public interface IConfigurationService
 
 public class ConfigurationService : IConfigurationService
 {
+    public const string PresetTidesTesting = "Testing TIDES — Texte Visible à l'Œil Nu";
     public const string PresetStandard = "Standard (Factures & Contrats)";
     public const string PresetFinancialStrict = "Audit Financier Strict (Montants & Tableaux)";
     public const string PresetLegalReflow = "Juridique & CGV (Tolérant au Reflow)";
@@ -32,6 +34,7 @@ public class ConfigurationService : IConfigurationService
 
     private static readonly string[] BuiltInPresets =
     {
+        PresetTidesTesting,
         PresetStandard,
         PresetFinancialStrict,
         PresetLegalReflow,
@@ -104,6 +107,44 @@ public class ConfigurationService : IConfigurationService
 
         switch (presetName)
         {
+            case PresetTidesTesting:
+                profile.ProfileName = PresetTidesTesting;
+                profile.ExclusionZones.Clear();
+                profile.ExclusionZones.Add(new ExclusionZoneRule
+                {
+                    Name = "Marge technique gauche (45pt)",
+                    IsEnabled = true,
+                    Scope = PageScope.AllPages,
+                    Unit = CoordinateUnit.PdfPoints,
+                    Origin = ZoneOrigin.TopLeft,
+                    X = 0,
+                    Y = 0,
+                    Width = 45,
+                    Height = 2000,
+                    CollectDatesInZone = false
+                });
+                profile.RegexRules.Clear();
+                profile.RegexRules.Add(new RegexMaskingRule
+                {
+                    Name = "Ancres techniques de signature (#...#)",
+                    IsEnabled = true,
+                    Pattern = @"#[A-Z0-9_]+#",
+                    ReplacementMask = "",
+                    IgnoreCase = true,
+                    MinOccurrences = 1
+                });
+                profile.EnableDynamicClientNameMasking = false;
+                profile.IgnoreWhiteOnWhiteText = true;
+                profile.MinAllowedFontSizePt = 1.5;
+                profile.MaxLineShiftForFullLine = 10;
+                profile.MaxLineShiftForSequence = 8;
+                profile.MaxLineShiftForSingleWord = 2;
+                profile.SsimSimilarityThreshold = 0.960;
+                profile.PerceptualYiqThreshold = 0.080;
+                profile.IgnoreAntiAliasingPixels = true;
+                profile.MinVisualClusterAreaPx = 14;
+                break;
+
             case PresetFinancialStrict:
                 profile.ProfileName = PresetFinancialStrict;
                 profile.EnableDynamicClientNameMasking = false;
@@ -147,6 +188,56 @@ public class ConfigurationService : IConfigurationService
         }
 
         CopyProfileValues(profile, ActiveProfile);
+        SaveActiveProfile();
+    }
+
+    public void ApplyTidesTestingProfile(bool ignoreRepeatingDates, bool ignoreHeaderFooterZones)
+    {
+        ApplyPreset(PresetTidesTesting);
+
+        if (ignoreHeaderFooterZones)
+        {
+            ActiveProfile.ExclusionZones.Add(new ExclusionZoneRule
+            {
+                Name = "En-tête de page (Header 130pt)",
+                IsEnabled = true,
+                Scope = PageScope.AllPages,
+                Unit = CoordinateUnit.PdfPoints,
+                Origin = ZoneOrigin.TopLeft,
+                X = 0,
+                Y = 0,
+                Width = 2000,
+                Height = 130,
+                CollectDatesInZone = ignoreRepeatingDates
+            });
+            ActiveProfile.ExclusionZones.Add(new ExclusionZoneRule
+            {
+                Name = "Pied de page (Footer 40pt)",
+                IsEnabled = true,
+                Scope = PageScope.AllPages,
+                Unit = CoordinateUnit.PdfPoints,
+                Origin = ZoneOrigin.BottomLeft,
+                X = 0,
+                Y = 0,
+                Width = 2000,
+                Height = 40,
+                CollectDatesInZone = false
+            });
+        }
+
+        if (ignoreRepeatingDates)
+        {
+            ActiveProfile.RegexRules.Add(new RegexMaskingRule
+            {
+                Name = "Dates variables répétées",
+                IsEnabled = true,
+                Pattern = @"\b\d{1,2}[./\-\s]+\d{1,2}[./\-\s]+\d{2,4}\b",
+                ReplacementMask = "[DATE_IGNORE]",
+                IgnoreCase = true,
+                MinOccurrences = 2
+            });
+        }
+
         SaveActiveProfile();
     }
 

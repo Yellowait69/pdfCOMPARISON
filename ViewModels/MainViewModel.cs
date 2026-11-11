@@ -41,6 +41,8 @@ public class AppSessionData
     public string SourceDirectory { get; set; } = string.Empty;
     public string TargetDirectory { get; set; } = string.Empty;
     public string OutputDirectory { get; set; } = string.Empty;
+    public string LastTidesRootPath { get; set; } = TidesCampaignService.DefaultNetworkRootPath;
+    public string LastTidesRelease { get; set; } = string.Empty;
     public List<DocumentPair> Pairs { get; set; } = new();
 }
 
@@ -51,10 +53,13 @@ public partial class MainViewModel : ObservableObject
     private readonly PdfComparisonOrchestrator _orchestrator;
     private readonly IGlobalSynthesisReportGenerator _globalReportGenerator;
     private readonly IPdfVisualRegressionService _visualRegressionService;
+    private readonly ITidesCampaignService _tidesCampaignService;
 
     private readonly string _sessionFilePath;
     private CancellationTokenSource? _cancellationTokenSource;
     private bool _suppressPresetCallback;
+    private string _lastTidesRootPath = TidesCampaignService.DefaultNetworkRootPath;
+    private string _lastTidesRelease = string.Empty;
 
     [ObservableProperty] private string _sourceDirectory = string.Empty;
     [ObservableProperty] private string _targetDirectory = string.Empty;
@@ -153,6 +158,9 @@ public partial class MainViewModel : ObservableObject
             _globalReportGenerator
         );
 
+        _tidesCampaignService = new TidesCampaignService();
+        _lastTidesRelease = _tidesCampaignService.GetCurrentMonthReleaseName();
+
         _suppressPresetCallback = true;
         if (AvailablePresets.Contains(_configurationService.ActiveProfile.ProfileName))
         {
@@ -219,6 +227,9 @@ public partial class MainViewModel : ObservableObject
         string q = SearchQuery.Trim();
         if (pair.MatchKey.Contains(q, StringComparison.OrdinalIgnoreCase) ||
             pair.SourcePath.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            pair.ProductName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            pair.Channel.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            pair.DisplayProductBadge.Contains(q, StringComparison.OrdinalIgnoreCase) ||
             pair.ErrorMessage.Contains(q, StringComparison.OrdinalIgnoreCase))
         {
             return true;
@@ -250,6 +261,8 @@ public partial class MainViewModel : ObservableObject
                 SourceDirectory = this.SourceDirectory,
                 TargetDirectory = this.TargetDirectory,
                 OutputDirectory = this.OutputDirectory,
+                LastTidesRootPath = this._lastTidesRootPath,
+                LastTidesRelease = this._lastTidesRelease,
                 Pairs = this.Pairs.ToList()
             };
 
@@ -282,6 +295,16 @@ public partial class MainViewModel : ObservableObject
                 if (!string.IsNullOrEmpty(data.OutputDirectory))
                 {
                     OutputDirectory = data.OutputDirectory;
+                }
+
+                if (!string.IsNullOrWhiteSpace(data.LastTidesRootPath))
+                {
+                    _lastTidesRootPath = data.LastTidesRootPath;
+                }
+
+                if (!string.IsNullOrWhiteSpace(data.LastTidesRelease))
+                {
+                    _lastTidesRelease = data.LastTidesRelease;
                 }
 
                 if (data.Pairs != null)
@@ -615,13 +638,13 @@ public partial class MainViewModel : ObservableObject
             {
                 Directory.CreateDirectory(OutputDirectory);
                 var sb = new StringBuilder();
-                sb.AppendLine("Document;Statut;Score SSIM (%);Page;Severite;Categorie;Action;Texte Attendu (Source);Texte Obtenu (Cible);Rapport Individuel");
+                sb.AppendLine("Canal;Produit;Release;Document;Statut;Score SSIM (%);Page;Severite;Categorie;Action;Texte Attendu (Source);Texte Obtenu (Cible);Rapport Individuel");
 
                 foreach (var p in Pairs)
                 {
                     if (p.DiffBlocks.Count == 0)
                     {
-                        sb.Append($"\"{p.MatchKey}\";\"{p.Status}\";\"{p.SsimScore:0.00}\";1;\"Conforme\";\"Aucune\";\"Identique\";\"\";\"\";\"{p.ReportPath}\"")
+                        sb.Append($"\"{p.Channel}\";\"{p.ProductName}\";\"{p.ReleaseName}\";\"{p.MatchKey}\";\"{p.Status}\";\"{p.SsimScore:0.00}\";1;\"Conforme\";\"Aucune\";\"Identique\";\"\";\"\";\"{p.ReportPath}\"")
                           .AppendLine();
                     }
                     else
@@ -630,7 +653,7 @@ public partial class MainViewModel : ObservableObject
                         {
                             string oldClean = (b.OldText ?? "").Replace("\r", " ").Replace("\n", " ").Replace("\"", "\"\"");
                             string newClean = (b.NewText ?? "").Replace("\r", " ").Replace("\n", " ").Replace("\"", "\"\"");
-                            sb.Append($"\"{p.MatchKey}\";\"{p.Status}\";\"{p.SsimScore:0.00}\";{b.PageNumber};\"{b.SeverityLabel}\";\"{b.Category}\";\"{b.ChangeTypeLabel}\";\"{oldClean}\";\"{newClean}\";\"{p.ReportPath}\"")
+                            sb.Append($"\"{p.Channel}\";\"{p.ProductName}\";\"{p.ReleaseName}\";\"{p.MatchKey}\";\"{p.Status}\";\"{p.SsimScore:0.00}\";{b.PageNumber};\"{b.SeverityLabel}\";\"{b.Category}\";\"{b.ChangeTypeLabel}\";\"{oldClean}\";\"{newClean}\";\"{p.ReportPath}\"")
                               .AppendLine();
                         }
                     }
@@ -713,6 +736,168 @@ public partial class MainViewModel : ObservableObject
         {
             StatusMessage = "Annulation du traitement en cours...";
             _cancellationTokenSource.Cancel();
+        }
+    }
+
+    /// <summary>
+    /// Ouvre la fenêtre de Campagne Rapide Testing TIDES Life (\\sppdfc01\TIDES\Life : Bank puis Broker)
+    /// et automatise la comparaison de tous les produits cochés.
+    /// </summary>
+    [RelayCommand]
+    private async Task OpenTidesCampaignAsync()
+    {
+        if (IsProcessing) return;
+
+        try
+        {
+            string defaultRelease = _tidesCampaignService.GetCurrentMonthReleaseName();
+            var campaignWin = new Views.TidesCampaignWindow(_tidesCampaignService, _lastTidesRootPath, defaultRelease);
+            if (Application.Current?.MainWindow != null)
+            {
+                campaignWin.Owner = Application.Current.MainWindow;
+            }
+
+            if (campaignWin.ShowDialog() != true || campaignWin.SelectedProductsToCompare.Count == 0)
+            {
+                return;
+            }
+
+            _lastTidesRootPath = campaignWin.SelectedRootPath;
+            _lastTidesRelease = campaignWin.SelectedReleaseName;
+
+            if (campaignWin.UseVisibleTextOnlyMode)
+            {
+                _suppressPresetCallback = true;
+                _configurationService.ApplyTidesTestingProfile(
+                    campaignWin.IgnoreRepeatingDates,
+                    campaignWin.IgnoreHeaderFooter);
+                SelectedPreset = ConfigurationService.PresetTidesTesting;
+                _suppressPresetCallback = false;
+                OnPropertyChanged(nameof(ActiveProfile));
+            }
+
+            await RunTidesCampaignInternalAsync(
+                campaignWin.SelectedProductsToCompare,
+                campaignWin.SelectedRootPath,
+                campaignWin.SelectedReleaseName,
+                campaignWin.WriteToProductOutputs);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erreur lors du lancement de la campagne TIDES : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async Task RunTidesCampaignInternalAsync(
+        List<TidesProductItem> selectedProducts,
+        string rootPath,
+        string releaseName,
+        bool writeToProductOutputs)
+    {
+        IsProcessing = true;
+        Pairs.Clear();
+        SelectedPair = null;
+        ProgressValue = 0;
+        ActiveStatusFilter = "ALL";
+        RefreshKpiCounters();
+
+        int bankProductsCount = selectedProducts.Count(p => string.Equals(p.Channel, "Bank", StringComparison.OrdinalIgnoreCase));
+        int brokerProductsCount = selectedProducts.Count(p => string.Equals(p.Channel, "Broker", StringComparison.OrdinalIgnoreCase));
+
+        SourceDirectory = $"{rootPath} [Source • {bankProductsCount} Bank + {brokerProductsCount} Broker]";
+        TargetDirectory = $"{rootPath} [{releaseName}\\Target]";
+
+        _cancellationTokenSource = new CancellationTokenSource();
+
+        try
+        {
+            StatusMessage = $"Préparation de la campagne TIDES ({releaseName}) : appairage de {selectedProducts.Count} produit(s) (Bank puis Broker)...";
+
+            var matchedPairs = await Task.Run(
+                () => _tidesCampaignService.BuildOrderedCampaignPairs(selectedProducts, _fileService),
+                _cancellationTokenSource.Token);
+
+            Pairs.ReplaceRange(matchedPairs);
+            RefreshKpiCounters();
+
+            var pairsToProcess = matchedPairs.Where(p => p.Status != CompareStatus.MissingInTarget).ToList();
+            ProgressMax = pairsToProcess.Count;
+
+            if (ProgressMax == 0)
+            {
+                StatusMessage = $"Aucune paire PDF valide trouvée dans les {selectedProducts.Count} produit(s) sélectionné(s).";
+                return;
+            }
+
+            int bankDocsCount = pairsToProcess.Count(p => string.Equals(p.Channel, "Bank", StringComparison.OrdinalIgnoreCase));
+
+            var progress = new Progress<int>(val =>
+            {
+                ProgressValue = val;
+                string phaseLabel = val <= bankDocsCount ? "1/2 • BANK (Prioritaire)" : "2/2 • BROKER";
+                StatusMessage = $"[{phaseLabel}] Comparaison en cours : document {val} / {ProgressMax}";
+                RefreshKpiCounters();
+            });
+
+            StatusMessage = $"Comparaison TIDES ({releaseName}) en cours : {bankDocsCount} PDF Bank puis {ProgressMax - bankDocsCount} PDF Broker...";
+
+            await _orchestrator.ProcessPairsAsync(
+                pairsToProcess,
+                OutputDirectory,
+                progress,
+                _cancellationTokenSource.Token,
+                copyToProductOutput: writeToProductOutputs);
+
+            if (writeToProductOutputs)
+            {
+                await Task.Run(() => _tidesCampaignService.ExportPerProductSummaries(Pairs), _cancellationTokenSource.Token);
+            }
+
+            // Conserver l'ordre Bank d'abord puis Broker, tout en plaçant les différences en tête de chaque canal
+            var sortedCampaignPairs = Pairs
+                .OrderBy(p => string.Equals(p.Channel, "Bank", StringComparison.OrdinalIgnoreCase) ? 1 : 2)
+                .ThenByDescending(p => p.CriticalCount)
+                .ThenByDescending(p => p.DiffCount)
+                .ThenBy(p => p.ProductName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            Pairs.ReplaceRange(sortedCampaignPairs);
+            RefreshKpiCounters();
+
+            SelectedPair = Pairs.FirstOrDefault(p => p.Status == CompareStatus.Different) ?? Pairs.FirstOrDefault();
+
+            StatusMessage = $"Campagne TIDES ({releaseName}) terminée ! {DifferentPairsCount} différent(s) ({CriticalPairsCount} critique(s)) sur {ProgressMax} PDF ({bankProductsCount} produit(s) Bank, {brokerProductsCount} Broker).";
+            SaveSession();
+
+            MessageBox.Show(
+                $"Campagne TIDES Life ({releaseName}) terminée avec succès !\n\n" +
+                $"• Produits traités : {bankProductsCount} Bank (en 1er) + {brokerProductsCount} Broker\n" +
+                $"• Documents conformes (100%) : {IdenticalPairsCount}\n" +
+                $"• Documents avec vraies différences : {DifferentPairsCount} (dont {CriticalPairsCount} critique(s))\n" +
+                $"• Fichiers manquants / erreurs : {IssuesPairsCount}\n" +
+                $"• Rapports générés dans : {OutputDirectory}" +
+                (writeToProductOutputs ? $"\n• Copiés également dans chaque dossier <Produit>\\{releaseName}\\Output" : ""),
+                "Campagne Testing TIDES Terminée",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (OperationCanceledException)
+        {
+            RefreshKpiCounters();
+            StatusMessage = "Campagne TIDES annulée par l'utilisateur.";
+            MessageBox.Show("La campagne TIDES a été arrêtée.", "Annulé", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            RefreshKpiCounters();
+            StatusMessage = $"Erreur campagne TIDES : {ex.Message}";
+            MessageBox.Show(ex.Message, "Erreur Critique", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsProcessing = false;
+            _cancellationTokenSource?.Dispose();
+            _cancellationTokenSource = null;
         }
     }
 

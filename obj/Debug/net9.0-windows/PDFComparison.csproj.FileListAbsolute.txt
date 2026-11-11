@@ -92,3 +92,5 @@ C:\Users\maxen\Downloads\PDFComparison\obj\Debug\net9.0-windows\refint\PDFCompar
 C:\Users\maxen\Downloads\PDFComparison\obj\Debug\net9.0-windows\PDFComparison.pdb
 C:\Users\maxen\Downloads\PDFComparison\obj\Debug\net9.0-windows\PDFComparison.genruntimeconfig.cache
 C:\Users\maxen\Downloads\PDFComparison\obj\Debug\net9.0-windows\ref\PDFComparison.dll
+C:\Users\maxen\Downloads\PDFComparison\obj\Debug\net9.0-windows\TidesCampaignWindow.baml
+C:\Users\maxen\Downloads\PDFComparison\obj\Debug\net9.0-windows\TidesCampaignWindow.g.cs

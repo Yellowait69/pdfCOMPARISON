@@ -33,16 +33,27 @@ public class PdfDiffAnalyzer
         if (pair == null) throw new ArgumentNullException(nameof(pair));
 
         string lang = "ND";
-        if (!string.IsNullOrEmpty(pair.MatchKey) && pair.MatchKey.Contains('_'))
+        if (pair.HasProductTag)
+        {
+            lang = string.IsNullOrWhiteSpace(pair.Channel)
+                ? pair.ProductName
+                : $"{pair.Channel}/{pair.ProductName}";
+        }
+        else if (!string.IsNullOrEmpty(pair.MatchKey) && pair.MatchKey.Contains('_'))
         {
             lang = pair.MatchKey.Split('_')[0].ToUpperInvariant();
         }
+
+        string rawDocName = Path.GetFileName(pair.TargetPath ?? pair.SourcePath ?? "UnknownTarget.pdf");
+        string fullDocTitle = pair.HasProductTag
+            ? $"[{pair.DisplayProductBadge}] {rawDocName}"
+            : rawDocName;
 
         var result = new DiffAnalysisResult
         {
             Summary = new DocumentDiffSummary
             {
-                DocumentName = Path.GetFileName(pair.TargetPath ?? "UnknownTarget.pdf"),
+                DocumentName = fullDocTitle,
                 Language = lang
             }
         };

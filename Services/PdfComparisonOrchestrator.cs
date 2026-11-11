@@ -29,7 +29,12 @@ public class PdfComparisonOrchestrator
         _globalReportGenerator = globalReportGenerator ?? throw new ArgumentNullException(nameof(globalReportGenerator));
     }
 
-    public async Task ProcessPairsAsync(IEnumerable<DocumentPair> validPairs, string outputDiffDir, IProgress<int> progress, CancellationToken cancellationToken = default)
+    public async Task ProcessPairsAsync(
+        IEnumerable<DocumentPair> validPairs,
+        string outputDiffDir,
+        IProgress<int> progress,
+        CancellationToken cancellationToken = default,
+        bool copyToProductOutput = false)
     {
         if (validPairs == null) throw new ArgumentNullException(nameof(validPairs));
 
@@ -42,60 +47,74 @@ public class PdfComparisonOrchestrator
             CancellationToken = cancellationToken
         };
 
-        await Parallel.ForEachAsync(validPairs, parallelOptions, (pair, ct) =>
+        var pairsList = validPairs.ToList();
+        bool hasBankChannel = pairsList.Any(p => string.Equals(p.Channel, "Bank", StringComparison.OrdinalIgnoreCase));
+
+        var batches = hasBankChannel
+            ? new List<List<DocumentPair>>
+            {
+                pairsList.Where(p => string.Equals(p.Channel, "Bank", StringComparison.OrdinalIgnoreCase)).ToList(),
+                pairsList.Where(p => !string.Equals(p.Channel, "Bank", StringComparison.OrdinalIgnoreCase)).ToList()
+            }
+            : new List<List<DocumentPair>> { pairsList };
+
+        foreach (var batch in batches.Where(b => b.Count > 0))
         {
-            try
+            await Parallel.ForEachAsync(batch, parallelOptions, (pair, ct) =>
             {
-                ct.ThrowIfCancellationRequested();
-
-                var (sourceText, sourceWords, sourceImagesCount, sourceImagesHash) = _extractionService.ExtractDocumentFullData(pair.SourcePath);
-                var (targetText, targetWords, targetImagesCount, targetImagesHash) = _extractionService.ExtractDocumentFullData(pair.TargetPath!);
-
-                bool isScannedPdf = sourceWords.Count == 0 && targetWords.Count == 0 && (sourceImagesCount > 0 || targetImagesCount > 0);
-
-                if (string.IsNullOrWhiteSpace(sourceText) && string.IsNullOrWhiteSpace(targetText) &&
-                    sourceWords.Count == 0 && targetWords.Count == 0 &&
-                    sourceImagesCount == 0 && targetImagesCount == 0)
+                try
                 {
-                    UpdatePairStatus(pair, CompareStatus.Error, "Unreadable / Empty PDF files", -1, 0, 0, 0.0, DiffSeverity.None, 0, null);
+                    ct.ThrowIfCancellationRequested();
+
+                    var (sourceText, sourceWords, sourceImagesCount, sourceImagesHash) = _extractionService.ExtractDocumentFullData(pair.SourcePath);
+                    var (targetText, targetWords, targetImagesCount, targetImagesHash) = _extractionService.ExtractDocumentFullData(pair.TargetPath!);
+
+                    bool isScannedPdf = sourceWords.Count == 0 && targetWords.Count == 0 && (sourceImagesCount > 0 || targetImagesCount > 0);
+
+                    if (string.IsNullOrWhiteSpace(sourceText) && string.IsNullOrWhiteSpace(targetText) &&
+                        sourceWords.Count == 0 && targetWords.Count == 0 &&
+                        sourceImagesCount == 0 && targetImagesCount == 0)
+                    {
+                        UpdatePairStatus(pair, CompareStatus.Error, "Unreadable / Empty PDF files", -1, 0, 0, 0.0, DiffSeverity.None, 0, null);
+                    }
+                    else if (isScannedPdf && sourceImagesHash == targetImagesHash)
+                    {
+                        UpdatePairStatus(pair, CompareStatus.Identical, "PDF Scanné • Conforme (SSIM 100%)", 0, 0, 0, 100.0, DiffSeverity.None, 0, null);
+                    }
+                    else if (!isScannedPdf &&
+                             string.Equals(sourceText, targetText, StringComparison.Ordinal) &&
+                             sourceImagesHash == targetImagesHash)
+                    {
+                        UpdatePairStatus(pair, CompareStatus.Identical, "Identical (No differences)", 0, 0, 0, 100.0, DiffSeverity.None, 0, null);
+                    }
+                    else
+                    {
+                        ProcessSinglePair(pair, sourceText, targetText, sourceWords, targetWords, isScannedPdf, outputDiffDir, allSummaries, copyToProductOutput, ct);
+                    }
+
+                    RunOnUiThread(() => pair.CompletedTime = DateTime.Now);
                 }
-                else if (isScannedPdf && sourceImagesHash == targetImagesHash)
+                catch (OperationCanceledException)
                 {
-                    UpdatePairStatus(pair, CompareStatus.Identical, "PDF Scanné • Conforme (SSIM 100%)", 0, 0, 0, 100.0, DiffSeverity.None, 0, null);
+                    UpdatePairStatus(pair, CompareStatus.Pending, "Cancelled by user", pair.DiffCount, pair.InsertionsCount, pair.DeletionsCount, pair.SsimScore, pair.MaxSeverity, pair.CriticalCount, null);
                 }
-                else if (!isScannedPdf &&
-                         string.Equals(sourceText, targetText, StringComparison.Ordinal) &&
-                         sourceImagesHash == targetImagesHash)
+                catch (IOException ex)
                 {
-                    UpdatePairStatus(pair, CompareStatus.Identical, "Identical (No differences)", 0, 0, 0, 100.0, DiffSeverity.None, 0, null);
+                    UpdatePairStatus(pair, CompareStatus.Error, $"File access error (is it open?): {ex.Message}", -1, 0, 0, 0.0, DiffSeverity.None, 0, null);
                 }
-                else
+                catch (Exception ex)
                 {
-                    ProcessSinglePair(pair, sourceText, targetText, sourceWords, targetWords, isScannedPdf, outputDiffDir, allSummaries, ct);
+                    UpdatePairStatus(pair, CompareStatus.Error, $"Error: {ex.Message}", -1, 0, 0, 0.0, DiffSeverity.None, 0, null);
+                }
+                finally
+                {
+                    int currentCount = Interlocked.Increment(ref completed);
+                    progress.Report(currentCount);
                 }
 
-                RunOnUiThread(() => pair.CompletedTime = DateTime.Now);
-            }
-            catch (OperationCanceledException)
-            {
-                UpdatePairStatus(pair, CompareStatus.Pending, "Cancelled by user", pair.DiffCount, pair.InsertionsCount, pair.DeletionsCount, pair.SsimScore, pair.MaxSeverity, pair.CriticalCount, null);
-            }
-            catch (IOException ex)
-            {
-                UpdatePairStatus(pair, CompareStatus.Error, $"File access error (is it open?): {ex.Message}", -1, 0, 0, 0.0, DiffSeverity.None, 0, null);
-            }
-            catch (Exception ex)
-            {
-                UpdatePairStatus(pair, CompareStatus.Error, $"Error: {ex.Message}", -1, 0, 0, 0.0, DiffSeverity.None, 0, null);
-            }
-            finally
-            {
-                int currentCount = Interlocked.Increment(ref completed);
-                progress.Report(currentCount);
-            }
-
-            return ValueTask.CompletedTask;
-        });
+                return ValueTask.CompletedTask;
+            });
+        }
 
         if (!allSummaries.IsEmpty)
         {
@@ -122,6 +141,7 @@ public class PdfComparisonOrchestrator
         bool isScannedPdf,
         string outputDiffDir,
         ConcurrentBag<DocumentDiffSummary> summariesBag,
+        bool copyToProductOutput,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -145,7 +165,8 @@ public class PdfComparisonOrchestrator
 
         if (totalVisualDiffs > 0)
         {
-            string reportPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{pair.MatchKey}.pdf");
+            string safeKey = BuildSafeReportKey(pair);
+            string reportPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{safeKey}.pdf");
 
             ct.ThrowIfCancellationRequested();
 
@@ -158,6 +179,7 @@ public class PdfComparisonOrchestrator
                 _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, reportPath, diffResult.Highlights, diffResult.VisualRegions);
                 diffResult.Summary.ReportFileName = Path.GetFileName(reportPath);
                 SetReportPath(pair, reportPath);
+                TryCopyReportToProductOutput(pair, reportPath, copyToProductOutput);
 
                 UpdatePairStatus(
                     pair,
@@ -173,10 +195,11 @@ public class PdfComparisonOrchestrator
             }
             catch (IOException)
             {
-                string fallbackPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{pair.MatchKey}_{DateTime.Now:HHmmss}.pdf");
+                string fallbackPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{safeKey}_{DateTime.Now:HHmmss}.pdf");
                 _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, fallbackPath, diffResult.Highlights, diffResult.VisualRegions);
                 diffResult.Summary.ReportFileName = Path.GetFileName(fallbackPath);
                 SetReportPath(pair, fallbackPath);
+                TryCopyReportToProductOutput(pair, fallbackPath, copyToProductOutput);
 
                 UpdatePairStatus(
                     pair,
@@ -199,6 +222,47 @@ public class PdfComparisonOrchestrator
                 ? $"PDF Scanné • Conforme (SSIM {ssimPercent:0.0}%)"
                 : "False positives ignored (SSIM & Reflow verified)";
             UpdatePairStatus(pair, CompareStatus.Identical, okMessage, 0, 0, 0, ssimPercent, DiffSeverity.None, 0, null);
+        }
+    }
+
+    private static string BuildSafeReportKey(DocumentPair pair)
+    {
+        string raw = pair.MatchKey ?? "Document";
+        char[] invalidChars = Path.GetInvalidFileNameChars();
+        var chars = raw.Select(c => invalidChars.Contains(c) || c == '[' || c == ']' || c == '•' ? '_' : c).ToArray();
+        string cleaned = new string(chars).Trim('_');
+        while (cleaned.Contains("__"))
+        {
+            cleaned = cleaned.Replace("__", "_");
+        }
+        cleaned = cleaned.Replace(' ', '_');
+
+        if (cleaned.Length > 85)
+        {
+            uint hash = (uint)StringComparer.OrdinalIgnoreCase.GetHashCode(raw);
+            cleaned = $"{cleaned.Substring(0, 74)}_{hash:X8}";
+        }
+
+        return string.IsNullOrWhiteSpace(cleaned) ? "Doc" : cleaned;
+    }
+
+    private static void TryCopyReportToProductOutput(DocumentPair pair, string generatedReportPath, bool copyToProductOutput)
+    {
+        if (!copyToProductOutput || string.IsNullOrWhiteSpace(pair.ProductOutputDirectory) || !File.Exists(generatedReportPath))
+            return;
+
+        try
+        {
+            Directory.CreateDirectory(pair.ProductOutputDirectory);
+            string destFile = Path.Combine(pair.ProductOutputDirectory, Path.GetFileName(generatedReportPath));
+            if (!string.Equals(Path.GetFullPath(generatedReportPath), Path.GetFullPath(destFile), StringComparison.OrdinalIgnoreCase))
+            {
+                File.Copy(generatedReportPath, destFile, overwrite: true);
+            }
+        }
+        catch
+        {
+            // Ignorer si le dossier Output réseau est verrouillé ou en lecture seule
         }
     }
 
