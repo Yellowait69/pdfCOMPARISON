@@ -262,10 +262,79 @@ public class PdfVisualRegressionService : IPdfVisualRegressionService
         using var srcBmp = RenderNormalizedPageBitmap(sPage, sWords, SafeGetImages(sPage), totalPages, scale, profile);
         using var trgBmp = RenderNormalizedPageBitmap(tPage, tWords, SafeGetImages(tPage), totalPages, scale, profile);
 
-        var (pageSsim, diffRectsPx, _, _) = CompareBitmapsPerceptually(srcBmp, trgBmp, profile);
-        using var heatmapBmp = BuildHeatmapBitmap(srcBmp, trgBmp, diffRectsPx);
+        // Calculer et surligner uniquement les vraies différences de texte sur les deux pages côte à côte au même niveau
+        var sanitizer = new PdfLayoutSanitizerService();
+        var matcher = new VisualHighlightMatcherService(_configService);
+        var sLines = sanitizer.GroupIntoLines(sWords);
+        var tLines = sanitizer.GroupIntoLines(tWords);
 
-        return (BitmapToPngBytes(srcBmp), BitmapToPngBytes(trgBmp), BitmapToPngBytes(heatmapBmp), pageSsim, totalPages);
+        string sDiffTxt = string.Join("\n", sLines.Select(l => string.Join(" ", l.Select(w => w.CleanText))));
+        string tDiffTxt = string.Join("\n", tLines.Select(l => string.Join(" ", l.Select(w => w.CleanText))));
+
+        var diffModel = new DiffPlex.DiffBuilder.SideBySideDiffBuilder(new DiffPlex.Differ()).BuildDiffModel(sDiffTxt, tDiffTxt);
+        var highlights = matcher.GenerateHighlights(diffModel, sLines, tLines);
+
+        DrawTextDiffHighlightsOnBitmap(srcBmp, highlights.SourceRed, sPage.Height, scale, isSource: true);
+        DrawTextDiffHighlightsOnBitmap(trgBmp, highlights.TargetRed, tPage.Height, scale, isSource: false);
+
+        int totalWords = Math.Max(1, sWords.Count + tWords.Count);
+        int changedLetters = highlights.SourceRed.Count + highlights.TargetRed.Count;
+        double textConcordance = changedLetters == 0 ? 1.0 : Math.Clamp(1.0 - ((double)changedLetters / Math.Max(20, totalWords * 5)), 0.0, 0.999);
+
+        using var heatmapBmp = BuildHeatmapBitmap(srcBmp, trgBmp, new List<Rectangle>());
+
+        return (BitmapToPngBytes(srcBmp), BitmapToPngBytes(trgBmp), BitmapToPngBytes(heatmapBmp), textConcordance, totalPages);
+    }
+
+    private static void DrawTextDiffHighlightsOnBitmap(
+        Bitmap bmp,
+        List<LetterLoc> letters,
+        double pageHeightPt,
+        double scale,
+        bool isSource)
+    {
+        if (letters == null || letters.Count == 0) return;
+
+        var unifiedBlocks = VisualSegmentHelper.GetUnifiedBlocks(letters);
+        if (unifiedBlocks.Count == 0) return;
+
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        var fillColor = isSource
+            ? System.Drawing.Color.FromArgb(65, 239, 68, 68)
+            : System.Drawing.Color.FromArgb(65, 16, 185, 129);
+        var strokeColor = isSource
+            ? System.Drawing.Color.FromArgb(230, 220, 38, 38)
+            : System.Drawing.Color.FromArgb(230, 5, 150, 105);
+        var guideColor = isSource
+            ? System.Drawing.Color.FromArgb(95, 239, 68, 68)
+            : System.Drawing.Color.FromArgb(95, 16, 185, 129);
+
+        using var fillBrush = new SolidBrush(fillColor);
+        using var borderPen = new Pen(strokeColor, 2.2f);
+        using var marginBrush = new SolidBrush(strokeColor);
+        using var guidePen = new Pen(guideColor, 1.0f) { DashStyle = DashStyle.Dash };
+
+        foreach (var blk in unifiedBlocks)
+        {
+            float x = (float)((double)blk.minX * scale) - 3f;
+            float w = (float)((double)(blk.maxX - blk.minX) * scale) + 6f;
+            float topPt = (float)((double)pageHeightPt - (double)blk.maxY);
+            float h = (float)((double)(blk.maxY - blk.minY) * scale) + 4f;
+            float y = (float)(topPt * scale) - 2f;
+
+            // Ligne guide horizontale sur toute la largeur pour repérer immédiatement le niveau vertical côte à côte
+            float midY = y + (h / 2f);
+            g.DrawLine(guidePen, 0, midY, bmp.Width, midY);
+
+            // Repère épais dans la marge gauche
+            g.FillRectangle(marginBrush, 2f, y, 7f, Math.Max(8f, h));
+
+            // Surlignage + Encadrement unifié du bloc de différences consécutives
+            g.FillRectangle(fillBrush, x, y, Math.Max(8f, w), Math.Max(8f, h));
+            g.DrawRectangle(borderPen, x, y, Math.Max(8f, w), Math.Max(8f, h));
+        }
     }
 
     private static Bitmap BuildHeatmapBitmap(Bitmap srcBmp, Bitmap trgBmp, List<Rectangle> diffRectsPx)

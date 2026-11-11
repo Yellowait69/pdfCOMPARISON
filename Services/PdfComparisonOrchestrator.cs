@@ -66,30 +66,21 @@ public class PdfComparisonOrchestrator
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    var (sourceText, sourceWords, sourceImagesCount, sourceImagesHash) = _extractionService.ExtractDocumentFullData(pair.SourcePath);
-                    var (targetText, targetWords, targetImagesCount, targetImagesHash) = _extractionService.ExtractDocumentFullData(pair.TargetPath!);
-
-                    bool isScannedPdf = sourceWords.Count == 0 && targetWords.Count == 0 && (sourceImagesCount > 0 || targetImagesCount > 0);
+                    var (sourceText, sourceWords, _, _) = _extractionService.ExtractDocumentFullData(pair.SourcePath);
+                    var (targetText, targetWords, _, _) = _extractionService.ExtractDocumentFullData(pair.TargetPath!);
 
                     if (string.IsNullOrWhiteSpace(sourceText) && string.IsNullOrWhiteSpace(targetText) &&
-                        sourceWords.Count == 0 && targetWords.Count == 0 &&
-                        sourceImagesCount == 0 && targetImagesCount == 0)
+                        sourceWords.Count == 0 && targetWords.Count == 0)
                     {
-                        UpdatePairStatus(pair, CompareStatus.Error, "Unreadable / Empty PDF files", -1, 0, 0, 0.0, DiffSeverity.None, 0, null);
+                        UpdatePairStatus(pair, CompareStatus.Identical, "Aucun texte visible détecté", 0, 0, 0, 100.0, DiffSeverity.None, 0, null);
                     }
-                    else if (isScannedPdf && sourceImagesHash == targetImagesHash)
+                    else if (string.Equals(sourceText, targetText, StringComparison.Ordinal))
                     {
-                        UpdatePairStatus(pair, CompareStatus.Identical, "PDF Scanné • Conforme (SSIM 100%)", 0, 0, 0, 100.0, DiffSeverity.None, 0, null);
-                    }
-                    else if (!isScannedPdf &&
-                             string.Equals(sourceText, targetText, StringComparison.Ordinal) &&
-                             sourceImagesHash == targetImagesHash)
-                    {
-                        UpdatePairStatus(pair, CompareStatus.Identical, "Identical (No differences)", 0, 0, 0, 100.0, DiffSeverity.None, 0, null);
+                        UpdatePairStatus(pair, CompareStatus.Identical, "Conforme (Texte 100% identique)", 0, 0, 0, 100.0, DiffSeverity.None, 0, null);
                     }
                     else
                     {
-                        ProcessSinglePair(pair, sourceText, targetText, sourceWords, targetWords, isScannedPdf, outputDiffDir, allSummaries, copyToProductOutput, ct);
+                        ProcessSinglePair(pair, sourceText, targetText, sourceWords, targetWords, false, outputDiffDir, allSummaries, copyToProductOutput, ct);
                     }
 
                     RunOnUiThread(() => pair.CompletedTime = DateTime.Now);
@@ -156,12 +147,11 @@ public class PdfComparisonOrchestrator
         int visualInsertions = CountVisualSegments(diffResult.Highlights.TargetRed);
         int visualDeletions = CountVisualSegments(diffResult.Highlights.SourceRed);
 
-        int totalVisualDiffs = diffResult.Summary.Blocks.Count > 0
-            ? diffResult.Summary.Blocks.Count
-            : (visualInsertions + visualDeletions + diffResult.VisualRegions.Count);
+        // Uniquement les vraies différences de texte vérifiées
+        int totalVisualDiffs = diffResult.Summary.Blocks.Count;
 
         diffResult.DifferencesCount = totalVisualDiffs;
-        double ssimPercent = Math.Round(diffResult.OverallSsimScore * 100.0, 2);
+        double ssimPercent = totalVisualDiffs == 0 ? 100.0 : Math.Round(diffResult.OverallSsimScore * 100.0, 2);
 
         if (totalVisualDiffs > 0)
         {
@@ -170,13 +160,11 @@ public class PdfComparisonOrchestrator
 
             ct.ThrowIfCancellationRequested();
 
-            string statusDetail = isScannedPdf
-                ? $"PDF Scanné • {totalVisualDiffs} écart(s) visuel(s)"
-                : $"{totalVisualDiffs} diff(s) • {diffResult.Summary.CriticalAlertsCount} critique(s)";
+            string statusDetail = $"{totalVisualDiffs} diff(s) texte • {diffResult.Summary.CriticalAlertsCount} critique(s)";
 
             try
             {
-                _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, reportPath, diffResult.Highlights, diffResult.VisualRegions);
+                _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, reportPath, diffResult.Highlights, diffResult.VisualRegions, diffResult.Summary.Blocks);
                 diffResult.Summary.ReportFileName = Path.GetFileName(reportPath);
                 SetReportPath(pair, reportPath);
                 TryCopyReportToProductOutput(pair, reportPath, copyToProductOutput);
@@ -196,7 +184,7 @@ public class PdfComparisonOrchestrator
             catch (IOException)
             {
                 string fallbackPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{safeKey}_{DateTime.Now:HHmmss}.pdf");
-                _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, fallbackPath, diffResult.Highlights, diffResult.VisualRegions);
+                _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, fallbackPath, diffResult.Highlights, diffResult.VisualRegions, diffResult.Summary.Blocks);
                 diffResult.Summary.ReportFileName = Path.GetFileName(fallbackPath);
                 SetReportPath(pair, fallbackPath);
                 TryCopyReportToProductOutput(pair, fallbackPath, copyToProductOutput);
@@ -254,10 +242,25 @@ public class PdfComparisonOrchestrator
         try
         {
             Directory.CreateDirectory(pair.ProductOutputDirectory);
-            string destFile = Path.Combine(pair.ProductOutputDirectory, Path.GetFileName(generatedReportPath));
-            if (!string.Equals(Path.GetFullPath(generatedReportPath), Path.GetFullPath(destFile), StringComparison.OrdinalIgnoreCase))
+            string srcDir = Path.GetDirectoryName(generatedReportPath) ?? string.Empty;
+            string stem = Path.GetFileNameWithoutExtension(generatedReportPath);
+
+            string[] relatedFiles =
             {
-                File.Copy(generatedReportPath, destFile, overwrite: true);
+                generatedReportPath,
+                Path.Combine(srcDir, $"{stem}_SOURCE.pdf"),
+                Path.Combine(srcDir, $"{stem}_TARGET.pdf"),
+                Path.Combine(srcDir, $"{stem}_SideBySide.html")
+            };
+
+            foreach (var file in relatedFiles)
+            {
+                if (!File.Exists(file)) continue;
+                string destFile = Path.Combine(pair.ProductOutputDirectory, Path.GetFileName(file));
+                if (!string.Equals(Path.GetFullPath(file), Path.GetFullPath(destFile), StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Copy(file, destFile, overwrite: true);
+                }
             }
         }
         catch

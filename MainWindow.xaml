@@ -176,10 +176,10 @@
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock Text="PDF Comparator Pro" FontSize="22" FontWeight="Bold" Foreground="#0F172A" VerticalAlignment="Center"/>
                         <Border Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="6" Padding="8,2" Margin="10,2,0,0" VerticalAlignment="Center">
-                            <TextBlock Text="SSIM + Dé-césure + IA Spatiale" FontSize="11" FontWeight="SemiBold" Foreground="#1D4ED8"/>
+                            <TextBlock Text="Comparaison Texte Visible à l'Œil Nu • Zéro Faux-Positif" FontSize="11" FontWeight="SemiBold" Foreground="#1D4ED8"/>
                         </Border>
                     </StackPanel>
-                    <TextBlock Text="Comparaison documentaire zéro faux-positif, exclusions dynamiques &amp; synthèse décisionnelle"
+                    <TextBlock Text="Comparaison stricte du texte visible uniquement, vue Côte à Côte au même niveau &amp; synthèse décisionnelle"
                                FontSize="12.5" Foreground="#64748B" Margin="0,2,16,0" TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
             </StackPanel>
@@ -651,7 +651,7 @@
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
 
-                        <DataGridTextColumn Header="SSIM" Binding="{Binding SsimScore, StringFormat=\{0:F1\}%}" Width="80" FontWeight="SemiBold" Foreground="#2563EB"/>
+                        <DataGridTextColumn Header="Texte %" Binding="{Binding SsimScore, StringFormat=\{0:F1\}%}" Width="80" FontWeight="SemiBold" Foreground="#2563EB"/>
 
                         <DataGridTextColumn Header="Vraies Diffs" Binding="{Binding DiffCount}" Width="95" FontWeight="Bold" Foreground="#0F172A"/>
 
@@ -675,7 +675,7 @@
 
                         <DataGridTextColumn Header="Heure" Binding="{Binding CompletedTime, StringFormat=\{0:HH:mm\}}" Width="75" Foreground="#94A3B8"/>
 
-                        <DataGridTemplateColumn Header="Actions" Width="195">
+                        <DataGridTemplateColumn Header="Actions" Width="225">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
                                     <StackPanel Orientation="Horizontal">
@@ -687,18 +687,18 @@
 
                                         <Button Command="{Binding DataContext.OpenVisualInspectorCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                                 CommandParameter="{Binding}"
-                                                Content="🔍" FontSize="11.5" Padding="8,4" Margin="0,0,5,0"
+                                                Content="📖 Vue A|B" FontSize="11.5" Padding="8,4" Margin="0,0,5,0"
                                                 Style="{StaticResource ModernSecondaryButton}"
-                                                ToolTip="Ouvrir l'Inspecteur Visuel A/B, Calque &amp; Heatmap SSIM"/>
+                                                ToolTip="Voir Source et Target côte à côte au même niveau dans l'application"/>
 
                                         <Button Command="{Binding DataContext.OpenReportCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                                 CommandParameter="{Binding}"
                                                 Visibility="{Binding HasReport, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                 Padding="10,4" Background="#2563EB" Foreground="White" BorderThickness="0" Cursor="Hand"
-                                                ToolTip="Ouvrir le rapport PDF annoté">
+                                                ToolTip="Ouvrir les 2 PDF annotés (Source et Target) côte à côte au même niveau">
                                              <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="&#xE8A7;" FontFamily="Segoe MDL2 Assets" Margin="0,0,5,0" VerticalAlignment="Center" FontSize="11.5"/>
-                                                <TextBlock Text="Rapport" FontWeight="SemiBold" FontSize="11.5" VerticalAlignment="Center"/>
+                                                <TextBlock Text="Côte à Côte" FontWeight="SemiBold" FontSize="11.5" VerticalAlignment="Center"/>
                                             </StackPanel>
                                             <Button.Style>
                                                 <Style TargetType="Button">
@@ -763,11 +763,11 @@
                                 Style="{StaticResource ModernSecondaryButton}"
                                 Padding="10,4" FontSize="12" Margin="0,0,6,0"
                                 ToolTip="Relancer immédiatement la comparaison de ce seul document avec les règles actuelles"/>
-                        <Button Content="🔍 Inspecteur Visuel A/B"
+                        <Button Content="📖 Voir Côte à Côte (App)"
                                 Command="{Binding OpenVisualInspectorCommand}"
                                 Style="{StaticResource ModernPrimaryButton}"
                                 Background="#7C3AED" Padding="12,4" FontSize="12" Margin="0,0,8,0"
-                                ToolTip="Ouvrir la visionneuse interactive (Côte à Côte, Superposition Calque, Blink A/B, Heatmap SSIM)"/>
+                                ToolTip="Ouvrir la vue Côte à Côte au même niveau (Source à gauche | Target à droite)"/>
                         <Button Content="✓ Approuver Conforme"
                                 Command="{Binding ApproveSelectedPairCommand}"
                                 Style="{StaticResource ModernPrimaryButton}"
@@ -775,7 +775,7 @@
                                 ToolTip="Valider manuellement ce document comme Conforme (met à jour les KPI)"/>
                         <Button Content="PDF Source" Command="{Binding OpenSourcePdfCommand}" Style="{StaticResource ModernSecondaryButton}" Padding="10,4" FontSize="12" Margin="0,0,6,0"/>
                         <Button Content="PDF Cible" Command="{Binding OpenTargetPdfCommand}" Style="{StaticResource ModernSecondaryButton}" Padding="10,4" FontSize="12" Margin="0,0,6,0"/>
-                        <Button Content="PDF Annoté" Command="{Binding OpenReportCommand}" Style="{StaticResource ModernPrimaryButton}" Padding="12,4" FontSize="12"/>
+                        <Button Content="🌐 PDF Côte à Côte" Command="{Binding OpenReportCommand}" Style="{StaticResource ModernPrimaryButton}" Padding="12,4" FontSize="12" ToolTip="Ouvrir les 2 vrais PDF annotés côte à côte au même niveau dans le navigateur"/>
                     </StackPanel>
                 </DockPanel>
 

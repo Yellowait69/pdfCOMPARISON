@@ -156,81 +156,33 @@ public class PdfDrawingService : IPdfDrawingService
 
     public void DrawDiffMarkup(PdfPageBuilder pageBuilder, IEnumerable<LetterLoc> letters, byte r, byte g, byte b, MarkupStyle style)
     {
-        var segments = VisualSegmentHelper.GetSegments(letters);
-        if (segments.Count == 0) return;
+        var unifiedBlocks = VisualSegmentHelper.GetUnifiedBlocks(letters);
+        if (unifiedBlocks.Count == 0) return;
 
         pageBuilder.SetStrokeColor(r, g, b);
 
-        if (style == MarkupStyle.Highlight)
+        foreach (var blk in unifiedBlocks)
         {
-            var marginBlocks = new List<(decimal minY, decimal maxY)>();
-            decimal currentMaxY = segments[0].baselineY + (segments[0].fontSize * 0.9m);
-            decimal currentMinY = segments[0].baselineY - (segments[0].fontSize * 0.2m);
+            decimal padding = Math.Clamp(blk.fontSize * 0.18m, 1.5m, 3.0m);
+            decimal boxX = blk.minX - padding;
+            decimal boxY = blk.minY - (padding * 0.5m);
+            decimal boxWidth = (blk.maxX - blk.minX) + (padding * 2m);
+            decimal boxHeight = (blk.maxY - blk.minY) + padding;
+            decimal borderStroke = Math.Clamp(blk.fontSize * 0.16m, 1.3m, 2.2m);
 
-            for (int i = 1; i < segments.Count; i++)
-            {
-                var seg = segments[i];
-                decimal boxMinY = seg.baselineY - (seg.fontSize * 0.2m);
-                decimal boxMaxY = seg.baselineY + (seg.fontSize * 0.9m);
+            // Repère vertical dans la marge gauche à la hauteur exacte du bloc
+            pageBuilder.DrawLine(
+                new PdfPoint(6.0, (double)boxY),
+                new PdfPoint(6.0, (double)(boxY + boxHeight)),
+                8.0m);
 
-                if (currentMinY - boxMaxY < seg.fontSize * 2.0m)
-                {
-                    currentMinY = Math.Min(currentMinY, boxMinY);
-                    currentMaxY = Math.Max(currentMaxY, boxMaxY);
-                }
-                else
-                {
-                    marginBlocks.Add((currentMinY, currentMaxY));
-                    currentMaxY = boxMaxY;
-                    currentMinY = boxMinY;
-                }
-            }
-            marginBlocks.Add((currentMinY, currentMaxY));
-
-            foreach (var mb in marginBlocks)
-            {
-                decimal marginX = 6m;
-                pageBuilder.DrawLine(
-                    new PdfPoint((double)marginX, (double)mb.minY),
-                    new PdfPoint((double)marginX, (double)mb.maxY),
-                    8.0m
-                );
-            }
-        }
-
-        foreach (var seg in segments)
-        {
-            decimal strokeWidth = Math.Max(seg.fontSize * 0.08m, 0.75m);
-            decimal width = seg.maxX - seg.minX;
-
-            switch (style)
-            {
-                case MarkupStyle.Strikethrough:
-                    pageBuilder.DrawLine(new PdfPoint((double)seg.minX, (double)(seg.baselineY + (seg.fontSize * 0.3m))), new PdfPoint((double)seg.maxX, (double)(seg.baselineY + (seg.fontSize * 0.3m))), strokeWidth);
-                    break;
-                case MarkupStyle.Underline:
-                    pageBuilder.DrawLine(new PdfPoint((double)seg.minX, (double)(seg.baselineY - (seg.fontSize * 0.12m))), new PdfPoint((double)seg.maxX, (double)(seg.baselineY - (seg.fontSize * 0.12m))), strokeWidth);
-                    break;
-                case MarkupStyle.Box:
-                    decimal paddingX = seg.fontSize * 0.1m;
-                    pageBuilder.DrawRectangle(new PdfPoint((double)(seg.minX - paddingX), (double)(seg.baselineY - (seg.fontSize * 0.15m))), width + (paddingX * 2), seg.fontSize * 0.9m, strokeWidth, false);
-                    break;
-                case MarkupStyle.Highlight:
-                    decimal padding = Math.Clamp(seg.fontSize * 0.14m, 1.0m, 2.5m);
-                    decimal boxX = seg.minX - padding;
-                    decimal boxY = seg.baselineY - (seg.fontSize * 0.22m);
-                    decimal boxWidth = (seg.maxX - seg.minX) + (padding * 2);
-                    decimal boxHeight = seg.fontSize * 1.12m;
-                    decimal borderStroke = Math.Clamp(seg.fontSize * 0.16m, 1.2m, 2.2m);
-
-                    pageBuilder.DrawRectangle(
-                        new PdfPoint((double)boxX, (double)boxY),
-                        boxWidth,
-                        boxHeight,
-                        borderStroke,
-                        false);
-                    break;
-            }
+            // Un seul cadre unifié autour du bloc de différences consécutives
+            pageBuilder.DrawRectangle(
+                new PdfPoint((double)boxX, (double)boxY),
+                boxWidth,
+                boxHeight,
+                borderStroke,
+                false);
         }
     }
 

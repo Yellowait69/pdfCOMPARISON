@@ -1,6 +1,8 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -32,6 +34,16 @@ public partial class VisualDiffViewerWindow : Window
 
         DocTitleText.Text = $"Document : {_pair.MatchKey}";
 
+        if (_pair.DiffBlocks != null && _pair.DiffBlocks.Count > 0)
+        {
+            ListDiffBlocks.ItemsSource = _pair.DiffBlocks;
+            DiffsListBanner.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            DiffsListBanner.Visibility = Visibility.Collapsed;
+        }
+
         _blinkTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(650)
@@ -50,7 +62,7 @@ public partial class VisualDiffViewerWindow : Window
 
         try
         {
-            var (srcBytes, trgBytes, heatBytes, pageSsim, totalPages) =
+            var (srcBytes, trgBytes, _, pageSsim, totalPages) =
                 _visualService.RenderInteractiveInspectionPage(_pair.SourcePath, _pair.TargetPath!, _currentPage);
 
             _totalPages = Math.Max(1, totalPages);
@@ -58,20 +70,18 @@ public partial class VisualDiffViewerWindow : Window
 
             var srcImg = BytesToBitmapImage(srcBytes);
             var trgImg = BytesToBitmapImage(trgBytes);
-            var heatImg = BytesToBitmapImage(heatBytes);
 
             ImgSideSource.Source = srcImg;
             ImgSideTarget.Source = trgImg;
             ImgOverlaySource.Source = srcImg;
             ImgOverlayTarget.Source = trgImg;
-            ImgHeatmap.Source = heatImg;
 
             PageIndicatorText.Text = $"Page {_currentPage} / {_totalPages}";
-            SsimScoreBadge.Text = $"SSIM Page : {pageSsim * 100.0:0.0}%";
+            SsimScoreBadge.Text = $"Concordance Texte : {pageSsim * 100.0:0.0}%";
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Erreur lors du rendu visuel de la page {_currentPage} : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"Erreur lors du rendu de la page {_currentPage} : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -85,6 +95,51 @@ public partial class VisualDiffViewerWindow : Window
         image.EndInit();
         image.Freeze();
         return image;
+    }
+
+    private void ListDiffBlocks_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ListDiffBlocks.SelectedItem is DiffSummaryBlock block && block.PageNumber > 0 && block.PageNumber != _currentPage)
+        {
+            _currentPage = block.PageNumber;
+            RenderCurrentPage();
+        }
+    }
+
+    private void OnOpenBrowserSideBySideClick(object sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(_pair.ReportPath))
+        {
+            string dir = Path.GetDirectoryName(_pair.ReportPath) ?? string.Empty;
+            string stem = Path.GetFileNameWithoutExtension(_pair.ReportPath);
+            string sideBySideHtml = Path.Combine(dir, $"{stem}_SideBySide.html");
+
+            if (File.Exists(sideBySideHtml))
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo(sideBySideHtml) { UseShellExecute = true });
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Impossible d'ouvrir la vue côte à côte : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+        }
+
+        if (File.Exists(_pair.SourcePath) && !string.IsNullOrWhiteSpace(_pair.TargetPath) && File.Exists(_pair.TargetPath))
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(_pair.SourcePath) { UseShellExecute = true });
+                Process.Start(new ProcessStartInfo(_pair.TargetPath!) { UseShellExecute = true });
+            }
+            catch
+            {
+                // Ignorer
+            }
+        }
     }
 
     private void OnPrevPageClick(object sender, RoutedEventArgs e)
@@ -111,11 +166,9 @@ public partial class VisualDiffViewerWindow : Window
         BtnSideBySide.Background = InactiveBtnBrush;
         BtnOverlay.Background = InactiveBtnBrush;
         BtnBlink.Background = InactiveBtnBrush;
-        BtnHeatmap.Background = InactiveBtnBrush;
         OverlayControlsPanel.Visibility = Visibility.Collapsed;
         SideBySideView.Visibility = Visibility.Collapsed;
         OverlayBlinkView.Visibility = Visibility.Collapsed;
-        HeatmapView.Visibility = Visibility.Collapsed;
     }
 
     private void OnModeSideBySideClick(object sender, RoutedEventArgs e)
@@ -146,19 +199,12 @@ public partial class VisualDiffViewerWindow : Window
         _blinkTimer.Start();
     }
 
-    private void OnModeHeatmapClick(object sender, RoutedEventArgs e)
-    {
-        ResetModeButtons();
-        BtnHeatmap.Background = ActiveBtnBrush;
-        HeatmapView.Visibility = Visibility.Visible;
-    }
-
     private void OnBlinkTimerTick(object? sender, EventArgs e)
     {
         _blinkShowingTarget = !_blinkShowingTarget;
         ImgOverlayTarget.Opacity = _blinkShowingTarget ? 1.0 : 0.0;
         OverlayModeLabel.Text = _blinkShowingTarget
-            ? "BLINK A/B : OBTENU (CIBLE)"
+            ? "BLINK A/B : OBTENU (TARGET)"
             : "BLINK A/B : ATTENDU (SOURCE)";
     }
 

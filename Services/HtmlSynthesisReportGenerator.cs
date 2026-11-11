@@ -138,7 +138,12 @@ public class HtmlSynthesisReportGenerator : IHtmlSynthesisReportGenerator
 
             if (!string.IsNullOrEmpty(doc.ReportFileName))
             {
-                sb.AppendLine($"<a class=\"pdf-link\" href=\"{Uri.EscapeDataString(doc.ReportFileName)}\" target=\"_blank\">Ouvrir le PDF Annoté ↗</a>");
+                string stem = Path.GetFileNameWithoutExtension(doc.ReportFileName);
+                string sideBySideFile = $"{stem}_SideBySide.html";
+                sb.AppendLine("<div style=\"display:flex; gap:8px;\">");
+                sb.AppendLine($"<a class=\"pdf-link\" style=\"background:#059669;\" href=\"{Uri.EscapeDataString(sideBySideFile)}\" target=\"_blank\">📖 Voir Côte à Côte (Source | Target) ↗</a>");
+                sb.AppendLine($"<a class=\"pdf-link\" href=\"{Uri.EscapeDataString(doc.ReportFileName)}\" target=\"_blank\">📄 PDF Annoté ↗</a>");
+                sb.AppendLine("</div>");
             }
             sb.AppendLine("</div>");
 

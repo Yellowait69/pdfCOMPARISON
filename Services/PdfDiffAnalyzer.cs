@@ -28,7 +28,12 @@ public class PdfDiffAnalyzer
         _visualRegressionService = visualRegressionService;
     }
 
-    public DiffAnalysisResult AnalyzeDifferences(DocumentPair pair, string cleanSource, string cleanTarget, IReadOnlyList<PdfWordInfo> sourceWords, IReadOnlyList<PdfWordInfo> targetWords)
+    public DiffAnalysisResult AnalyzeDifferences(
+        DocumentPair pair,
+        string cleanSource,
+        string cleanTarget,
+        IReadOnlyList<PdfWordInfo> sourceWords,
+        IReadOnlyList<PdfWordInfo> targetWords)
     {
         if (pair == null) throw new ArgumentNullException(nameof(pair));
 
@@ -51,10 +56,12 @@ public class PdfDiffAnalyzer
 
         var result = new DiffAnalysisResult
         {
+            OverallSsimScore = 1.0,
             Summary = new DocumentDiffSummary
             {
                 DocumentName = fullDocTitle,
-                Language = lang
+                Language = lang,
+                OverallSsimScore = 1.0
             }
         };
 
@@ -64,61 +71,67 @@ public class PdfDiffAnalyzer
         string sourceDiffText = BuildDiffText(sourceLinesList);
         string targetDiffText = BuildDiffText(targetLinesList);
 
+        // Si le texte visuellement ordonné et normalisé est strictement identique -> 0 différence
+        if (string.Equals(sourceDiffText, targetDiffText, StringComparison.Ordinal))
+        {
+            result.DifferencesCount = 0;
+            return result;
+        }
+
         var diffBuilder = new SideBySideDiffBuilder(new Differ());
         var diffLinesModelForVisuals = diffBuilder.BuildDiffModel(sourceDiffText, targetDiffText);
 
         result.Highlights = _visualMatcherService.GenerateHighlights(diffLinesModelForVisuals, sourceLinesList, targetLinesList);
 
-        string formattedSource = _layoutSanitizer.CleanLineForDiff(cleanSource);
-        string formattedTarget = _layoutSanitizer.CleanLineForDiff(cleanTarget);
-
-        // Construction des blocs de synthèse vérifiés (uniquement pour les différences réelles après filtrage du reflow)
-        if (result.Highlights.SourceRed.Count > 0 || result.Highlights.TargetRed.Count > 0)
+        if (result.Highlights.SourceRed.Count == 0 && result.Highlights.TargetRed.Count == 0)
         {
-            var verifiedBlocks = _textSummaryService.BuildVerifiedSummaryBlocks(
-                formattedSource,
-                formattedTarget,
-                sourceLinesList,
-                targetLinesList,
-                result.Highlights);
-
-            result.Summary.Blocks.AddRange(verifiedBlocks);
-        }
-
-        // Validation perceptuelle (SSIM + Distance YIQ + Filtre Anti-Aliasing) et génération des captures visuelles (SourceImage / TargetImage)
-        if (_visualRegressionService != null &&
-            !string.IsNullOrWhiteSpace(pair.SourcePath) &&
-            !string.IsNullOrWhiteSpace(pair.TargetPath))
-        {
-            _visualRegressionService.AnalyzeVisualAndPopulateSnapshots(
-                pair.SourcePath,
-                pair.TargetPath!,
-                sourceWords,
-                targetWords,
-                result);
-        }
-
-        if (result.Highlights.SourceRed.Count == 0 &&
-            result.Highlights.TargetRed.Count == 0 &&
-            result.VisualRegions.Count == 0)
-        {
-            result.Summary.Blocks.Clear();
             result.DifferencesCount = 0;
-            result.Summary.MaxSeverity = DiffSeverity.None;
-            result.Summary.CriticalAlertsCount = 0;
             return result;
         }
 
+        string formattedSource = _layoutSanitizer.CleanLineForDiff(cleanSource);
+        string formattedTarget = _layoutSanitizer.CleanLineForDiff(cleanTarget);
+
+        // Construction des blocs de synthèse vérifiés uniquement sur les vraies différences de texte
+        var verifiedBlocks = _textSummaryService.BuildVerifiedSummaryBlocks(
+            formattedSource,
+            formattedTarget,
+            sourceLinesList,
+            targetLinesList,
+            result.Highlights,
+            sourceWords,
+            targetWords);
+
+        result.Summary.Blocks.AddRange(verifiedBlocks);
+
+        // Si aucun bloc de texte n'a de vraie différence alphanumérique visible -> document 100% conforme
+        if (result.Summary.Blocks.Count == 0)
+        {
+            result.Highlights.SourceRed.Clear();
+            result.Highlights.TargetRed.Clear();
+            result.VisualRegions.Clear();
+            result.DifferencesCount = 0;
+            result.Summary.MaxSeverity = DiffSeverity.None;
+            result.Summary.CriticalAlertsCount = 0;
+            result.OverallSsimScore = 1.0;
+            result.Summary.OverallSsimScore = 1.0;
+            return result;
+        }
+
+        int totalWords = Math.Max(1, sourceWords.Count + targetWords.Count);
+        int changedLetters = result.Highlights.SourceRed.Count + result.Highlights.TargetRed.Count;
+        double textConcordance = Math.Clamp(1.0 - ((double)changedLetters / Math.Max(20, totalWords * 5)), 0.0, 0.999);
+
+        result.OverallSsimScore = textConcordance;
+        result.Summary.OverallSsimScore = textConcordance;
         result.DifferencesCount = result.Summary.Blocks.Count;
         result.Summary.CriticalAlertsCount = result.Summary.Blocks.Count(b => b.Severity == DiffSeverity.Critical);
-        result.Summary.MaxSeverity = result.Summary.Blocks.Count > 0
-            ? result.Summary.Blocks.Max(b => b.Severity)
-            : DiffSeverity.Minor;
+        result.Summary.MaxSeverity = result.Summary.Blocks.Max(b => b.Severity);
 
         return result;
     }
 
-    private string BuildDiffText(List<List<(string CleanText, List<LetterLoc> Letters)>> linesList)
+    private static string BuildDiffText(List<List<(string CleanText, List<LetterLoc> Letters)>> linesList)
     {
         if (linesList == null || linesList.Count == 0) return string.Empty;
 

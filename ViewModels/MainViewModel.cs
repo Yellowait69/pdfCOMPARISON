@@ -502,18 +502,31 @@ public partial class MainViewModel : ObservableObject
     private void OpenReport(DocumentPair? pair)
     {
         var target = pair ?? SelectedPair;
-        if (target != null && target.HasReport && File.Exists(target.ReportPath))
+        if (target != null && target.HasReport)
         {
-            try
+            string dir = Path.GetDirectoryName(target.ReportPath) ?? string.Empty;
+            string stem = Path.GetFileNameWithoutExtension(target.ReportPath);
+            string sideBySideHtmlPath = Path.Combine(dir, $"{stem}_SideBySide.html");
+
+            // Privilégier l'ouverture de la vue Côte-à-Côte au même niveau (Source à gauche | Target à droite)
+            string pathToOpen = File.Exists(sideBySideHtmlPath) ? sideBySideHtmlPath : target.ReportPath;
+
+            if (File.Exists(pathToOpen))
             {
-                Process.Start(new ProcessStartInfo(target.ReportPath) { UseShellExecute = true });
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Cannot open the report: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                try
+                {
+                    Process.Start(new ProcessStartInfo(pathToOpen) { UseShellExecute = true });
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Cannot open the report: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
             }
         }
-        else if (target != null && !File.Exists(target.ReportPath))
+
+        if (target != null && !File.Exists(target.ReportPath))
         {
             MessageBox.Show("The report file has been moved or deleted since the last session.", "File not found", MessageBoxButton.OK, MessageBoxImage.Warning);
         }

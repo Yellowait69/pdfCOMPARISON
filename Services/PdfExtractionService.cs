@@ -32,7 +32,7 @@ public class PdfExtractionService
     private ComparisonProfile? Profile => _configService?.ActiveProfile;
 
     /// <summary>
-    /// Extrait en une seule passe I/O le texte masqué et la liste des mots avec leurs coordonnées.
+    /// Extrait en une seule passe I/O le texte masqué et la liste des mots visibles avec leurs coordonnées.
     /// </summary>
     public (string MaskedText, List<PdfWordInfo> Words) ExtractDocumentData(string pdfPath)
     {
@@ -41,8 +41,8 @@ public class PdfExtractionService
     }
 
     /// <summary>
-    /// Extrait en une seule passe I/O le texte masqué, les mots avec coordonnées, ainsi que le nombre d'images
-    /// et leur empreinte rapide (pour détecter les PDF scannés et les changements de logos/signatures même à texte identique).
+    /// Extrait uniquement le texte visible à l'œil nu (ignore le texte hors-page, le texte blanc/invisible,
+    /// les micro-polices techniques et les filigranes).
     /// </summary>
     public (string MaskedText, List<PdfWordInfo> Words, int ImagesCount, int ImagesHash) ExtractDocumentFullData(string pdfPath)
     {
@@ -51,8 +51,6 @@ public class PdfExtractionService
         var sb = new StringBuilder();
         var words = new List<PdfWordInfo>();
         var headerDatesToIgnore = new HashSet<string>(StringComparer.Ordinal);
-        int imagesCount = 0;
-        int imagesHash = 17;
 
         var configuredZones = (IReadOnlyList<ExclusionZoneRule>?)Profile?.ExclusionZones ?? FallbackZones;
 
@@ -69,51 +67,11 @@ public class PdfExtractionService
                 .Where(z => z.AppliesToPage(page.Number, totalPages))
                 .ToList();
 
-            try
-            {
-                foreach (var img in page.GetImages())
-                {
-                    var b = img.Bounds;
-                    bool imgExcluded = false;
-                    for (int i = 0; i < activeZonesForPage.Count; i++)
-                    {
-                        if (activeZonesForPage[i].IntersectsPdfBox(
-                                b.BottomLeft.X, b.BottomLeft.Y,
-                                b.TopRight.X, b.TopRight.Y,
-                                page.Width, page.Height))
-                        {
-                            imgExcluded = true;
-                            break;
-                        }
-                    }
-
-                    if (imgExcluded) continue;
-
-                    imagesCount++;
-                    int rawLen = img.RawBytes.Count;
-                    imagesHash = HashCode.Combine(imagesHash, page.Number, (int)Math.Round(b.Width), (int)Math.Round(b.Height), rawLen);
-
-                    if (rawLen > 0)
-                    {
-                        var span = img.RawBytes;
-                        int step = Math.Max(1, span.Count / 16);
-                        for (int k = 0; k < span.Count; k += step)
-                        {
-                            imagesHash = HashCode.Combine(imagesHash, span[k]);
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                // Ignorer les flux d'images non standard
-            }
-
             foreach (var word in page.GetWords())
             {
                 if (string.IsNullOrWhiteSpace(word.Text)) continue;
 
-                if (IsHiddenOrWhiteWord(word)) continue;
+                if (IsHiddenOrOffPageWord(word, page.Width, page.Height)) continue;
 
                 bool isExcludedByZone = false;
                 var box = word.BoundingBox;
@@ -138,9 +96,12 @@ public class PdfExtractionService
                 if (isExcludedByZone) continue;
                 if (_watermarkFilter.IsWatermark(word)) continue;
 
+                string cleanedWordText = _watermarkFilter.CleanRawText(word.Text);
+                if (string.IsNullOrWhiteSpace(cleanedWordText)) continue;
+
                 words.Add(new PdfWordInfo
                 {
-                    Text = word.Text,
+                    Text = cleanedWordText,
                     Letters = word.Letters,
                     PageNumber = page.Number
                 });
@@ -165,7 +126,7 @@ public class PdfExtractionService
                     }
                 }
 
-                currentLine.Append(word.Text);
+                currentLine.Append(cleanedWordText);
 
                 lastX = box.TopRight.X;
                 lastY = box.BottomLeft.Y;
@@ -184,7 +145,7 @@ public class PdfExtractionService
         string maskedText = _intelligentMasking.MaskRepeatingTextElements(sb.ToString(), headerDatesToIgnore);
         _intelligentMasking.MaskRepeatingWordElements(words, headerDatesToIgnore);
 
-        return (maskedText, words, imagesCount, imagesHash);
+        return (maskedText, words, 0, 0);
     }
 
     public string ExtractTextFast(string pdfPath)
@@ -197,17 +158,25 @@ public class PdfExtractionService
         return ExtractDocumentData(pdfPath).Words;
     }
 
-    private bool IsHiddenOrWhiteWord(Word word)
+    private bool IsHiddenOrOffPageWord(Word word, double pageWidth, double pageHeight)
     {
-        if (word.Letters.Count == 0) return false;
+        if (word.Letters.Count == 0) return true;
+
+        var box = word.BoundingBox;
+        // Ignorer le texte situé en dehors de la page visible (MediaBox)
+        if (box.TopRight.X < 0 || box.BottomLeft.X > pageWidth ||
+            box.TopRight.Y < 0 || box.BottomLeft.Y > pageHeight)
+        {
+            return true;
+        }
 
         string text = word.Text.Trim();
-        if (text == "." || text == "," || text == "-" || text == "'") return false;
+        if (string.IsNullOrEmpty(text)) return true;
 
         var firstLetter = word.Letters[0];
-        double minFontSize = Profile?.MinAllowedFontSizePt ?? 1.0;
+        double minFontSize = Math.Max(1.8, Profile?.MinAllowedFontSizePt ?? 1.8);
 
-        if (firstLetter.PointSize <= minFontSize || firstLetter.GlyphRectangle.Width <= 0.1)
+        if (firstLetter.PointSize < minFontSize || firstLetter.GlyphRectangle.Width <= 0.1)
         {
             return true;
         }
@@ -215,7 +184,8 @@ public class PdfExtractionService
         if ((Profile?.IgnoreWhiteOnWhiteText ?? true) && firstLetter.Color != null)
         {
             var (r, g, b) = firstLetter.Color.ToRGBValues();
-            if (r >= 0.98 && g >= 0.98 && b >= 0.98)
+            // Ignorer le texte blanc ou quasi-blanc invisible à l'œil nu sur fond blanc
+            if (r >= 0.94 && g >= 0.94 && b >= 0.94)
             {
                 return true;
             }

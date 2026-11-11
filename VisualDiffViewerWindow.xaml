@@ -1,8 +1,8 @@
 <Window x:Class="PDFComparison.Views.VisualDiffViewerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Inspecteur Visuel Interactif A/B, Calque &amp; Heatmap SSIM"
-        Height="860" Width="1340"
+        Title="Comparateur Côte à Côte au Même Niveau (Source vs Target)"
+        Height="900" Width="1440"
         WindowStartupLocation="CenterOwner"
         Background="#0F172A"
         FontFamily="Segoe UI Variable, Segoe UI">
@@ -10,94 +10,140 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- BARRE D'OUTILS SUPÉRIEURE -->
-        <Border Grid.Row="0" Background="#1E293B" BorderBrush="#334155" BorderThickness="0,0,0,1" Padding="18,12">
+        <!-- 1. BARRE D'OUTILS SUPÉRIEURE -->
+        <Border Grid.Row="0" Background="#1E293B" BorderBrush="#334155" BorderThickness="0,0,0,1" Padding="18,10">
             <DockPanel>
                 <!-- Titre & Navigation Pages -->
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock x:Name="DocTitleText" Text="Document" Foreground="White" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" Margin="0,0,16,0"/>
+                    <TextBlock x:Name="DocTitleText" Text="Document" Foreground="White" FontWeight="Bold" FontSize="14.5" VerticalAlignment="Center" Margin="0,0,16,0" MaxWidth="360" TextTrimming="CharacterEllipsis"/>
 
-                    <Button Content="◄ Préc." Click="OnPrevPageClick" Padding="10,5" Background="#334155" Foreground="White" BorderThickness="0" Cursor="Hand" Margin="0,0,6,0"/>
-                    <Border Background="#0F172A" CornerRadius="6" Padding="12,5" Margin="0,0,6,0">
+                    <Button Content="◄ Page Préc." Click="OnPrevPageClick" Padding="10,5" Background="#334155" Foreground="White" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Margin="0,0,6,0"/>
+                    <Border Background="#0F172A" BorderBrush="#475569" BorderThickness="1" CornerRadius="6" Padding="12,5" Margin="0,0,6,0">
                         <TextBlock x:Name="PageIndicatorText" Text="Page 1 / 1" Foreground="#E2E8F0" FontWeight="Bold" VerticalAlignment="Center"/>
                     </Border>
-                    <Button Content="Suiv. ►" Click="OnNextPageClick" Padding="10,5" Background="#334155" Foreground="White" BorderThickness="0" Cursor="Hand" Margin="0,0,14,0"/>
+                    <Button Content="Page Suiv. ►" Click="OnNextPageClick" Padding="10,5" Background="#334155" Foreground="White" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Margin="0,0,14,0"/>
 
-                    <Border Background="#1E3A8A" CornerRadius="6" Padding="10,5">
-                        <TextBlock x:Name="SsimScoreBadge" Text="SSIM : 100.0%" Foreground="#93C5FD" FontWeight="Bold" FontSize="12.5" VerticalAlignment="Center"/>
+                    <Border Background="#1E3A8A" CornerRadius="6" Padding="10,5" Margin="0,0,10,0">
+                        <TextBlock x:Name="SsimScoreBadge" Text="Texte : 100.0%" Foreground="#93C5FD" FontWeight="Bold" FontSize="12" VerticalAlignment="Center"/>
                     </Border>
+
+                    <Button Content="🌐 Ouvrir les 2 PDF Vectoriels Côte à Côte (Navigateur)"
+                            Click="OnOpenBrowserSideBySideClick"
+                            Padding="12,6" Background="#059669" Foreground="White" FontWeight="Bold" BorderThickness="0" Cursor="Hand"
+                            ToolTip="Ouvre les deux vrais fichiers PDF annotés côte à côte au même niveau dans Microsoft Edge"/>
                 </StackPanel>
 
                 <!-- Modes d'affichage & Zoom -->
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Button x:Name="BtnSideBySide" Content="1. Côte à Côte (A | B)" Click="OnModeSideBySideClick" Padding="12,6" Background="#2563EB" Foreground="White" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Margin="0,0,6,0"/>
+                    <Button x:Name="BtnSideBySide" Content="1. Côte à Côte au Même Niveau (Source | Target)" Click="OnModeSideBySideClick" Padding="12,6" Background="#2563EB" Foreground="White" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Margin="0,0,6,0"/>
                     <Button x:Name="BtnOverlay" Content="2. Superposition Calque" Click="OnModeOverlayClick" Padding="12,6" Background="#334155" Foreground="White" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Margin="0,0,6,0"/>
-                    <Button x:Name="BtnBlink" Content="3. Mode Blink A/B" Click="OnModeBlinkClick" Padding="12,6" Background="#334155" Foreground="White" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Margin="0,0,6,0"/>
-                    <Button x:Name="BtnHeatmap" Content="4. Heatmap SSIM" Click="OnModeHeatmapClick" Padding="12,6" Background="#334155" Foreground="White" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Margin="0,0,16,0"/>
+                    <Button x:Name="BtnBlink" Content="3. Clignotement A/B" Click="OnModeBlinkClick" Padding="12,6" Background="#334155" Foreground="White" FontWeight="SemiBold" BorderThickness="0" Cursor="Hand" Margin="0,0,14,0"/>
 
                     <!-- Contrôle d'opacité pour le mode Superposition -->
                     <StackPanel x:Name="OverlayControlsPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center" Margin="0,0,14,0">
                         <TextBlock Text="Opacité Cible :" Foreground="#CBD5E1" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <Slider x:Name="OverlayOpacitySlider" Minimum="0" Maximum="1" Value="0.5" Width="100" VerticalAlignment="Center" ValueChanged="OnOverlayOpacityChanged"/>
+                        <Slider x:Name="OverlayOpacitySlider" Minimum="0" Maximum="1" Value="0.5" Width="90" VerticalAlignment="Center" ValueChanged="OnOverlayOpacityChanged"/>
                     </StackPanel>
 
                     <!-- Contrôle Zoom -->
                     <TextBlock Text="Zoom :" Foreground="#CBD5E1" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <Slider x:Name="ZoomSlider" Minimum="0.5" Maximum="2.5" Value="1.0" Width="100" VerticalAlignment="Center" ValueChanged="OnZoomChanged"/>
-                    <TextBlock x:Name="ZoomPercentText" Text="100%" Foreground="White" FontWeight="Bold" FontSize="12" Width="44" TextAlignment="Right" VerticalAlignment="Center"/>
+                    <Slider x:Name="ZoomSlider" Minimum="0.7" Maximum="2.5" Value="1.0" Width="95" VerticalAlignment="Center" ValueChanged="OnZoomChanged"/>
+                    <TextBlock x:Name="ZoomPercentText" Text="100%" Foreground="White" FontWeight="Bold" FontSize="12" Width="42" TextAlignment="Right" VerticalAlignment="Center"/>
                 </StackPanel>
             </DockPanel>
         </Border>
 
-        <!-- ZONE DE VISUALISATION -->
-        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Padding="20">
-            <Grid HorizontalAlignment="Center" VerticalAlignment="Top">
+        <!-- 2. BANDEAU DES VRAIES DIFFÉRENCES DE TEXTE (CLIQUER POUR ALLER À LA PAGE) -->
+        <Border Grid.Row="1" x:Name="DiffsListBanner" Background="#1E293B" BorderBrush="#334155" BorderThickness="0,0,0,1" Padding="16,8" MaxHeight="135">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="Différences de texte détectées à l'œil nu (cliquez sur une ligne pour afficher la page correspondante côte à côte) :"
+                           Foreground="#94A3B8" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                <ListBox Grid.Row="1" x:Name="ListDiffBlocks"
+                         Background="Transparent" BorderThickness="0"
+                         SelectionChanged="ListDiffBlocks_SelectionChanged"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="#0F172A" BorderBrush="#334155" BorderThickness="1" CornerRadius="6" Padding="10,4" Margin="0,2" Cursor="Hand">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="65"/>
+                                        <ColumnDefinition Width="120"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="28"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding PageNumber, StringFormat=Page {0}}" Foreground="#60A5FA" FontWeight="Bold" FontSize="12" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Category}" Foreground="#C084FC" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2" Text="{Binding OldText}" Foreground="#FCA5A5" FontWeight="SemiBold" FontSize="12.5" TextTrimming="CharacterEllipsis" ToolTip="{Binding OldText}" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="3" Text="➔" Foreground="#94A3B8" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="4" Text="{Binding NewText}" Foreground="#6EE7B7" FontWeight="SemiBold" FontSize="12.5" TextTrimming="CharacterEllipsis" ToolTip="{Binding NewText}" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </Border>
+
+        <!-- 3. ZONE DE VISUALISATION CÔTE À CÔTE AU MÊME NIVEAU (50% GAUCHE | 50% DROITE SYNCHRONISÉS) -->
+        <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Padding="16,12">
+            <Grid HorizontalAlignment="Stretch" VerticalAlignment="Top">
                 <Grid.LayoutTransform>
                     <ScaleTransform x:Name="MainScaleTransform" ScaleX="1.0" ScaleY="1.0"/>
                 </Grid.LayoutTransform>
 
-                <!-- MODE 1 : CÔTE À CÔTE -->
+                <!-- MODE 1 : CÔTE À CÔTE AU MÊME NIVEAU (2 COLONNES ÉGALES * | *) -->
                 <Grid x:Name="SideBySideView" Visibility="Visible">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="24"/>
-                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Column="0">
-                        <TextBlock Text="ATTENDU (SOURCE)" Foreground="#F87171" FontWeight="Bold" FontSize="13" Margin="0,0,0,8" HorizontalAlignment="Center"/>
-                        <Border Background="White" BorderBrush="#475569" BorderThickness="1" CornerRadius="4">
-                            <Image x:Name="ImgSideSource" Stretch="None"/>
-                        </Border>
-                    </StackPanel>
+                    <!-- DOCUMENT SOURCE (GAUCHE) -->
+                    <Border Grid.Column="0" Background="#1E293B" BorderBrush="#EF4444" BorderThickness="2" CornerRadius="8" Padding="8">
+                        <StackPanel>
+                            <Border Background="#7F1D1D" CornerRadius="5" Padding="10,5" Margin="0,0,0,8">
+                                <TextBlock Text="🔴 DOCUMENT ATTENDU (SOURCE) — Texte supprimé/modifié surligné en ROUGE"
+                                           Foreground="#FECACA" FontWeight="Bold" FontSize="12.5" HorizontalAlignment="Center"/>
+                            </Border>
+                            <Border Background="White" CornerRadius="4">
+                                <Image x:Name="ImgSideSource" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
 
-                    <StackPanel Grid.Column="2">
-                        <TextBlock Text="OBTENU (CIBLE)" Foreground="#34D399" FontWeight="Bold" FontSize="13" Margin="0,0,0,8" HorizontalAlignment="Center"/>
-                        <Border Background="White" BorderBrush="#475569" BorderThickness="1" CornerRadius="4">
-                            <Image x:Name="ImgSideTarget" Stretch="None"/>
-                        </Border>
-                    </StackPanel>
+                    <!-- DOCUMENT TARGET (DROITE - AU MÊME NIVEAU) -->
+                    <Border Grid.Column="2" Background="#1E293B" BorderBrush="#10B981" BorderThickness="2" CornerRadius="8" Padding="8">
+                        <StackPanel>
+                            <Border Background="#064E3B" CornerRadius="5" Padding="10,5" Margin="0,0,0,8">
+                                <TextBlock Text="🟢 DOCUMENT OBTENU (TARGET) — Texte ajouté/modifié surligné en VERT"
+                                           Foreground="#A7F3D0" FontWeight="Bold" FontSize="12.5" HorizontalAlignment="Center"/>
+                            </Border>
+                            <Border Background="White" CornerRadius="4">
+                                <Image x:Name="ImgSideTarget" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
                 </Grid>
 
                 <!-- MODE 2 & 3 : SUPERPOSITION CALQUE / BLINK A-B -->
-                <StackPanel x:Name="OverlayBlinkView" Visibility="Collapsed" HorizontalAlignment="Center">
+                <StackPanel x:Name="OverlayBlinkView" Visibility="Collapsed" HorizontalAlignment="Center" MaxWidth="920">
                     <TextBlock x:Name="OverlayModeLabel" Text="MODE SUPERPOSITION / BLINK" Foreground="#60A5FA" FontWeight="Bold" FontSize="13" Margin="0,0,0,8" HorizontalAlignment="Center"/>
                     <Border Background="White" BorderBrush="#475569" BorderThickness="1" CornerRadius="4">
                         <Grid>
-                            <Image x:Name="ImgOverlaySource" Stretch="None"/>
-                            <Image x:Name="ImgOverlayTarget" Stretch="None" Opacity="0.5"/>
+                            <Image x:Name="ImgOverlaySource" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <Image x:Name="ImgOverlayTarget" Stretch="Uniform" Opacity="0.5" RenderOptions.BitmapScalingMode="HighQuality"/>
                         </Grid>
-                    </Border>
-                </StackPanel>
-
-                <!-- MODE 4 : CARTE THERMIQUE (HEATMAP SSIM) -->
-                <StackPanel x:Name="HeatmapView" Visibility="Collapsed" HorizontalAlignment="Center">
-                    <TextBlock Text="CARTE THERMIQUE DES DIFFÉRENCES (ROUGE/MAGENTA = ÉCART RÉEL)" Foreground="#F43F5E" FontWeight="Bold" FontSize="13" Margin="0,0,0,8" HorizontalAlignment="Center"/>
-                    <Border Background="White" BorderBrush="#475569" BorderThickness="1" CornerRadius="4">
-                        <Image x:Name="ImgHeatmap" Stretch="None"/>
                     </Border>
                 </StackPanel>
             </Grid>
