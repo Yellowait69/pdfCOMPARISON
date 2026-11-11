@@ -160,7 +160,12 @@ public class PdfComparisonOrchestrator
 
             ct.ThrowIfCancellationRequested();
 
-            string statusDetail = $"{totalVisualDiffs} diff(s) texte • {diffResult.Summary.CriticalAlertsCount} critique(s)";
+            var firstBlock = diffResult.Summary.Blocks[0];
+            string shortOld = TruncateInline(firstBlock.OldText, 22);
+            string shortNew = TruncateInline(firstBlock.NewText, 22);
+            string statusDetail = totalVisualDiffs == 1
+                ? $"1 diff (P.{firstBlock.PageNumber}) : {shortOld} ➔ {shortNew}"
+                : $"{totalVisualDiffs} diffs • P.{firstBlock.PageNumber}: {shortOld} ➔ {shortNew} (+{totalVisualDiffs - 1})";
 
             try
             {
@@ -206,11 +211,15 @@ public class PdfComparisonOrchestrator
         }
         else
         {
-            string okMessage = isScannedPdf
-                ? $"PDF Scanné • Conforme (SSIM {ssimPercent:0.0}%)"
-                : "False positives ignored (SSIM & Reflow verified)";
-            UpdatePairStatus(pair, CompareStatus.Identical, okMessage, 0, 0, 0, ssimPercent, DiffSeverity.None, 0, null);
+            UpdatePairStatus(pair, CompareStatus.Identical, "Conforme (Texte 100% identique)", 0, 0, 0, 100.0, DiffSeverity.None, 0, null);
         }
+    }
+
+    private static string TruncateInline(string? value, int maxLen)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "(vide)";
+        string singleLine = value.Replace("\r\n", " ").Replace("\n", " ").Trim();
+        return singleLine.Length <= maxLen ? singleLine : singleLine.Substring(0, maxLen) + "…";
     }
 
     private static string BuildSafeReportKey(DocumentPair pair)

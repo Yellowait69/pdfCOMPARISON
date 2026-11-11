@@ -35,10 +35,16 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
     [GeneratedRegex(@"-?\d{1,3}(?:[\s\u00A0\u202F.]\d{3})*(?:[.,]\d+)?|-?\d+(?:[.,]\d+)?")]
     private static partial Regex NumericValueExtractorRegex();
 
-    [GeneratedRegex(@"\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}\b")]
+    [GeneratedRegex(@"\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}\b|\b\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}\b|\b\d{1,2}\s+(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|januari|februari|maart|april|mei|juni|juli|augustus|september|oktober|november|december|january|february|march|may|june|july|august|october|januar|februar|märz|mai|oktober|dezember)\s+\d{2,4}\b", RegexOptions.IgnoreCase)]
     private static partial Regex DatePatternRegex();
 
-    [GeneratedRegex(@"(?i)\b(prix|pénalité|pénalités|résiliation|ttc|ht|garantie|article|euro|eur|taxe|montant|facture|prime|capital|rachat|versement|taux|frais|rente|police|bénéficiaire|iban|bic|price|penalty|termination|vat|warranty|tax|amount|invoice|bedrag|premie|totaal|kapitaal|kosten|afkoop|storting|overdracht|betaling|rekening|polis|begunstigde|waarborg|belasting|taks|intrest|rendement)\b")]
+    [GeneratedRegex(@"\b(?:[A-Z]{2}\d{2}(?:[\s\u00A0]?[A-Z0-9]{4}){2,7}|FBB_\d{3}-\d{5,}-\d{2}|[A-Z]{2,4}[-_/.]\d{4,}[-_/.]?\d*)\b")]
+    private static partial Regex ReferenceOrIbanRegex();
+
+    [GeneratedRegex(@"-?\d+(?:[.,]\d+)?\s*%")]
+    private static partial Regex PercentagePatternRegex();
+
+    [GeneratedRegex(@"(?i)\b(prix|pénalité|pénalités|résiliation|ttc|ht|garantie|article|euro|eur|taxe|montant|facture|prime|capital|rachat|versement|taux|frais|rente|police|bénéficiaire|décès|invalidité|échéance|franchise|plafond|iban|bic|price|penalty|termination|vat|warranty|tax|amount|invoice|claim|deductible|beneficiary|bedrag|premie|totaal|kapitaal|kosten|afkoop|storting|overdracht|betaling|rekening|polis|begunstigde|waarborg|belasting|taks|intrest|rendement|overlijden|invaliditeit|vervaldag|franchise|prämie|betrag|steuer|kündigung|leistung|vertrag)\b")]
     private static partial Regex DefaultCriticalKeywordRegex();
 
     [GeneratedRegex(@"[\p{L}\p{N}]+")]
@@ -86,6 +92,7 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
             .ToList();
 
         var verifiedBlocks = new List<DiffSummaryBlock>();
+        var verifiedPageNumbers = new HashSet<int>();
 
         foreach (int pageNum in affectedPages)
         {
@@ -97,6 +104,7 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
             var trgClusters = BuildConsecutiveDiffClusters(pageTrgLines);
 
             bool[] usedTrg = new bool[trgClusters.Count];
+            int countBeforePage = verifiedBlocks.Count;
 
             // Appairage des blocs consécutifs situés au même niveau vertical (Y) sur la page
             for (int i = 0; i < srcClusters.Count; i++)
@@ -126,23 +134,38 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
                     }
 
                     string combinedTrgDiffText = string.Join(Environment.NewLine, matchedTrgIndices.Select(idx => trgClusters[idx].DiffOnlyText));
-                    TryAddVerifiedBlock(
+                    bool accepted = TryAddVerifiedBlock(
                         verifiedBlocks,
                         pageNum,
                         sCluster.DiffOnlyText,
                         combinedTrgDiffText,
                         sCluster.ContextBefore,
                         sCluster.ContextAfter);
+
+                    if (!accepted)
+                    {
+                        // Supprimer les surlignages visuels correspondant à un faux-positif rejeté
+                        RemoveClusterHighlights(confirmedHighlights.SourceRed, pageNum, sCluster.MinY, sCluster.MaxY);
+                        foreach (int idx in matchedTrgIndices)
+                        {
+                            RemoveClusterHighlights(confirmedHighlights.TargetRed, pageNum, trgClusters[idx].MinY, trgClusters[idx].MaxY);
+                        }
+                    }
                 }
                 else
                 {
-                    TryAddVerifiedBlock(
+                    bool accepted = TryAddVerifiedBlock(
                         verifiedBlocks,
                         pageNum,
                         sCluster.DiffOnlyText,
                         string.Empty,
                         sCluster.ContextBefore,
                         sCluster.ContextAfter);
+
+                    if (!accepted)
+                    {
+                        RemoveClusterHighlights(confirmedHighlights.SourceRed, pageNum, sCluster.MinY, sCluster.MaxY);
+                    }
                 }
             }
 
@@ -151,15 +174,29 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
             {
                 if (usedTrg[j]) continue;
                 var tCluster = trgClusters[j];
-                TryAddVerifiedBlock(
+                bool accepted = TryAddVerifiedBlock(
                     verifiedBlocks,
                     pageNum,
                     string.Empty,
                     tCluster.DiffOnlyText,
                     tCluster.ContextBefore,
                     tCluster.ContextAfter);
+
+                if (!accepted)
+                {
+                    RemoveClusterHighlights(confirmedHighlights.TargetRed, pageNum, tCluster.MinY, tCluster.MaxY);
+                }
+            }
+
+            if (verifiedBlocks.Count > countBeforePage)
+            {
+                verifiedPageNumbers.Add(pageNum);
             }
         }
+
+        // Nettoyage final des pages où toutes les différences étaient de faux-positifs
+        confirmedHighlights.SourceRed.RemoveAll(l => !verifiedPageNumbers.Contains(l.PageNumber));
+        confirmedHighlights.TargetRed.RemoveAll(l => !verifiedPageNumbers.Contains(l.PageNumber));
 
         // Fusionner les blocs consécutifs sur la même page si l'un est une suppression pure et le suivant un ajout pur
         verifiedBlocks = MergeAdjacentDeleteInsertBlocksOnSamePage(verifiedBlocks);
@@ -167,7 +204,15 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         return verifiedBlocks;
     }
 
-    private void TryAddVerifiedBlock(
+    private static void RemoveClusterHighlights(List<LetterLoc> highlightsList, int pageNum, decimal minY, decimal maxY)
+    {
+        highlightsList.RemoveAll(l =>
+            l.PageNumber == pageNum &&
+            l.BaselineY >= minY - 8.0m &&
+            l.BaselineY <= maxY + 8.0m);
+    }
+
+    private bool TryAddVerifiedBlock(
         List<DiffSummaryBlock> verifiedBlocks,
         int pageNumber,
         string oldText,
@@ -175,7 +220,7 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         string ctxBefore,
         string ctxAfter)
     {
-        // Élaguer tout préfixe ou suffixe de mots identiques pour n'afficher QUE ce qui est différent à l'œil nu
+        // Élaguer tout préfixe, suffixe ou séquence centrale de mots identiques pour n'afficher QUE ce qui est différent à l'œil nu
         var (diffOldOnly, diffNewOnly, updatedBefore, updatedAfter) = TrimCommonPrefixAndSuffixWords(
             oldText,
             newText,
@@ -188,13 +233,13 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         // Si le texte alphanumérique sans espaces/ponctuations est identique, ce n'est PAS une vraie différence de texte
         if (string.Equals(cleanOld, cleanNew, StringComparison.Ordinal))
         {
-            return;
+            return false;
         }
 
         var changedTokens = ExtractActuallyChangedTokens(diffOldOnly, diffNewOnly);
         if (changedTokens.Count == 0)
         {
-            return;
+            return false;
         }
 
         var block = new DiffSummaryBlock
@@ -214,10 +259,11 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         // Si la différence n'est qu'un formatage numérique de valeur strictement égale (ex: "1 000,00" vs "1.000,00") ou formatage mineur sans changement de mot
         if (block.Category == "Formatage Numérique" || block.Category == "Formatage")
         {
-            return;
+            return false;
         }
 
         verifiedBlocks.Add(block);
+        return true;
     }
 
     private static (string DiffOld, string DiffNew, string CtxBefore, string CtxAfter) TrimCommonPrefixAndSuffixWords(
@@ -274,6 +320,11 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
             string prefixStr = string.Join(" ", removedPrefix);
             finalBefore = string.IsNullOrWhiteSpace(finalBefore) ? prefixStr : $"{finalBefore} {prefixStr}";
         }
+        if (!string.IsNullOrWhiteSpace(finalBefore))
+        {
+            var bw = finalBefore.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (bw.Length > 5) finalBefore = string.Join(" ", bw.Skip(bw.Length - 5));
+        }
 
         string finalAfter = ctxAfter ?? string.Empty;
         if (removedSuffix.Count > 0)
@@ -281,12 +332,115 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
             string suffixStr = string.Join(" ", removedSuffix);
             finalAfter = string.IsNullOrWhiteSpace(finalAfter) ? suffixStr : $"{suffixStr} {finalAfter}";
         }
+        if (!string.IsNullOrWhiteSpace(finalAfter))
+        {
+            var aw = finalAfter.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (aw.Length > 4) finalAfter = string.Join(" ", aw.Take(4));
+        }
+
+        // Si le bloc restant contient plusieurs mots avec des séquences centrales identiques (>= 2 mots communs au milieu),
+        // remplacer les mots identiques centraux par "…" pour ne laisser visible que ce qui diffère à l'œil nu
+        var (collapsedOld, collapsedNew) = CollapseMiddleUnchangedWords(oldWords, newWords);
 
         return (
-            string.Join(" ", oldWords),
-            string.Join(" ", newWords),
+            collapsedOld,
+            collapsedNew,
             finalBefore.Trim(),
             finalAfter.Trim());
+    }
+
+    private static (string CollapsedOld, string CollapsedNew) CollapseMiddleUnchangedWords(List<string> oldWords, List<string> newWords)
+    {
+        int m = oldWords.Count;
+        int n = newWords.Count;
+
+        if (m < 3 || n < 3 || m > 60 || n > 60)
+        {
+            return (string.Join(" ", oldWords), string.Join(" ", newWords));
+        }
+
+        int[,] dp = new int[m + 1, n + 1];
+        for (int i = m - 1; i >= 0; i--)
+        {
+            string cOld = PdfLayoutSanitizerService.CleanWord(oldWords[i]);
+            for (int j = n - 1; j >= 0; j--)
+            {
+                string cNew = PdfLayoutSanitizerService.CleanWord(newWords[j]);
+                if (!string.IsNullOrEmpty(cOld) && string.Equals(cOld, cNew, StringComparison.Ordinal))
+                {
+                    dp[i, j] = 1 + dp[i + 1, j + 1];
+                }
+                else
+                {
+                    dp[i, j] = Math.Max(dp[i + 1, j], dp[i, j + 1]);
+                }
+            }
+        }
+
+        if (dp[0, 0] < 2)
+        {
+            return (string.Join(" ", oldWords), string.Join(" ", newWords));
+        }
+
+        bool[] oldCommon = new bool[m];
+        bool[] newCommon = new bool[n];
+        int x = 0, y = 0;
+        while (x < m && y < n)
+        {
+            string cOld = PdfLayoutSanitizerService.CleanWord(oldWords[x]);
+            string cNew = PdfLayoutSanitizerService.CleanWord(newWords[y]);
+            if (!string.IsNullOrEmpty(cOld) && string.Equals(cOld, cNew, StringComparison.Ordinal))
+            {
+                oldCommon[x] = true;
+                newCommon[y] = true;
+                x++;
+                y++;
+            }
+            else if (dp[x + 1, y] >= dp[x, y + 1])
+            {
+                x++;
+            }
+            else
+            {
+                y++;
+            }
+        }
+
+        return (BuildCollapsedString(oldWords, oldCommon), BuildCollapsedString(newWords, newCommon));
+    }
+
+    private static string BuildCollapsedString(List<string> words, bool[] isCommon)
+    {
+        var outTokens = new List<string>(words.Count);
+        int i = 0;
+        while (i < words.Count)
+        {
+            if (!isCommon[i])
+            {
+                outTokens.Add(words[i]);
+                i++;
+            }
+            else
+            {
+                int runStart = i;
+                while (i < words.Count && isCommon[i]) i++;
+                int runLen = i - runStart;
+
+                // Si >= 2 mots consécutifs au milieu sont identiques, les résumer par "…"
+                if (runLen >= 2)
+                {
+                    if (outTokens.Count > 0 && outTokens[^1] != "…")
+                    {
+                        outTokens.Add("…");
+                    }
+                }
+                else
+                {
+                    outTokens.Add(words[runStart]);
+                }
+            }
+        }
+        return string.Join(" ", outTokens);
     }
 
     private List<DiffSummaryBlock> MergeAdjacentDeleteInsertBlocksOnSamePage(List<DiffSummaryBlock> blocks)
@@ -468,12 +622,25 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
                     var sortedW = l.Words.OrderBy(w => w.Letters[0].GlyphRectangle.BottomLeft.X).ToList();
                     var fullSb = new StringBuilder();
                     double lastRightX = -1000;
+                    double lastLeftX = -1000;
+                    string lastWordText = string.Empty;
 
                     var wordEntries = new List<(string Text, bool IsHighlighted)>(sortedW.Count);
 
                     foreach (var w in sortedW)
                     {
                         double leftX = w.Letters[0].GlyphRectangle.BottomLeft.X;
+
+                        // Ignorer les mots superposés en double (effet Faux-Gras vectoriel dans le PDF)
+                        if (Math.Abs(leftX - lastLeftX) <= 2.5 &&
+                            string.Equals(w.Text, lastWordText, StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
+                        lastLeftX = leftX;
+                        lastWordText = w.Text;
+
                         if (fullSb.Length > 0 && leftX - lastRightX > 1.5)
                         {
                             fullSb.Append(' ');
@@ -481,18 +648,29 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
                         fullSb.Append(w.Text);
                         lastRightX = w.Letters[^1].GlyphRectangle.TopRight.X;
 
-                        bool wordHasHighlight = false;
+                        int highlightedLettersCount = 0;
                         foreach (var let in w.Letters)
                         {
                             var key = (pageNum, Math.Round((decimal)let.GlyphRectangle.BottomLeft.X, 1), Math.Round((decimal)let.Location.Y, 1));
                             if (confirmedHighlightSet.Contains(key))
                             {
-                                wordHasHighlight = true;
-                                break;
+                                highlightedLettersCount++;
                             }
                         }
 
-                        wordEntries.Add((w.Text, wordHasHighlight));
+                        if (highlightedLettersCount == 0)
+                        {
+                            wordEntries.Add((w.Text, false));
+                        }
+                        else if (highlightedLettersCount == w.Letters.Count)
+                        {
+                            wordEntries.Add((w.Text, true));
+                        }
+                        else
+                        {
+                            // Si seule une partie d'un mot composé (ex: "Police:123456") est surlignée, séparer la partie inchangée de la partie modifiée
+                            AppendPartiallyHighlightedWordSegments(w.Letters, pageNum, confirmedHighlightSet, wordEntries);
+                        }
                     }
 
                     int firstDiffIdx = wordEntries.FindIndex(x => x.IsHighlighted);
@@ -513,11 +691,12 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
 
                         if (firstDiffIdx > 0)
                         {
-                            sameLinePrefix = string.Join(" ", wordEntries.Take(firstDiffIdx).Select(x => x.Text)).Trim();
+                            int startTake = Math.Max(0, firstDiffIdx - 5);
+                            sameLinePrefix = string.Join(" ", wordEntries.Skip(startTake).Take(firstDiffIdx - startTake).Select(x => x.Text)).Trim();
                         }
                         if (lastDiffIdx + 1 < wordEntries.Count)
                         {
-                            sameLineSuffix = string.Join(" ", wordEntries.Skip(lastDiffIdx + 1).Select(x => x.Text)).Trim();
+                            sameLineSuffix = string.Join(" ", wordEntries.Skip(lastDiffIdx + 1).Take(4).Select(x => x.Text)).Trim();
                         }
                     }
 
@@ -536,11 +715,17 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
 
                 for (int i = 0; i < orderedPageLines.Count; i++)
                 {
-                    string prevLineText = i > 0 ? orderedPageLines[i - 1].ReadableText : string.Empty;
-                    string nextLineText = i + 1 < orderedPageLines.Count ? orderedPageLines[i + 1].ReadableText : string.Empty;
+                    if (!string.IsNullOrWhiteSpace(orderedPageLines[i].SameLinePrefixContext))
+                    {
+                        orderedPageLines[i].ContextBefore = orderedPageLines[i].SameLinePrefixContext;
+                    }
+                    else if (i > 0 && !string.IsNullOrWhiteSpace(orderedPageLines[i - 1].ReadableText))
+                    {
+                        var prevWords = orderedPageLines[i - 1].ReadableText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        orderedPageLines[i].ContextBefore = string.Join(" ", prevWords.Skip(Math.Max(0, prevWords.Length - 4)));
+                    }
 
-                    orderedPageLines[i].ContextBefore = string.Join(" ", new[] { prevLineText, orderedPageLines[i].SameLinePrefixContext }.Where(s => !string.IsNullOrWhiteSpace(s)));
-                    orderedPageLines[i].ContextAfter = string.Join(" ", new[] { orderedPageLines[i].SameLineSuffixContext, nextLineText }.Where(s => !string.IsNullOrWhiteSpace(s)));
+                    orderedPageLines[i].ContextAfter = orderedPageLines[i].SameLineSuffixContext;
                     result.Add(orderedPageLines[i]);
                 }
             }
@@ -578,6 +763,73 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         }
 
         return result;
+    }
+
+    private static void AppendPartiallyHighlightedWordSegments(
+        IReadOnlyList<UglyToad.PdfPig.Content.Letter> letters,
+        int pageNum,
+        HashSet<(int Page, decimal X, decimal Y)> confirmedHighlightSet,
+        List<(string Text, bool IsHighlighted)> wordEntries)
+    {
+        if (letters == null || letters.Count == 0) return;
+
+        // S'il y a un séparateur de mot composé (':', ';', '(', ')', '[', ']'), découper au séparateur
+        int splitIdx = -1;
+        for (int i = 0; i < letters.Count; i++)
+        {
+            string val = letters[i].Value ?? string.Empty;
+            if (val is ":" or ";" or "(" or ")" or "[" or "]")
+            {
+                splitIdx = i;
+                break;
+            }
+        }
+
+        if (splitIdx != -1)
+        {
+            var leftPart = new StringBuilder();
+            bool leftHighlighted = false;
+            for (int i = 0; i <= splitIdx; i++)
+            {
+                leftPart.Append(letters[i].Value);
+                var key = (pageNum, Math.Round((decimal)letters[i].GlyphRectangle.BottomLeft.X, 1), Math.Round((decimal)letters[i].Location.Y, 1));
+                if (confirmedHighlightSet.Contains(key)) leftHighlighted = true;
+            }
+            if (leftPart.Length > 0) wordEntries.Add((leftPart.ToString(), leftHighlighted));
+
+            var rightPart = new StringBuilder();
+            bool rightHighlighted = false;
+            for (int i = splitIdx + 1; i < letters.Count; i++)
+            {
+                rightPart.Append(letters[i].Value);
+                var key = (pageNum, Math.Round((decimal)letters[i].GlyphRectangle.BottomLeft.X, 1), Math.Round((decimal)letters[i].Location.Y, 1));
+                if (confirmedHighlightSet.Contains(key)) rightHighlighted = true;
+            }
+            if (rightPart.Length > 0) wordEntries.Add((rightPart.ToString(), rightHighlighted));
+            return;
+        }
+
+        // Sinon, regrouper les lettres consécutives ayant le même état de surlignage
+        var sb = new StringBuilder(letters.Count);
+        bool currentHi = confirmedHighlightSet.Contains((pageNum, Math.Round((decimal)letters[0].GlyphRectangle.BottomLeft.X, 1), Math.Round((decimal)letters[0].Location.Y, 1)));
+
+        for (int i = 0; i < letters.Count; i++)
+        {
+            var let = letters[i];
+            bool isHi = confirmedHighlightSet.Contains((pageNum, Math.Round((decimal)let.GlyphRectangle.BottomLeft.X, 1), Math.Round((decimal)let.Location.Y, 1)));
+            if (isHi != currentHi && sb.Length > 0)
+            {
+                wordEntries.Add((sb.ToString(), currentHi));
+                sb.Clear();
+                currentHi = isHi;
+            }
+            sb.Append(let.Value);
+        }
+
+        if (sb.Length > 0)
+        {
+            wordEntries.Add((sb.ToString(), currentHi));
+        }
     }
 
     public static List<string> ExtractActuallyChangedTokens(string? oldText, string? newText)
@@ -627,6 +879,28 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
             block.Category = "Date";
             block.Severity = DiffSeverity.Critical;
         }
+        else if (ReferenceOrIbanRegex().IsMatch(fullText))
+        {
+            block.Category = "Référence / Police";
+            block.Severity = DiffSeverity.Critical;
+        }
+        else if (PercentagePatternRegex().IsMatch(fullText))
+        {
+            if (TryComputeFinancialDelta(block.OldText, block.NewText, out decimal pctDelta, out _, out bool isSamePct))
+            {
+                if (isSamePct)
+                {
+                    block.Category = "Formatage Numérique";
+                    block.Severity = DiffSeverity.Minor;
+                    return;
+                }
+                string sign = pctDelta > 0 ? "+" : "";
+                block.FinancialDelta = string.Create(CultureInfo.InvariantCulture, $"Δ {sign}{pctDelta:0.##} pt");
+            }
+
+            block.Category = "Taux / %";
+            block.Severity = DiffSeverity.Critical;
+        }
         else if (AmountOrNumberRegex().IsMatch(combinedChanged))
         {
             if (TryComputeFinancialDelta(block.OldText, block.NewText, out _, out string deltaFormatted, out bool isSameNumericValue))
@@ -650,7 +924,12 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         }
         else if (changedTokens.Count > 0)
         {
-            block.Category = "Texte";
+            block.Category = block.Type switch
+            {
+                ChangeType.Inserted => "Texte Ajouté",
+                ChangeType.Deleted => "Texte Supprimé",
+                _ => "Texte Modifié"
+            };
             block.Severity = DiffSeverity.Major;
         }
         else

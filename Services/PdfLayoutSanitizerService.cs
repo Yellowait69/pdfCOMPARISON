@@ -29,20 +29,23 @@ public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
                 case 'ﬀ': sb.Append("ff"); break;
                 case 'ﬃ': sb.Append("ffi"); break;
                 case 'ﬄ': sb.Append("ffl"); break;
+                case 'ﬅ': case 'ﬆ': sb.Append("st"); break;
                 case 'œ': sb.Append("oe"); break;
                 case 'æ': sb.Append("ae"); break;
                 case 'Œ': sb.Append("OE"); break;
                 case 'Æ': sb.Append("AE"); break;
+                case 'ĳ': sb.Append("ij"); break;
+                case 'Ĳ': sb.Append("IJ"); break;
 
-                case '•': case '·': case '▪': case '●': case '○': case '\uF0A7': case '\u2023': case '\u2043':
+                case '•': case '·': case '▪': case '●': case '○': case '◦': case '\uF0A7': case '\uF0B7': case '\u2023': case '\u2043':
                     sb.Append(' '); break;
 
-                case '–': case '—': case '−':
+                case '–': case '—': case '−': case '\u2010': case '\u2011': case '\u2012':
                     sb.Append('-'); break;
 
-                case '’': case '‘': case '´': case '`':
+                case '’': case '‘': case '´': case '`': case 'ʼ':
                     sb.Append('\''); break;
-                case '“': case '”': case '«': case '»':
+                case '“': case '”': case '«': case '»': case '„':
                     sb.Append('"'); break;
 
                 default:
@@ -101,54 +104,64 @@ public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
             if (word.Letters == null || word.Letters.Count == 0) continue;
 
             bool isMaskedToken = word.Text.StartsWith('[') && word.Text.EndsWith(']');
-
-            var locs = new List<LetterLoc>(word.Letters.Count);
-            var deduplicatedTextBuilder = new StringBuilder(word.Letters.Count);
-            string lastCleanedGlyph = string.Empty;
-
-            foreach (var letter in word.Letters)
+            if (isMaskedToken)
             {
-                string rawGlyph = letter.Value ?? string.Empty;
-                string cleanedGlyph = CleanWord(rawGlyph);
-
-                var loc = new LetterLoc(letter.GlyphRectangle, word.PageNumber, (decimal)letter.Location.Y, (decimal)letter.PointSize);
-
-                if (locs.Count > 0)
+                var maskedLocs = word.Letters
+                    .Select(l => new LetterLoc(l.GlyphRectangle, word.PageNumber, (decimal)l.Location.Y, (decimal)l.PointSize))
+                    .ToList();
+                string maskedClean = CleanWord(word.Text);
+                if (maskedLocs.Count > 0 && !string.IsNullOrEmpty(maskedClean))
                 {
-                    var last = locs[^1];
-                    decimal dupToleranceX = Math.Max(1.5m, loc.FontSize * 0.18m);
-                    decimal dupToleranceY = Math.Max(1.2m, loc.FontSize * 0.18m);
-
-                    // Filtre les glyphes doublés par effet "Faux-Gras" (double-frappe vectorielle au même endroit)
-                    if (Math.Abs(last.BaselineY - loc.BaselineY) < dupToleranceY &&
-                        Math.Abs((decimal)last.BoundingBox.BottomLeft.X - (decimal)loc.BoundingBox.BottomLeft.X) < dupToleranceX &&
-                        string.Equals(lastCleanedGlyph, cleanedGlyph, StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
+                    list.Add((maskedClean, maskedLocs));
                 }
+                continue;
+            }
 
-                locs.Add(loc);
-                if (!string.IsNullOrEmpty(cleanedGlyph))
+            // Découper les mots collés par deux-points ou point-virgule (ex: "Police:123456" -> "Police" + "123456")
+            // tout en gardant intacts les nombres ("1.250,00"), dates ("10/11/2026") et références ("FBB_006-8459084-73")
+            foreach (var subWordLetters in SplitCompoundWordLetters(word.Letters))
+            {
+                var locs = new List<LetterLoc>(subWordLetters.Count);
+                var deduplicatedTextBuilder = new StringBuilder(subWordLetters.Count);
+                string lastCleanedGlyph = string.Empty;
+
+                foreach (var letter in subWordLetters)
                 {
-                    lastCleanedGlyph = cleanedGlyph;
-                    if (!isMaskedToken)
+                    string rawGlyph = letter.Value ?? string.Empty;
+                    string cleanedGlyph = CleanWord(rawGlyph);
+
+                    var loc = new LetterLoc(letter.GlyphRectangle, word.PageNumber, (decimal)letter.Location.Y, (decimal)letter.PointSize);
+
+                    if (locs.Count > 0)
                     {
+                        var last = locs[^1];
+                        decimal dupToleranceX = Math.Max(1.5m, loc.FontSize * 0.18m);
+                        decimal dupToleranceY = Math.Max(1.2m, loc.FontSize * 0.18m);
+
+                        // Filtre les glyphes doublés par effet "Faux-Gras" (double-frappe vectorielle au même endroit)
+                        if (Math.Abs(last.BaselineY - loc.BaselineY) < dupToleranceY &&
+                            Math.Abs((decimal)last.BoundingBox.BottomLeft.X - (decimal)loc.BoundingBox.BottomLeft.X) < dupToleranceX &&
+                            string.Equals(lastCleanedGlyph, cleanedGlyph, StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+                    }
+
+                    locs.Add(loc);
+                    if (!string.IsNullOrEmpty(cleanedGlyph))
+                    {
+                        lastCleanedGlyph = cleanedGlyph;
                         deduplicatedTextBuilder.Append(cleanedGlyph);
                     }
                 }
-            }
 
-            string cleanText = isMaskedToken ? CleanWord(word.Text) : deduplicatedTextBuilder.ToString();
-            if (string.IsNullOrEmpty(cleanText))
-            {
-                cleanText = CleanWord(word.Text);
-            }
+                string cleanText = deduplicatedTextBuilder.ToString();
 
-            // On ignore les jetons constitués uniquement de ponctuation isolée (".", ":", "-", "•")
-            if (locs.Count > 0 && !string.IsNullOrEmpty(cleanText))
-            {
-                list.Add((cleanText, locs));
+                // On ignore les jetons constitués uniquement de ponctuation isolée (".", ":", "-", "•")
+                if (locs.Count > 0 && !string.IsNullOrEmpty(cleanText))
+                {
+                    list.Add((cleanText, locs));
+                }
             }
         }
 
@@ -162,6 +175,57 @@ public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
         }
 
         return linesList;
+    }
+
+    /// <summary>
+    /// Scinde un mot PDF lorsque deux unités lexicales distinctes sont collées par ':', ';', '(' ou ')'
+    /// (ex: "Montant:1250" -> "Montant" et "1250"), sans jamais couper les heures ("14:30"), les dates ou les montants.
+    /// </summary>
+    private static List<List<UglyToad.PdfPig.Content.Letter>> SplitCompoundWordLetters(IReadOnlyList<UglyToad.PdfPig.Content.Letter> letters)
+    {
+        var result = new List<List<UglyToad.PdfPig.Content.Letter>>();
+        if (letters == null || letters.Count == 0) return result;
+
+        var current = new List<UglyToad.PdfPig.Content.Letter>(letters.Count);
+
+        for (int i = 0; i < letters.Count; i++)
+        {
+            var l = letters[i];
+            string val = l.Value ?? string.Empty;
+
+            bool isSplitSeparator = false;
+            if (val is ":" or ";" or "(" or ")" or "[" or "]")
+            {
+                // Ne pas couper une heure comme "14:30" (chiffre avant et chiffre après ':')
+                bool prevIsDigit = i > 0 && !string.IsNullOrEmpty(letters[i - 1].Value) && char.IsDigit(letters[i - 1].Value[0]);
+                bool nextIsDigit = i + 1 < letters.Count && !string.IsNullOrEmpty(letters[i + 1].Value) && char.IsDigit(letters[i + 1].Value[0]);
+
+                if (!(val == ":" && prevIsDigit && nextIsDigit))
+                {
+                    isSplitSeparator = true;
+                }
+            }
+
+            if (isSplitSeparator)
+            {
+                if (current.Count > 0)
+                {
+                    result.Add(current);
+                    current = new List<UglyToad.PdfPig.Content.Letter>();
+                }
+            }
+            else
+            {
+                current.Add(l);
+            }
+        }
+
+        if (current.Count > 0)
+        {
+            result.Add(current);
+        }
+
+        return result;
     }
 
     private static void GroupWordsSubsetIntoLines(
@@ -309,7 +373,6 @@ public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
     private static bool AllDigitsOrCurrency(string text)
     {
         if (string.IsNullOrEmpty(text)) return false;
-        if (!char.IsDigit(text[0])) return false;
 
         for (int i = 0; i < text.Length; i++)
         {

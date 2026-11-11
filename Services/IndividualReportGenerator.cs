@@ -169,11 +169,13 @@ public class IndividualReportGenerator : IIndividualReportGenerator
             .page-btn { padding: 5px 11px; border-radius: 6px; border: 1px solid #475569; background: #334155; color: #e2e8f0; font-size: 12px; font-weight: 600; cursor: pointer; }
             .page-btn.diff { border-color: #ef4444; background: #7f1d1d; color: #fecaca; }
             .page-btn.active { background: #2563eb; border-color: #60a5fa; color: white; }
-            .diff-strip { background: #1e293b; border-bottom: 1px solid #334155; padding: 8px 18px; max-height: 115px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; }
-            .diff-row { display: grid; grid-template-columns: 75px 1fr 24px 1fr; gap: 10px; align-items: center; background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 5px 10px; font-size: 12.5px; cursor: pointer; }
-            .diff-row:hover { border-color: #3b82f6; }
-            .old-txt { color: #fca5a5; background: rgba(239,68,68,0.12); padding: 4px 8px; border-radius: 4px; word-break: break-word; white-space: pre-line; }
-            .new-txt { color: #6ee7b7; background: rgba(16,185,129,0.12); padding: 4px 8px; border-radius: 4px; word-break: break-word; white-space: pre-line; }
+            .diff-strip { background: #1e293b; border-bottom: 1px solid #334155; padding: 6px 18px; max-height: 135px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+            .diff-row { display: grid; grid-template-columns: 68px 140px 160px 1fr 22px 1fr; gap: 8px; align-items: center; background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+            .diff-row:hover { border-color: #3b82f6; background: #172554; }
+            .cat-pill { background: #312e81; color: #c7d2fe; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .ctx-txt { color: #94a3b8; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .old-txt { color: #fca5a5; background: rgba(239,68,68,0.16); border: 1px solid rgba(239,68,68,0.35); padding: 3px 8px; border-radius: 4px; font-weight: 700; word-break: break-word; white-space: pre-line; }
+            .new-txt { color: #6ee7b7; background: rgba(16,185,129,0.16); border: 1px solid rgba(16,185,129,0.35); padding: 3px 8px; border-radius: 4px; font-weight: 700; word-break: break-word; white-space: pre-line; }
             .viewer-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 10px; background: #0f172a; min-height: 0; }
             .pdf-pane { display: flex; flex-direction: column; background: #1e293b; border-radius: 8px; overflow: hidden; border: 2px solid #334155; min-height: 0; }
             .pdf-pane.source { border-color: #ef4444; }
@@ -209,11 +211,15 @@ public class IndividualReportGenerator : IIndividualReportGenerator
             sb.AppendLine("<div class=\"diff-strip\">");
             foreach (var b in diffBlocks)
             {
+                string shortCtx = !string.IsNullOrWhiteSpace(b.ContextBefore) ? b.ContextBefore : b.ContextAfter;
+                string catLabel = !string.IsNullOrWhiteSpace(b.FinancialDelta) ? $"{b.Category} ({b.FinancialDelta})" : b.Category;
                 sb.AppendLine($"<div class=\"diff-row\" onclick=\"goToPage({b.PageNumber})\" title=\"Cliquer pour afficher la Page {b.PageNumber} côte à côte\">");
                 sb.AppendLine($"<span style=\"font-weight:700; color:#93c5fd;\">Page {b.PageNumber}</span>");
-                sb.AppendLine($"<div class=\"old-txt\"><b>Source :</b> {WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(b.OldText) ? "(Aucun)" : b.OldText)}</div>");
-                sb.AppendLine("<span style=\"text-align:center; color:#94a3b8;\">➔</span>");
-                sb.AppendLine($"<div class=\"new-txt\"><b>Target :</b> {WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(b.NewText) ? "(Supprimé)" : b.NewText)}</div>");
+                sb.AppendLine($"<span class=\"cat-pill\" title=\"{WebUtility.HtmlEncode(catLabel)}\">{WebUtility.HtmlEncode(catLabel)}</span>");
+                sb.AppendLine($"<span class=\"ctx-txt\" title=\"{WebUtility.HtmlEncode(shortCtx)}\">{WebUtility.HtmlEncode(shortCtx)}</span>");
+                sb.AppendLine($"<div class=\"old-txt\">{WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(b.OldText) ? "(Absent)" : b.OldText)}</div>");
+                sb.AppendLine("<span style=\"text-align:center; color:#94a3b8; font-weight:800;\">➔</span>");
+                sb.AppendLine($"<div class=\"new-txt\">{WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(b.NewText) ? "(Supprimé)" : b.NewText)}</div>");
                 sb.AppendLine("</div>");
             }
             sb.AppendLine("</div>");
@@ -250,6 +256,13 @@ public class IndividualReportGenerator : IIndividualReportGenerator
                 fSrc.src = srcBase + '#page=' + pageNum + '&view=FitH';
                 fTrg.src = trgBase + '#page=' + pageNum + '&view=FitH';
             }}
+
+            window.addEventListener('DOMContentLoaded', () => {{
+                const m = window.location.hash.match(/page=(\d+)/i);
+                if (m && m[1]) {{
+                    goToPage(parseInt(m[1], 10));
+                }}
+            }});
         </script>
         </body></html>");
 
