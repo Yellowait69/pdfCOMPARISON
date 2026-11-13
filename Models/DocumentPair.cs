@@ -35,9 +35,12 @@ public partial class DocumentPair : ObservableObject
     private string _productOutputDirectory = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayStatusBadge))]
+    [NotifyPropertyChangedFor(nameof(DisplayDocumentNote))]
     private CompareStatus _status = CompareStatus.Pending;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayDocumentNote))]
     private string _errorMessage = string.Empty;
 
     [ObservableProperty]
@@ -68,7 +71,33 @@ public partial class DocumentPair : ObservableObject
     public ObservableCollection<DiffSummaryBlock> DiffBlocks { get; set; } = new();
 
     [JsonIgnore]
-    public bool HasReport => !string.IsNullOrEmpty(ReportPath);
+    public ObservableCollection<DocumentPair> GroupedSourcePairs { get; } = new();
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ActiveRepresentativePair))]
+    [NotifyPropertyChangedFor(nameof(HasReport))]
+    [property: JsonIgnore]
+    private DocumentPair? _selectedGroupedMember;
+
+    [JsonIgnore]
+    public bool IsGroupedRow => GroupedSourcePairs.Count > 1;
+
+    [JsonIgnore]
+    public int GroupedPdfCount => GroupedSourcePairs.Count > 0 ? GroupedSourcePairs.Count : 1;
+
+    [JsonIgnore]
+    public DocumentPair ActiveRepresentativePair => SelectedGroupedMember ?? (GroupedSourcePairs.Count > 0 ? GroupedSourcePairs[0] : this);
+
+    [JsonIgnore]
+    public string DisplayStatusBadge => Status == CompareStatus.Different && GroupedPdfCount > 1
+        ? $"Different ({GroupedPdfCount} PDF)"
+        : Status.ToString();
+
+    [JsonIgnore]
+    public string ProductGroupKey => HasProductTag ? DisplayProductBadge : "Lot Principal";
+
+    [JsonIgnore]
+    public bool HasReport => !string.IsNullOrEmpty(ActiveRepresentativePair.ReportPath);
 
     [JsonIgnore]
     public bool HasProductTag => !string.IsNullOrWhiteSpace(ProductName);
@@ -76,10 +105,38 @@ public partial class DocumentPair : ObservableObject
     [JsonIgnore]
     public string DisplayProductBadge => HasProductTag
         ? (string.IsNullOrWhiteSpace(Channel) ? ProductName : $"{Channel} • {ProductName}")
-        : "Standard";
+        : "Lot Principal";
 
     [JsonIgnore]
     public string FileNameOnly => string.IsNullOrWhiteSpace(SourcePath) ? MatchKey : Path.GetFileName(SourcePath);
+
+    [JsonIgnore]
+    public string DisplayDocumentNote
+    {
+        get
+        {
+            if (Status == CompareStatus.Different && DiffBlocks.Count > 0)
+            {
+                var b = DiffBlocks[0];
+                string oldS = string.IsNullOrWhiteSpace(b.OldText) ? "(vide)" : b.OldText.Replace("\r\n", " ").Replace("\n", " ").Trim();
+                if (oldS.Length > 26) oldS = oldS.Substring(0, 26) + "…";
+                string newS = string.IsNullOrWhiteSpace(b.NewText) ? "(vide)" : b.NewText.Replace("\r\n", " ").Replace("\n", " ").Trim();
+                if (newS.Length > 26) newS = newS.Substring(0, 26) + "…";
+                string moreDiffs = DiffBlocks.Count > 1 ? $" (+{DiffBlocks.Count - 1} diff)" : string.Empty;
+
+                if (IsGroupedRow)
+                {
+                    string filesPreview = string.Join(", ", System.Linq.Enumerable.Select(System.Linq.Enumerable.Take(GroupedSourcePairs, 2), p => p.FileNameOnly));
+                    string extra = GroupedSourcePairs.Count > 2 ? $" +{GroupedSourcePairs.Count - 2} autres" : string.Empty;
+                    return $"P.{b.PageNumber} : {oldS} ➔ {newS}{moreDiffs}  •  ({filesPreview}{extra})";
+                }
+
+                return $"P.{b.PageNumber} : {oldS} ➔ {newS}{moreDiffs}  •  {FileNameOnly}";
+            }
+
+            return SourcePath;
+        }
+    }
 
     public DocumentPair()
     {

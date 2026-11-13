@@ -35,6 +35,9 @@ public class DiffSummaryBlock
     public string NewText { get; set; } = string.Empty;
     public string ContextAfter { get; set; } = string.Empty;
     public ChangeType Type { get; set; }
+    public int OccurrenceCount { get; set; } = 1;
+    public string PagesLabel { get; set; } = string.Empty;
+    public List<string> ImpactedDocuments { get; set; } = new();
 
     [JsonIgnore]
     public byte[]? SourceImage { get; set; }
@@ -44,6 +47,20 @@ public class DiffSummaryBlock
 
     [JsonIgnore]
     public bool HasFinancialDelta => !string.IsNullOrWhiteSpace(FinancialDelta);
+
+    [JsonIgnore]
+    public bool IsMultiPdfGrouped => OccurrenceCount > 1;
+
+    [JsonIgnore]
+    public string DisplayPageLabel => !string.IsNullOrWhiteSpace(PagesLabel) ? PagesLabel : $"Page {PageNumber}";
+
+    [JsonIgnore]
+    public string OccurrenceBadgeText => OccurrenceCount > 1 ? $"{OccurrenceCount} PDF regroupés" : string.Empty;
+
+    [JsonIgnore]
+    public string ImpactedDocumentsTooltip => ImpactedDocuments.Count > 0
+        ? $"Présent dans {ImpactedDocuments.Count} PDF :\n• " + string.Join("\n• ", ImpactedDocuments)
+        : string.Empty;
 
     [JsonIgnore]
     public string ChangeTypeLabel => Type switch
@@ -70,7 +87,18 @@ public class DocumentDiffSummary
 
     public string Language { get; init; } = string.Empty;
 
+    public string Channel { get; init; } = string.Empty;
+
+    public string ProductName { get; init; } = string.Empty;
+
+    public string RawFileName { get; init; } = string.Empty;
+
     public string ReportFileName { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string ProductGroupKey => !string.IsNullOrWhiteSpace(ProductName)
+        ? (string.IsNullOrWhiteSpace(Channel) ? ProductName : $"{Channel} • {ProductName}")
+        : "Lot Principal";
 
     public double OverallSsimScore { get; set; } = 1.0;
 

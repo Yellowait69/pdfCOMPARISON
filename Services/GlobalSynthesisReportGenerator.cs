@@ -69,26 +69,19 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
             System.Diagnostics.Debug.WriteLine($"CSV/JSON Export warning: {ex.Message}");
         }
 
-        // 3. Génération du Rapport PDF Global de Synthèse (Format Court, Direct & Tabulaire dès la Page 1)
+        // 3. Génération du Rapport PDF Global de Synthèse (Regroupé par Code Produit, sans doublons)
         string reportPath = Path.Combine(outputDiffDir, "Global_Synthesis_Report.pdf");
+
+        var productGroups = ProductDifferenceGroupingService.GroupSummariesByProduct(summaries);
+        if (productGroups.Count == 0) return;
 
         var builder = new PdfDocumentBuilder();
         var (font, fontBold) = _drawingService.LoadFonts(builder);
 
-        var impactedDocs = summaries
-            .Where(s => s.Blocks.Count > 0)
-            .OrderByDescending(s => s.CriticalAlertsCount)
-            .ThenBy(s =>
-            {
-                var match = FileSuffixNumberRegex().Match(s.DocumentName ?? string.Empty);
-                return match.Success && int.TryParse(match.Groups[1].Value, out int num) ? num : int.MaxValue;
-            })
-            .ThenBy(s => s.DocumentName)
-            .ToList();
-
-        int totalDocs = impactedDocs.Count;
-        int totalChanges = impactedDocs.Sum(s => s.Blocks.Count);
-        int criticalAlerts = impactedDocs.Sum(s => s.Blocks.Count(b => b.Severity == DiffSeverity.Critical));
+        int totalProducts = productGroups.Count;
+        int totalDocs = productGroups.Sum(g => g.ImpactedDocsCount);
+        int totalUniqueChanges = productGroups.Sum(g => g.UniqueDifferences.Count);
+        int criticalAlerts = productGroups.Sum(g => g.CriticalUniqueDiffsCount);
 
         decimal pageWidth = 842m;
         decimal pageHeight = 595m;
@@ -103,73 +96,80 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
 
         _drawingService.DrawTextLines(
             page,
-            "SYNTHESE DIRECTE DES DIFFERENCES DE TEXTE",
+            "SYNTHESE DES DIFFERENCES REGROUPEES PAR CODE PRODUIT",
             yPos - 10m,
             margin + 12m,
-            90,
+            95,
             255, 255, 255,
             fontBold);
 
-        string statsSummary = $"Genere le {DateTime.Now:dd/MM/yyyy a HH:mm}   |   Documents avec ecarts : {totalDocs}   |   Differences : {totalChanges}   |   Critiques : {criticalAlerts}";
+        string statsSummary = $"Genere le {DateTime.Now:dd/MM/yyyy a HH:mm}  |  Produits : {totalProducts}  |  Differences uniques : {totalUniqueChanges}  |  PDF impactes : {totalDocs}  |  Critiques : {criticalAlerts}";
         _drawingService.DrawTextLines(
             page,
             statsSummary,
             yPos - 25m,
             margin + 12m,
-            120,
+            135,
             148, 163, 184,
             font);
 
         yPos -= 50m;
 
         decimal colMetaX = margin + 4m;
-        decimal colSourceX = 210m;
-        decimal colTargetX = 515m;
-        int maxCharsMeta = 28;
-        int maxCharsTextCol = 46;
+        decimal colSourceX = 220m;
+        decimal colTargetX = 520m;
+        int maxCharsMeta = 30;
+        int maxCharsTextCol = 45;
 
-        foreach (var doc in impactedDocs)
+        foreach (var prodGroup in productGroups)
         {
-            if (yPos < margin + 75m)
+            if (yPos < margin + 85m)
             {
                 page = builder.AddPage((double)pageWidth, (double)pageHeight);
                 yPos = pageHeight - margin;
             }
 
-            // En-tête du document + entêtes de colonnes
+            // En-tête du Code Produit + entêtes de colonnes
             page.SetTextAndFillColor(226, 232, 240);
             page.DrawRectangle(new PdfPoint((double)margin, (double)(yPos - 16m)), pageWidth - (margin * 2m), 20m, 0m, true);
 
-            string docHeader = $"DOCUMENT : {doc.DocumentName}   ({doc.Blocks.Count} difference(s))";
-            _drawingService.DrawTextLines(page, docHeader, yPos - 3m, colMetaX, 110, 15, 23, 42, fontBold);
+            string prodHeader = $"CODE PRODUIT : {prodGroup.ProductGroupKey}   ({prodGroup.UniqueDifferences.Count} difference(s) unique(s) sur {prodGroup.ImpactedDocsCount} PDF)";
+            _drawingService.DrawTextLines(page, prodHeader, yPos - 3m, colMetaX, 115, 15, 23, 42, fontBold);
             yPos -= 24m;
 
-            _drawingService.DrawTextLines(page, "PAGE / CATEGORIE", yPos, colMetaX, 30, 100, 116, 139, fontBold);
+            _drawingService.DrawTextLines(page, "PAGE / REGROUPEMENT", yPos, colMetaX, 32, 100, 116, 139, fontBold);
             _drawingService.DrawTextLines(page, "ATTENDU (SOURCE)", yPos, colSourceX, 40, 185, 28, 28, fontBold);
             _drawingService.DrawTextLines(page, "OBTENU (TARGET)", yPos, colTargetX, 40, 5, 150, 105, fontBold);
             yPos -= 14m;
 
-            foreach (var block in doc.Blocks)
+            foreach (var diffItem in prodGroup.UniqueDifferences)
             {
+                var block = diffItem.Block;
                 string oldTxt = string.IsNullOrWhiteSpace(block.OldText) ? "(Absent)" : block.OldText.Replace("\r\n", " | ").Replace("\n", " | ");
                 string newTxt = string.IsNullOrWhiteSpace(block.NewText) ? "(Supprime)" : block.NewText.Replace("\r\n", " | ").Replace("\n", " | ");
 
                 int estLines = Math.Max(1, Math.Max(oldTxt.Length, newTxt.Length) / maxCharsTextCol + 1);
-                decimal rowHeight = Math.Max(22m, estLines * 12m + 8m);
+                decimal rowHeight = Math.Max(36m, estLines * 13m + 24m);
 
                 if (yPos - rowHeight < margin)
                 {
                     page = builder.AddPage((double)pageWidth, (double)pageHeight);
                     yPos = pageHeight - margin;
 
-                    _drawingService.DrawTextLines(page, $"DOCUMENT (suite) : {doc.DocumentName}", yPos, colMetaX, 110, 15, 23, 42, fontBold);
+                    _drawingService.DrawTextLines(page, $"CODE PRODUIT (suite) : {prodGroup.ProductGroupKey}", yPos, colMetaX, 115, 15, 23, 42, fontBold);
                     yPos -= 18m;
                 }
 
                 string deltaInfo = !string.IsNullOrWhiteSpace(block.FinancialDelta) ? $" ({block.FinancialDelta})" : string.Empty;
-                string metaLine = $"P.{block.PageNumber} - {block.Category}{deltaInfo}";
+                string metaLine = $"{diffItem.PagesCompactLabel} - {block.Category}{deltaInfo}";
 
                 decimal yMeta = _drawingService.DrawTextLines(page, metaLine, yPos, colMetaX, maxCharsMeta, 30, 58, 138, fontBold);
+
+                string occLabel = diffItem.ImpactedDocs.Count > 1
+                    ? $"Regroupe : {diffItem.ImpactedDocs.Count} PDF identiques"
+                    : "1 PDF concerne";
+                yMeta = _drawingService.DrawTextLines(page, occLabel, yMeta, colMetaX, maxCharsMeta, 37, 99, 235, fontBold);
+
                 if (!string.IsNullOrWhiteSpace(block.ContextBefore))
                 {
                     yMeta = _drawingService.DrawTextLines(page, block.ContextBefore, yMeta, colMetaX, maxCharsMeta, 120, 130, 145, font);
@@ -178,7 +178,17 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                 decimal yLeft = _drawingService.DrawTextLines(page, oldTxt, yPos, colSourceX, maxCharsTextCol, 185, 28, 28, fontBold);
                 decimal yRight = _drawingService.DrawTextLines(page, newTxt, yPos, colTargetX, maxCharsTextCol, 5, 150, 105, fontBold);
 
-                yPos = Math.Min(yMeta, Math.Min(yLeft, yRight)) - 4m;
+                yPos = Math.Min(yMeta, Math.Min(yLeft, yRight)) - 2m;
+
+                // Liste compacte des PDF regroupés sous la différence unique
+                int docCount = diffItem.ImpactedDocs.Count;
+                string docsLine = docCount > 1
+                    ? $"PDF regroupes ({docCount}) : " + string.Join(", ", diffItem.ImpactedDocs.Take(4).Select(d => d.DisplayFileName)) +
+                      (docCount > 4 ? $" (+{docCount - 4} autre(s))" : string.Empty)
+                    : $"Document : {diffItem.ImpactedDocs.FirstOrDefault()?.DisplayFileName ?? string.Empty}";
+
+                yPos = _drawingService.DrawTextLines(page, docsLine, yPos, colMetaX, 122, 100, 116, 139, font);
+                yPos -= 2m;
 
                 page.SetStrokeColor(226, 232, 240);
                 page.DrawLine(new PdfPoint((double)margin, (double)(yPos + 2m)), new PdfPoint((double)(pageWidth - margin), (double)(yPos + 2m)), 0.6m);
@@ -203,24 +213,31 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
         Directory.CreateDirectory(outputDiffDir);
         string csvPath = Path.Combine(outputDiffDir, "Global_Audit_Report.csv");
 
-        var sb = new StringBuilder();
-        sb.AppendLine("Document;Canal / Produit;Page;Severite;Categorie;Ecart;Repere / Contexte;Attendu (Source);Obtenu (Target);Rapport Individuel");
+        var productGroups = ProductDifferenceGroupingService.GroupSummariesByProduct(summaries);
 
-        foreach (var doc in summaries.Where(s => s.Blocks.Count > 0).OrderByDescending(s => s.CriticalAlertsCount).ThenBy(s => s.DocumentName))
+        var sb = new StringBuilder();
+        sb.AppendLine("Canal / Produit;Nb PDF Regroupes;Pages;Severite;Categorie;Ecart;Repere / Contexte;Attendu (Source);Obtenu (Target);Documents Regroupes;Rapport Exemple");
+
+        foreach (var prod in productGroups)
         {
-            foreach (var b in doc.Blocks)
+            foreach (var item in prod.UniqueDifferences)
             {
+                var b = item.Block;
                 string shortCtx = !string.IsNullOrWhiteSpace(b.ContextBefore) ? b.ContextBefore : b.ContextAfter;
-                sb.Append(EscapeCsvField(doc.DocumentName)).Append(';')
-                  .Append(EscapeCsvField(doc.Language)).Append(';')
-                  .Append(b.PageNumber).Append(';')
+                string docsJoined = string.Join(" | ", item.ImpactedDocs.Select(d => d.DisplayFileName));
+                string sampleReport = item.ImpactedDocs.FirstOrDefault()?.ReportFileName ?? string.Empty;
+
+                sb.Append(EscapeCsvField(prod.ProductGroupKey)).Append(';')
+                  .Append(item.ImpactedDocs.Count).Append(';')
+                  .Append(EscapeCsvField(item.PagesCompactLabel)).Append(';')
                   .Append(EscapeCsvField(b.SeverityLabel)).Append(';')
                   .Append(EscapeCsvField(b.Category)).Append(';')
                   .Append(EscapeCsvField(b.FinancialDelta)).Append(';')
                   .Append(EscapeCsvField(shortCtx)).Append(';')
                   .Append(EscapeCsvField(b.OldText)).Append(';')
                   .Append(EscapeCsvField(b.NewText)).Append(';')
-                  .AppendLine(EscapeCsvField(doc.ReportFileName));
+                  .Append(EscapeCsvField(docsJoined)).Append(';')
+                  .AppendLine(EscapeCsvField(sampleReport));
             }
         }
 
@@ -231,31 +248,34 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
     private void ExportCiJsonSummary(IReadOnlyCollection<DocumentDiffSummary> summaries, string outputDiffDir)
     {
         string jsonPath = Path.Combine(outputDiffDir, "Global_CI_Summary.json");
-        var impacted = summaries.Where(s => s.Blocks.Count > 0).ToList();
+        var productGroups = ProductDifferenceGroupingService.GroupSummariesByProduct(summaries);
         var payload = new
         {
             GeneratedAtUtc = DateTime.UtcNow,
             ProfileUsed = _configService?.ActiveProfile.ProfileName ?? "Default",
-            ImpactedDocumentsCount = impacted.Count,
-            TotalDifferencesCount = impacted.Sum(s => s.Blocks.Count),
-            TotalCriticalCount = impacted.Sum(s => s.CriticalAlertsCount),
-            Documents = impacted.Select(s => new
+            ImpactedProductsCount = productGroups.Count,
+            ImpactedDocumentsCount = productGroups.Sum(g => g.ImpactedDocsCount),
+            TotalUniqueDifferencesCount = productGroups.Sum(g => g.UniqueDifferences.Count),
+            TotalCriticalUniqueCount = productGroups.Sum(g => g.CriticalUniqueDiffsCount),
+            Products = productGroups.Select(p => new
             {
-                s.DocumentName,
-                s.Language,
-                s.CriticalAlertsCount,
-                MaxSeverity = s.MaxSeverity.ToString(),
-                s.ReportFileName,
-                Differences = s.Blocks.Select(b => new
+                p.ProductGroupKey,
+                p.Channel,
+                p.ProductName,
+                p.ImpactedDocsCount,
+                p.CriticalUniqueDiffsCount,
+                UniqueDifferences = p.UniqueDifferences.Select(u => new
                 {
-                    b.PageNumber,
-                    Type = b.ChangeTypeLabel,
-                    Severity = b.SeverityLabel,
-                    b.Category,
-                    b.FinancialDelta,
-                    Context = !string.IsNullOrWhiteSpace(b.ContextBefore) ? b.ContextBefore : b.ContextAfter,
-                    b.OldText,
-                    b.NewText
+                    Pages = u.PagesCompactLabel,
+                    ImpactedPdfCount = u.ImpactedDocs.Count,
+                    Type = u.Block.ChangeTypeLabel,
+                    Severity = u.Block.SeverityLabel,
+                    u.Block.Category,
+                    u.Block.FinancialDelta,
+                    Context = !string.IsNullOrWhiteSpace(u.Block.ContextBefore) ? u.Block.ContextBefore : u.Block.ContextAfter,
+                    u.Block.OldText,
+                    u.Block.NewText,
+                    ImpactedDocuments = u.ImpactedDocs.Select(d => d.DisplayFileName)
                 })
             })
         };

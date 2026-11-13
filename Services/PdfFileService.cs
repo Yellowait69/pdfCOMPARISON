@@ -35,6 +35,11 @@ public partial class PdfFileService
     {
         var pairs = new List<DocumentPair>();
 
+        if (string.IsNullOrWhiteSpace(productName))
+        {
+            TryInferChannelAndProductFromPaths(sourcePathOrDir, targetPathOrDir, ref channel, ref productName);
+        }
+
         bool isSourceFile = File.Exists(sourcePathOrDir) && sourcePathOrDir.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
         bool isTargetFile = File.Exists(targetPathOrDir) && targetPathOrDir.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
 
@@ -262,5 +267,59 @@ public partial class PdfFileService
             return (match.Groups.Count > 1 ? match.Groups[1].Value : match.Value).ToUpperInvariant();
         }
         return null;
+    }
+
+    private static void TryInferChannelAndProductFromPaths(
+        string sourcePathOrDir,
+        string targetPathOrDir,
+        ref string channel,
+        ref string productName)
+    {
+        foreach (string rawPath in new[] { sourcePathOrDir, targetPathOrDir })
+        {
+            if (string.IsNullOrWhiteSpace(rawPath)) continue;
+
+            string dirPath = File.Exists(rawPath)
+                ? (Path.GetDirectoryName(rawPath) ?? string.Empty)
+                : rawPath;
+
+            var segments = dirPath
+                .Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries)
+                .ToArray();
+
+            for (int i = 0; i < segments.Length; i++)
+            {
+                if ((string.Equals(segments[i], "Bank", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(segments[i], "Broker", StringComparison.OrdinalIgnoreCase)) &&
+                    i + 1 < segments.Length &&
+                    !IsGenericSubfolderName(segments[i + 1]))
+                {
+                    channel = string.Equals(segments[i], "Bank", StringComparison.OrdinalIgnoreCase) ? "Bank" : "Broker";
+                    productName = segments[i + 1];
+                    return;
+                }
+            }
+
+            for (int i = segments.Length - 1; i >= 0; i--)
+            {
+                if (segments[i].StartsWith("SP.", StringComparison.OrdinalIgnoreCase))
+                {
+                    productName = segments[i];
+                    return;
+                }
+            }
+        }
+    }
+
+    private static bool IsGenericSubfolderName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return true;
+        if (Regex.IsMatch(name, @"^20\d{2}_R\d{1,2}$", RegexOptions.IgnoreCase)) return true;
+
+        return name.Equals("Source", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals("Target", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals("Output", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals("Attendu", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals("Obtenu", StringComparison.OrdinalIgnoreCase);
     }
 }

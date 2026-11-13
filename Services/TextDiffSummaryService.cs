@@ -201,6 +201,9 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         // Fusionner les blocs consécutifs sur la même page si l'un est une suppression pure et le suivant un ajout pur
         verifiedBlocks = MergeAdjacentDeleteInsertBlocksOnSamePage(verifiedBlocks);
 
+        // Dédupliquer toute différence strictement identique répétée dans le même PDF
+        verifiedBlocks = ProductDifferenceGroupingService.DeduplicateBlocksWithinDocument(verifiedBlocks);
+
         return verifiedBlocks;
     }
 
@@ -631,8 +634,9 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
                     {
                         double leftX = w.Letters[0].GlyphRectangle.BottomLeft.X;
 
-                        // Ignorer les mots superposés en double (effet Faux-Gras vectoriel dans le PDF)
-                        if (Math.Abs(leftX - lastLeftX) <= 2.5 &&
+                        // Ignorer uniquement les mots réellement superposés en double (effet Faux-Gras vectoriel dans le PDF)
+                        if (leftX < lastRightX - 0.5 &&
+                            Math.Abs(leftX - lastLeftX) <= 1.5 &&
                             string.Equals(w.Text, lastWordText, StringComparison.Ordinal))
                         {
                             continue;
@@ -809,7 +813,31 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
             return;
         }
 
-        // Sinon, regrouper les lettres consécutives ayant le même état de surlignage
+        // Pour un mot simple sans séparateur composé, vérifier s'il n'y a qu'une coupure nette préfixe/suffixe (<= 1 transition).
+        // S'il y a >= 2 transitions (ex: lettre non surlignée coincée au milieu d'un nombre), garder le mot entier intact pour ne jamais le tronquer.
+        int transitions = 0;
+        bool prevState = confirmedHighlightSet.Contains((pageNum, Math.Round((decimal)letters[0].GlyphRectangle.BottomLeft.X, 1), Math.Round((decimal)letters[0].Location.Y, 1)));
+        var fullWordSb = new StringBuilder(letters.Count);
+        fullWordSb.Append(letters[0].Value);
+
+        for (int i = 1; i < letters.Count; i++)
+        {
+            fullWordSb.Append(letters[i].Value);
+            bool state = confirmedHighlightSet.Contains((pageNum, Math.Round((decimal)letters[i].GlyphRectangle.BottomLeft.X, 1), Math.Round((decimal)letters[i].Location.Y, 1)));
+            if (state != prevState)
+            {
+                transitions++;
+                prevState = state;
+            }
+        }
+
+        if (transitions >= 2)
+        {
+            wordEntries.Add((fullWordSb.ToString(), true));
+            return;
+        }
+
+        // Sinon (0 ou 1 transition : préfixe ou suffixe élagué), regrouper les lettres consécutives ayant le même état de surlignage
         var sb = new StringBuilder(letters.Count);
         bool currentHi = confirmedHighlightSet.Contains((pageNum, Math.Round((decimal)letters[0].GlyphRectangle.BottomLeft.X, 1), Math.Round((decimal)letters[0].Location.Y, 1)));
 

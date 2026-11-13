@@ -123,7 +123,7 @@ public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
             {
                 var locs = new List<LetterLoc>(subWordLetters.Count);
                 var deduplicatedTextBuilder = new StringBuilder(subWordLetters.Count);
-                string lastCleanedGlyph = string.Empty;
+                UglyToad.PdfPig.Content.Letter? prevRawLetter = null;
 
                 foreach (var letter in subWordLetters)
                 {
@@ -132,25 +132,29 @@ public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
 
                     var loc = new LetterLoc(letter.GlyphRectangle, word.PageNumber, (decimal)letter.Location.Y, (decimal)letter.PointSize);
 
-                    if (locs.Count > 0)
+                    if (prevRawLetter != null && !string.IsNullOrEmpty(rawGlyph))
                     {
-                        var last = locs[^1];
-                        decimal dupToleranceX = Math.Max(1.5m, loc.FontSize * 0.18m);
-                        decimal dupToleranceY = Math.Max(1.2m, loc.FontSize * 0.18m);
+                        decimal dupToleranceX = Math.Max(0.45m, loc.FontSize * 0.06m);
+                        decimal dupToleranceY = Math.Max(0.80m, loc.FontSize * 0.10m);
+                        double prevWidth = prevRawLetter.GlyphRectangle.Width;
+                        bool boxesOverlap = prevWidth <= 0.2 ||
+                                            letter.GlyphRectangle.BottomLeft.X < prevRawLetter.GlyphRectangle.TopRight.X - (prevWidth * 0.40);
 
-                        // Filtre les glyphes doublés par effet "Faux-Gras" (double-frappe vectorielle au même endroit)
-                        if (Math.Abs(last.BaselineY - loc.BaselineY) < dupToleranceY &&
-                            Math.Abs((decimal)last.BoundingBox.BottomLeft.X - (decimal)loc.BoundingBox.BottomLeft.X) < dupToleranceX &&
-                            string.Equals(lastCleanedGlyph, cleanedGlyph, StringComparison.Ordinal))
+                        // Filtre uniquement les vrais glyphes doublés par effet "Faux-Gras" (double-frappe vectorielle superposée au même endroit)
+                        // sans jamais comparer à travers un point/ponctuation (ex: "0404.494.849") ni manger deux lettres étroites consécutives ("ll", "11")
+                        if (boxesOverlap &&
+                            Math.Abs((decimal)prevRawLetter.Location.Y - (decimal)letter.Location.Y) <= dupToleranceY &&
+                            Math.Abs((decimal)prevRawLetter.Location.X - (decimal)letter.Location.X) <= dupToleranceX &&
+                            string.Equals(prevRawLetter.Value, rawGlyph, StringComparison.Ordinal))
                         {
                             continue;
                         }
                     }
 
+                    prevRawLetter = letter;
                     locs.Add(loc);
                     if (!string.IsNullOrEmpty(cleanedGlyph))
                     {
-                        lastCleanedGlyph = cleanedGlyph;
                         deduplicatedTextBuilder.Append(cleanedGlyph);
                     }
                 }
@@ -301,10 +305,12 @@ public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
             var curr = sortedWords[i];
 
             decimal prevLeft = (decimal)prev.Letters[0].BoundingBox.BottomLeft.X;
+            decimal prevRight = (decimal)prev.Letters[^1].BoundingBox.TopRight.X;
             decimal currLeft = (decimal)curr.Letters[0].BoundingBox.BottomLeft.X;
-            decimal toleranceX = Math.Max(3.0m, prev.Letters[0].FontSize * 0.35m);
+            decimal toleranceX = Math.Max(1.5m, prev.Letters[0].FontSize * 0.18m);
 
-            if (Math.Abs(currLeft - prevLeft) <= toleranceX &&
+            if (currLeft < prevRight - 0.5m &&
+                Math.Abs(currLeft - prevLeft) <= toleranceX &&
                 string.Equals(prev.CleanText, curr.CleanText, StringComparison.Ordinal))
             {
                 continue;

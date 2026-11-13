@@ -61,6 +61,9 @@ public class PdfDiffAnalyzer
             {
                 DocumentName = fullDocTitle,
                 Language = lang,
+                Channel = pair.Channel ?? string.Empty,
+                ProductName = pair.ProductName ?? string.Empty,
+                RawFileName = rawDocName,
                 OverallSsimScore = 1.0
             }
         };

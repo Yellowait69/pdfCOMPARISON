@@ -465,7 +465,8 @@ public partial class TidesCampaignService : ITidesCampaignService
     }
 
     /// <summary>
-    /// Génère un fichier récapitulatif CSV directement dans le dossier &lt;Release&gt;\Output de chaque produit traité.
+    /// Génère un fichier récapitulatif CSV directement dans le dossier &lt;Release&gt;\Output de chaque produit traité,
+    /// en regroupant les différences identiques du code produit pour qu'elles n'apparaissent qu'une seule fois.
     /// </summary>
     public void ExportPerProductSummaries(IEnumerable<DocumentPair> allPairs)
     {
@@ -481,24 +482,32 @@ public partial class TidesCampaignService : ITidesCampaignService
                 Directory.CreateDirectory(productOutputDir);
                 string csvPath = Path.Combine(productOutputDir, "Summary_PDFComparatorPro.csv");
 
-                var sb = new StringBuilder();
-                sb.AppendLine("Canal;Produit;Release;Document;Statut;Score SSIM (%);Nb Differences;Alertes Critiques;Page;Severite;Categorie;Texte Source (Attendu);Texte Target (Obtenu);Rapport PDF");
+                var groupPairs = group.ToList();
+                var summaries = ProductDifferenceGroupingService.BuildSummariesFromPairs(groupPairs);
+                var groupedProducts = ProductDifferenceGroupingService.GroupSummariesByProduct(summaries);
 
-                foreach (var p in group)
+                var sb = new StringBuilder();
+                sb.AppendLine("Canal;Produit;Release;Nb PDF Regroupes;Documents Concernes;Statut;Pages;Severite;Categorie;Texte Source (Attendu);Texte Target (Obtenu);Rapport Exemple");
+
+                string sampleRelease = groupPairs.FirstOrDefault()?.ReleaseName ?? string.Empty;
+
+                foreach (var prod in groupedProducts)
                 {
-                    if (p.DiffBlocks.Count == 0)
+                    foreach (var diffItem in prod.UniqueDifferences)
                     {
-                        sb.AppendLine($"\"{p.Channel}\";\"{p.ProductName}\";\"{p.ReleaseName}\";\"{p.FileNameOnly}\";\"{p.Status}\";\"{p.SsimScore:0.00}\";{p.DiffCount};{p.CriticalCount};1;\"Conforme\";\"Aucune\";\"\";\"\";\"{p.ReportPath}\"");
+                        var b = diffItem.Block;
+                        string docsList = string.Join(" | ", diffItem.ImpactedDocs.Select(d => d.DisplayFileName)).Replace("\"", "\"\"");
+                        string oldClean = (b.OldText ?? "").Replace("\r", " ").Replace("\n", " ").Replace("\"", "\"\"");
+                        string newClean = (b.NewText ?? "").Replace("\r", " ").Replace("\n", " ").Replace("\"", "\"\"");
+                        string sampleRep = (diffItem.ImpactedDocs.FirstOrDefault()?.ReportFileName ?? "").Replace("\"", "\"\"");
+
+                        sb.AppendLine($"\"{prod.Channel}\";\"{prod.ProductName}\";\"{sampleRelease}\";{diffItem.ImpactedDocs.Count};\"{docsList}\";\"Different\";\"{diffItem.PagesCompactLabel}\";\"{b.SeverityLabel}\";\"{b.Category}\";\"{oldClean}\";\"{newClean}\";\"{sampleRep}\"");
                     }
-                    else
-                    {
-                        foreach (var b in p.DiffBlocks)
-                        {
-                            string oldClean = (b.OldText ?? "").Replace("\r", " ").Replace("\n", " ").Replace("\"", "\"\"");
-                            string newClean = (b.NewText ?? "").Replace("\r", " ").Replace("\n", " ").Replace("\"", "\"\"");
-                            sb.AppendLine($"\"{p.Channel}\";\"{p.ProductName}\";\"{p.ReleaseName}\";\"{p.FileNameOnly}\";\"{p.Status}\";\"{p.SsimScore:0.00}\";{p.DiffCount};{p.CriticalCount};{b.PageNumber};\"{b.SeverityLabel}\";\"{b.Category}\";\"{oldClean}\";\"{newClean}\";\"{p.ReportPath}\"");
-                        }
-                    }
+                }
+
+                foreach (var p in groupPairs.Where(x => x.DiffBlocks.Count == 0))
+                {
+                    sb.AppendLine($"\"{p.Channel}\";\"{p.ProductName}\";\"{p.ReleaseName}\";1;\"{p.FileNameOnly}\";\"{p.Status}\";\"P.1\";\"Conforme\";\"Aucune\";\"\";\"\";\"{p.ReportPath}\"");
                 }
 
                 File.WriteAllText(csvPath, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));

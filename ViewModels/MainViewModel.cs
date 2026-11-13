@@ -87,9 +87,12 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private string _selectedPreset = ConfigurationService.PresetStandard;
 
-    // --- Recherche & Filtrage Rapide ---
+    // --- Recherche, Regroupement Produit & Filtrage Rapide ---
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private string _activeStatusFilter = "ALL";
+
+    [ObservableProperty]
+    private bool _isGroupedByProductDiff = true;
 
     // --- Compteurs KPI de Synthèse Rapide ---
     [ObservableProperty]
@@ -99,6 +102,17 @@ public partial class MainViewModel : ObservableObject
     public bool IsEmptyState => TotalPairsCount == 0;
     [ObservableProperty] private int _identicalPairsCount;
     [ObservableProperty] private int _differentPairsCount;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUniqueDiffsBadge))]
+    [NotifyPropertyChangedFor(nameof(UniqueDiffsBadgeText))]
+    private int _uniqueDiffsCount;
+
+    public bool HasUniqueDiffsBadge => UniqueDiffsCount > 0;
+    public string UniqueDiffsBadgeText => UniqueDiffsCount > 0
+        ? $"{UniqueDiffsCount} diff{(UniqueDiffsCount > 1 ? "s" : "")} unique{(UniqueDiffsCount > 1 ? "s" : "")}"
+        : string.Empty;
+
     [ObservableProperty] private int _criticalPairsCount;
     [ObservableProperty] private int _issuesPairsCount;
 
@@ -112,6 +126,7 @@ public partial class MainViewModel : ObservableObject
     public ComparisonProfile ActiveProfile => _configurationService.ActiveProfile;
 
     public ObservableRangeCollection<DocumentPair> Pairs { get; } = new();
+    public ObservableRangeCollection<DocumentPair> DisplayPairs { get; } = new();
     public ICollectionView FilteredPairsView { get; }
 
     public MainViewModel()
@@ -168,7 +183,7 @@ public partial class MainViewModel : ObservableObject
         }
         _suppressPresetCallback = false;
 
-        FilteredPairsView = CollectionViewSource.GetDefaultView(Pairs);
+        FilteredPairsView = CollectionViewSource.GetDefaultView(DisplayPairs);
         FilteredPairsView.Filter = FilterDocumentPair;
 
         string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -179,6 +194,7 @@ public partial class MainViewModel : ObservableObject
         OutputDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "PDF_DiffReports");
 
         LoadSession();
+        RebuildDisplayPairs();
         RefreshKpiCounters();
     }
 
@@ -201,10 +217,57 @@ public partial class MainViewModel : ObservableObject
         FilteredPairsView.Refresh();
     }
 
+    partial void OnIsGroupedByProductDiffChanged(bool value)
+    {
+        SelectedPair = null;
+        RebuildDisplayPairs();
+        FilteredPairsView.Refresh();
+    }
+
+    [RelayCommand]
+    private void CloseQuickInspector()
+    {
+        SelectedPair = null;
+    }
+
     [RelayCommand]
     private void SetStatusFilter(string filterMode)
     {
         ActiveStatusFilter = string.IsNullOrWhiteSpace(filterMode) ? "ALL" : filterMode.ToUpperInvariant();
+    }
+
+    private void RebuildDisplayPairs(bool forceUngrouped = false)
+    {
+        if (Pairs.Count == 0)
+        {
+            DisplayPairs.Clear();
+            return;
+        }
+
+        if (!forceUngrouped && IsGroupedByProductDiff)
+        {
+            DisplayPairs.ReplaceRange(ProductDifferenceGroupingService.BuildGroupedDisplayPairs(Pairs));
+        }
+        else
+        {
+            DisplayPairs.ReplaceRange(Pairs);
+        }
+    }
+
+    private void RegenerateGlobalReportsSafe()
+    {
+        try
+        {
+            var summaries = ProductDifferenceGroupingService.BuildSummariesFromPairs(Pairs);
+            if (summaries.Count > 0 && !string.IsNullOrWhiteSpace(OutputDirectory))
+            {
+                _globalReportGenerator.GenerateGlobalSynthesisReport(summaries, OutputDirectory);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Report refresh warning: {ex.Message}");
+        }
     }
 
     private bool FilterDocumentPair(object obj)
@@ -227,10 +290,18 @@ public partial class MainViewModel : ObservableObject
         string q = SearchQuery.Trim();
         if (pair.MatchKey.Contains(q, StringComparison.OrdinalIgnoreCase) ||
             pair.SourcePath.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            pair.DisplayDocumentNote.Contains(q, StringComparison.OrdinalIgnoreCase) ||
             pair.ProductName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
             pair.Channel.Contains(q, StringComparison.OrdinalIgnoreCase) ||
             pair.DisplayProductBadge.Contains(q, StringComparison.OrdinalIgnoreCase) ||
             pair.ErrorMessage.Contains(q, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (pair.GroupedSourcePairs.Any(g =>
+            g.MatchKey.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            g.SourcePath.Contains(q, StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }
@@ -246,6 +317,7 @@ public partial class MainViewModel : ObservableObject
         TotalPairsCount = Pairs.Count;
         IdenticalPairsCount = Pairs.Count(p => p.Status == CompareStatus.Identical);
         DifferentPairsCount = Pairs.Count(p => p.Status == CompareStatus.Different);
+        UniqueDiffsCount = ProductDifferenceGroupingService.CountTotalUniqueDifferences(Pairs);
         CriticalPairsCount = Pairs.Count(p => p.Status == CompareStatus.Different && (p.MaxSeverity == DiffSeverity.Critical || p.CriticalCount > 0));
         IssuesPairsCount = Pairs.Count(p => p.Status is CompareStatus.MissingInTarget or CompareStatus.Error);
         OnPropertyChanged(nameof(HasSelectedPairWithDiffs));
@@ -313,8 +385,8 @@ public partial class MainViewModel : ObservableObject
 
                     if (Pairs.Count > 0)
                     {
-                        StatusMessage = $"Session restaurée ({Pairs.Count} documents).";
-                        SelectedPair = Pairs.FirstOrDefault(p => p.Status == CompareStatus.Different) ?? Pairs.FirstOrDefault();
+                        StatusMessage = $"Session restaurée ({Pairs.Count} documents). Cliquez sur une ligne pour ouvrir sa synthèse.";
+                        SelectedPair = null;
                     }
                 }
             }
@@ -326,7 +398,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Action rapide en 1 clic : Approuve manuellement le document sélectionné comme Conforme.
+    /// Action rapide en 1 clic : Approuve manuellement le document (ou groupe de PDF) sélectionné comme Conforme.
     /// </summary>
     [RelayCommand]
     private void ApproveSelectedPair(DocumentPair? pair)
@@ -334,23 +406,60 @@ public partial class MainViewModel : ObservableObject
         var target = pair ?? SelectedPair;
         if (target == null) return;
 
-        target.Status = CompareStatus.Identical;
-        target.DiffCount = 0;
-        target.InsertionsCount = 0;
-        target.DeletionsCount = 0;
-        target.CriticalCount = 0;
-        target.MaxSeverity = DiffSeverity.None;
-        target.SsimScore = 100.0;
-        target.ErrorMessage = "Approuvé manuellement (Validé Conforme)";
-        target.DiffBlocks.Clear();
+        if (target.GroupedSourcePairs.Count > 0)
+        {
+            var approvedSigs = target.DiffBlocks
+                .Select(ProductDifferenceGroupingService.GetBlockSignature)
+                .ToHashSet(StringComparer.Ordinal);
 
+            foreach (var underlying in target.GroupedSourcePairs)
+            {
+                var remaining = underlying.DiffBlocks
+                    .Where(b => !approvedSigs.Contains(ProductDifferenceGroupingService.GetBlockSignature(b)))
+                    .ToList();
+
+                underlying.DiffBlocks.Clear();
+                foreach (var r in remaining) underlying.DiffBlocks.Add(r);
+
+                ApplyRemainingBlocksToPair(underlying, "Approuvé manuellement (Validé Conforme)");
+            }
+        }
+        else
+        {
+            target.DiffBlocks.Clear();
+            ApplyRemainingBlocksToPair(target, "Approuvé manuellement (Validé Conforme)");
+        }
+
+        SelectedPair = null;
+        RebuildDisplayPairs();
         RefreshKpiCounters();
+        RegenerateGlobalReportsSafe();
         SaveSession();
-        StatusMessage = $"Document '{target.MatchKey}' validé manuellement comme Conforme.";
+        StatusMessage = $"'{target.MatchKey}' validé manuellement comme Conforme.";
+    }
+
+    private static void ApplyRemainingBlocksToPair(DocumentPair p, string emptyReason)
+    {
+        p.DiffCount = p.DiffBlocks.Count;
+        p.CriticalCount = p.DiffBlocks.Count(b => b.Severity == DiffSeverity.Critical);
+        p.MaxSeverity = p.DiffBlocks.Count > 0 ? p.DiffBlocks.Max(b => b.Severity) : DiffSeverity.None;
+
+        if (p.DiffBlocks.Count == 0)
+        {
+            p.Status = CompareStatus.Identical;
+            p.InsertionsCount = 0;
+            p.DeletionsCount = 0;
+            p.SsimScore = 100.0;
+            p.ErrorMessage = emptyReason;
+        }
+        else
+        {
+            p.ErrorMessage = $"{p.DiffCount} diff(s) • {p.CriticalCount} critique(s)";
+        }
     }
 
     /// <summary>
-    /// Relance l'analyse complète d'un seul document en ~0.2 seconde (sans relancer tout le lot).
+    /// Relance l'analyse complète d'un document (ou des PDF regroupés de la ligne) avec les règles actuelles.
     /// </summary>
     [RelayCommand]
     private async Task RetestPairAsync(DocumentPair? pair)
@@ -358,8 +467,12 @@ public partial class MainViewModel : ObservableObject
         var target = pair ?? SelectedPair;
         if (target == null || IsProcessing) return;
 
-        if (string.IsNullOrWhiteSpace(target.SourcePath) || string.IsNullOrWhiteSpace(target.TargetPath) ||
-            !File.Exists(target.SourcePath) || !File.Exists(target.TargetPath))
+        var pairsToRetest = target.GroupedSourcePairs.Count > 0
+            ? target.GroupedSourcePairs.ToList()
+            : new List<DocumentPair> { target };
+
+        if (pairsToRetest.Any(p => string.IsNullOrWhiteSpace(p.SourcePath) || string.IsNullOrWhiteSpace(p.TargetPath) ||
+                                   !File.Exists(p.SourcePath) || !File.Exists(p.TargetPath)))
         {
             MessageBox.Show("Les fichiers PDF Source ou Cible de ce document sont introuvables.", "Erreur", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
@@ -368,13 +481,16 @@ public partial class MainViewModel : ObservableObject
         try
         {
             IsProcessing = true;
-            StatusMessage = $"Re-test rapide de '{target.MatchKey}' avec les règles actuelles...";
+            StatusMessage = $"Re-test rapide de '{target.MatchKey}' ({pairsToRetest.Count} PDF) avec les règles actuelles...";
 
-            await _orchestrator.ProcessPairsAsync(new[] { target }, OutputDirectory, new Progress<int>());
+            await _orchestrator.ProcessPairsAsync(pairsToRetest, OutputDirectory, new Progress<int>());
 
+            SelectedPair = null;
+            RebuildDisplayPairs();
             RefreshKpiCounters();
+            RegenerateGlobalReportsSafe();
             SaveSession();
-            StatusMessage = $"Re-test terminé pour '{target.MatchKey}' : {target.Status} ({target.DiffCount} écart(s), SSIM {target.SsimScore:0.0}%).";
+            StatusMessage = $"Re-test terminé pour '{target.MatchKey}' ({pairsToRetest.Count} PDF vérifié(s)).";
         }
         catch (Exception ex)
         {
@@ -392,7 +508,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenVisualInspector(DocumentPair? pair)
     {
-        var target = pair ?? SelectedPair;
+        var target = (pair ?? SelectedPair)?.ActiveRepresentativePair;
         if (target == null || string.IsNullOrWhiteSpace(target.SourcePath) || string.IsNullOrWhiteSpace(target.TargetPath))
             return;
 
@@ -419,7 +535,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Action rapide en 1 clic : Crée une règle Regex d'exclusion à partir d'un bloc de différence et retire l'écart.
+    /// Action rapide en 1 clic : Crée une règle Regex d'exclusion à partir d'un bloc de différence et retire l'écart sur tous les PDF concernés.
     /// </summary>
     [RelayCommand]
     private void IgnoreDiffBlockText(DiffSummaryBlock? block)
@@ -438,30 +554,34 @@ public partial class MainViewModel : ObservableObject
 
         _configurationService.AddQuickIgnoreRegexRule(textToIgnore);
 
-        if (SelectedPair != null && SelectedPair.DiffBlocks.Contains(block))
-        {
-            SelectedPair.DiffBlocks.Remove(block);
-            SelectedPair.DiffCount = SelectedPair.DiffBlocks.Count;
-            SelectedPair.CriticalCount = SelectedPair.DiffBlocks.Count(b => b.Severity == DiffSeverity.Critical);
-            SelectedPair.MaxSeverity = SelectedPair.DiffBlocks.Count > 0
-                ? SelectedPair.DiffBlocks.Max(b => b.Severity)
-                : DiffSeverity.None;
+        string targetSig = ProductDifferenceGroupingService.GetBlockSignature(block);
+        int affectedDocs = 0;
 
-            if (SelectedPair.DiffBlocks.Count == 0)
+        foreach (var p in Pairs.Where(x => x.Status == CompareStatus.Different && x.DiffBlocks.Count > 0))
+        {
+            var matching = p.DiffBlocks
+                .Where(b => ProductDifferenceGroupingService.GetBlockSignature(b) == targetSig)
+                .ToList();
+
+            if (matching.Count > 0)
             {
-                SelectedPair.Status = CompareStatus.Identical;
-                SelectedPair.SsimScore = 100.0;
-                SelectedPair.ErrorMessage = "Conforme (Écart exclu par règle rapide)";
-            }
-            else
-            {
-                SelectedPair.ErrorMessage = $"{SelectedPair.DiffCount} diff(s) • {SelectedPair.CriticalCount} critique(s)";
+                foreach (var m in matching) p.DiffBlocks.Remove(m);
+                ApplyRemainingBlocksToPair(p, "Conforme (Écart exclu par règle rapide)");
+                affectedDocs++;
             }
         }
 
+        RebuildDisplayPairs();
+        if (SelectedPair != null)
+        {
+            string prevKey = SelectedPair.ProductGroupKey;
+            SelectedPair = DisplayPairs.FirstOrDefault(d => d.Status == CompareStatus.Different && d.ProductGroupKey == prevKey);
+        }
+
         RefreshKpiCounters();
+        RegenerateGlobalReportsSafe();
         SaveSession();
-        StatusMessage = $"Règle d'exclusion créée dans le profil actif pour ignorer : \"{(textToIgnore.Length > 40 ? textToIgnore.Substring(0, 40) + "..." : textToIgnore)}\".";
+        StatusMessage = $"Règle d'exclusion créée ({affectedDocs} PDF mis à jour) pour ignorer : \"{(textToIgnore.Length > 40 ? textToIgnore.Substring(0, 40) + "..." : textToIgnore)}\".";
     }
 
     [RelayCommand]
@@ -501,8 +621,8 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenReport(DocumentPair? pair)
     {
-        var target = pair ?? SelectedPair;
-        if (target != null && target.HasReport)
+        var target = (pair ?? SelectedPair)?.ActiveRepresentativePair;
+        if (target != null && !string.IsNullOrEmpty(target.ReportPath))
         {
             string dir = Path.GetDirectoryName(target.ReportPath) ?? string.Empty;
             string stem = Path.GetFileNameWithoutExtension(target.ReportPath);
@@ -535,7 +655,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenSourcePdf(DocumentPair? pair)
     {
-        var target = pair ?? SelectedPair;
+        var target = (pair ?? SelectedPair)?.ActiveRepresentativePair;
         if (target != null && File.Exists(target.SourcePath))
         {
             try
@@ -552,7 +672,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenTargetPdf(DocumentPair? pair)
     {
-        var target = pair ?? SelectedPair;
+        var target = (pair ?? SelectedPair)?.ActiveRepresentativePair;
         if (target != null && !string.IsNullOrEmpty(target.TargetPath) && File.Exists(target.TargetPath))
         {
             try
@@ -649,30 +769,8 @@ public partial class MainViewModel : ObservableObject
         {
             try
             {
-                Directory.CreateDirectory(OutputDirectory);
-                var sb = new StringBuilder();
-                sb.AppendLine("Canal;Produit;Release;Document;Statut;Score SSIM (%);Page;Severite;Categorie;Action;Texte Attendu (Source);Texte Obtenu (Cible);Rapport Individuel");
-
-                foreach (var p in Pairs)
-                {
-                    if (p.DiffBlocks.Count == 0)
-                    {
-                        sb.Append($"\"{p.Channel}\";\"{p.ProductName}\";\"{p.ReleaseName}\";\"{p.MatchKey}\";\"{p.Status}\";\"{p.SsimScore:0.00}\";1;\"Conforme\";\"Aucune\";\"Identique\";\"\";\"\";\"{p.ReportPath}\"")
-                          .AppendLine();
-                    }
-                    else
-                    {
-                        foreach (var b in p.DiffBlocks)
-                        {
-                            string oldClean = (b.OldText ?? "").Replace("\r", " ").Replace("\n", " ").Replace("\"", "\"\"");
-                            string newClean = (b.NewText ?? "").Replace("\r", " ").Replace("\n", " ").Replace("\"", "\"\"");
-                            sb.Append($"\"{p.Channel}\";\"{p.ProductName}\";\"{p.ReleaseName}\";\"{p.MatchKey}\";\"{p.Status}\";\"{p.SsimScore:0.00}\";{b.PageNumber};\"{b.SeverityLabel}\";\"{b.Category}\";\"{b.ChangeTypeLabel}\";\"{oldClean}\";\"{newClean}\";\"{p.ReportPath}\"")
-                              .AppendLine();
-                        }
-                    }
-                }
-
-                File.WriteAllText(csvReportPath, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+                var summaries = ProductDifferenceGroupingService.BuildSummariesFromPairs(Pairs);
+                csvReportPath = _globalReportGenerator.ExportCsvAuditReport(summaries, OutputDirectory);
             }
             catch (Exception ex)
             {
@@ -809,6 +907,7 @@ public partial class MainViewModel : ObservableObject
     {
         IsProcessing = true;
         Pairs.Clear();
+        DisplayPairs.Clear();
         SelectedPair = null;
         ProgressValue = 0;
         ActiveStatusFilter = "ALL";
@@ -831,6 +930,7 @@ public partial class MainViewModel : ObservableObject
                 _cancellationTokenSource.Token);
 
             Pairs.ReplaceRange(matchedPairs);
+            RebuildDisplayPairs(forceUngrouped: true);
             RefreshKpiCounters();
 
             var pairsToProcess = matchedPairs.Where(p => p.Status != CompareStatus.MissingInTarget).ToList();
@@ -875,18 +975,18 @@ public partial class MainViewModel : ObservableObject
                 .ToList();
 
             Pairs.ReplaceRange(sortedCampaignPairs);
+            SelectedPair = null;
+            RebuildDisplayPairs();
             RefreshKpiCounters();
 
-            SelectedPair = Pairs.FirstOrDefault(p => p.Status == CompareStatus.Different) ?? Pairs.FirstOrDefault();
-
-            StatusMessage = $"Campagne TIDES ({releaseName}) terminée ! {DifferentPairsCount} différent(s) ({CriticalPairsCount} critique(s)) sur {ProgressMax} PDF ({bankProductsCount} produit(s) Bank, {brokerProductsCount} Broker).";
+            StatusMessage = $"Campagne TIDES ({releaseName}) terminée ! {UniqueDiffsCount} différence(s) unique(s) sur {DifferentPairsCount} PDF ({CriticalPairsCount} critique(s)) • Cliquez sur une ligne pour voir le détail.";
             SaveSession();
 
             MessageBox.Show(
                 $"Campagne TIDES Life ({releaseName}) terminée avec succès !\n\n" +
                 $"• Produits traités : {bankProductsCount} Bank (en 1er) + {brokerProductsCount} Broker\n" +
                 $"• Documents conformes (100%) : {IdenticalPairsCount}\n" +
-                $"• Documents avec vraies différences : {DifferentPairsCount} (dont {CriticalPairsCount} critique(s))\n" +
+                $"• Différences uniques regroupées par produit : {UniqueDiffsCount} (sur {DifferentPairsCount} PDF, dont {CriticalPairsCount} critique(s))\n" +
                 $"• Fichiers manquants / erreurs : {IssuesPairsCount}\n" +
                 $"• Rapports générés dans : {OutputDirectory}" +
                 (writeToProductOutputs ? $"\n• Copiés également dans chaque dossier <Produit>\\{releaseName}\\Output" : ""),
@@ -896,12 +996,14 @@ public partial class MainViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
+            RebuildDisplayPairs();
             RefreshKpiCounters();
             StatusMessage = "Campagne TIDES annulée par l'utilisateur.";
             MessageBox.Show("La campagne TIDES a été arrêtée.", "Annulé", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         catch (Exception ex)
         {
+            RebuildDisplayPairs();
             RefreshKpiCounters();
             StatusMessage = $"Erreur campagne TIDES : {ex.Message}";
             MessageBox.Show(ex.Message, "Erreur Critique", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -934,6 +1036,7 @@ public partial class MainViewModel : ObservableObject
 
         IsProcessing = true;
         Pairs.Clear();
+        DisplayPairs.Clear();
         SelectedPair = null;
         ProgressValue = 0;
         ActiveStatusFilter = "ALL";
@@ -948,6 +1051,7 @@ public partial class MainViewModel : ObservableObject
             var matchedPairs = await Task.Run(() => _fileService.MatchFiles(SourceDirectory, TargetDirectory), _cancellationTokenSource.Token);
 
             Pairs.ReplaceRange(matchedPairs);
+            RebuildDisplayPairs(forceUngrouped: true);
             RefreshKpiCounters();
 
             var pairsToProcess = matchedPairs.Where(p => p.Status != CompareStatus.MissingInTarget).ToList();
@@ -970,7 +1074,7 @@ public partial class MainViewModel : ObservableObject
 
             await _orchestrator.ProcessPairsAsync(pairsToProcess, OutputDirectory, progress, _cancellationTokenSource.Token);
 
-            StatusMessage = "Tri des résultats par criticité...";
+            StatusMessage = "Regroupement et tri des résultats par criticité...";
 
             var sortedPairs = Pairs
                 .OrderByDescending(p => p.CriticalCount)
@@ -978,17 +1082,17 @@ public partial class MainViewModel : ObservableObject
                 .ToList();
 
             Pairs.ReplaceRange(sortedPairs);
+            SelectedPair = null;
+            RebuildDisplayPairs();
             RefreshKpiCounters();
 
-            SelectedPair = Pairs.FirstOrDefault(p => p.Status == CompareStatus.Different) ?? Pairs.FirstOrDefault();
-
-            StatusMessage = $"Terminé ! {DifferentPairsCount} document(s) différent(s) ({CriticalPairsCount} avec alerte critique) sur {ProgressMax} comparés.";
+            StatusMessage = $"Terminé ! {UniqueDiffsCount} différence(s) unique(s) sur {DifferentPairsCount} document(s) ({CriticalPairsCount} avec alerte critique) • Cliquez sur une ligne pour voir le détail.";
             SaveSession();
 
             MessageBox.Show(
                 $"Comparaison terminée avec succès !\n\n" +
                 $"• Documents identiques : {IdenticalPairsCount}\n" +
-                $"• Documents différents : {DifferentPairsCount} (dont {CriticalPairsCount} critique(s))\n" +
+                $"• Différences uniques regroupées par produit : {UniqueDiffsCount} (sur {DifferentPairsCount} PDF, dont {CriticalPairsCount} critique(s))\n" +
                 $"• Rapports générés : PDF + Synthèse Web (.HTML) + Export Excel (.CSV)",
                 "Comparaison Terminée",
                 MessageBoxButton.OK,
@@ -996,12 +1100,14 @@ public partial class MainViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
+            RebuildDisplayPairs();
             RefreshKpiCounters();
             StatusMessage = "Traitement annulé par l'utilisateur.";
             MessageBox.Show("Le processus de comparaison a été arrêté.", "Annulé", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         catch (Exception ex)
         {
+            RebuildDisplayPairs();
             RefreshKpiCounters();
             StatusMessage = $"Erreur globale : {ex.Message}";
             MessageBox.Show(ex.Message, "Erreur Critique", MessageBoxButton.OK, MessageBoxImage.Error);
