@@ -3,6 +3,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using System.Windows.Data;
 using PDFComparison.Models;
 
@@ -17,65 +18,82 @@ public partial class DocumentationViewModel : ObservableObject
     private DocItem? _selectedDocument;
 
     [ObservableProperty]
-    private string _markdownContent = "Sélectionnez un document dans le menu de gauche pour lire sa description.";
+    private string _markdownContent = string.Empty;
 
-    public ICollectionView GroupedDocuments { get; private set; }
+    public ICollectionView GroupedDocuments { get; }
 
     public DocumentationViewModel()
     {
         LoadDocuments();
         GroupedDocuments = CollectionViewSource.GetDefaultView(Documents);
         GroupedDocuments.GroupDescriptions.Add(new PropertyGroupDescription(nameof(DocItem.Category)));
+        SelectedDocument = Documents.FirstOrDefault();
     }
 
     private void LoadDocuments()
     {
         string docsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Docs");
 
-        if (Directory.Exists(docsPath))
+        if (!Directory.Exists(docsPath))
         {
-            var files = Directory.GetFiles(docsPath, "*.md");
-
-            foreach (var file in files)
-            {
-                string fileName = Path.GetFileNameWithoutExtension(file);
-                Documents.Add(new DocItem
-                {
-                    Title = fileName,
-                    FilePath = file,
-                    Category = DetermineCategory(fileName)
-                });
-            }
-
-            if (Documents.Count == 0)
-            {
-                MarkdownContent = "Le dossier 'Docs' a été trouvé, mais il ne contient aucun fichier Markdown (.md).";
-            }
+            MarkdownContent = "# Guide introuvable\n\nLe dossier `Docs` est absent du répertoire de l'application.";
+            return;
         }
-        else
+
+        var files = Directory.GetFiles(docsPath, "*.md")
+            .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var file in files)
         {
-            MarkdownContent = $"**Erreur :** Le dossier de documentation est introuvable.\n\nVeuillez vérifier qu'un dossier `Docs` existe à l'emplacement suivant et que vos fichiers `.md` sont configurés pour être copiés dans le répertoire de sortie : \n\n`{docsPath}`";
+            string stem = Path.GetFileNameWithoutExtension(file);
+            var (title, subtitle, icon, category) = DescribeGuide(stem, file);
+            Documents.Add(new DocItem
+            {
+                Title = title,
+                Subtitle = subtitle,
+                IconGlyph = icon,
+                FilePath = file,
+                Category = category
+            });
+        }
+
+        if (Documents.Count == 0)
+        {
+            MarkdownContent = "# Aucun guide disponible\n\nLe dossier `Docs` ne contient aucun fichier `.md`.";
         }
     }
 
-    private string DetermineCategory(string fileName)
+    private static (string Title, string Subtitle, string Icon, string Category) DescribeGuide(string stem, string filePath)
     {
-        if (fileName.EndsWith("Service") || fileName.Contains("Orchestrator") || fileName.Contains("Generator") || fileName.Contains("Helper") || fileName.Contains("Analyzer") || fileName.Contains("Sanitizer") || fileName.Contains("Filter"))
-            return "Services (Backend)";
+        if (stem.StartsWith("01_", StringComparison.OrdinalIgnoreCase))
+            return ("1. Démarrage Rapide", "Dossiers, PDF unitaires & filtres", "\uE768", "PRISE EN MAIN");
 
-        if (fileName.EndsWith("ViewModel"))
-            return "ViewModels (Logique)";
+        if (stem.StartsWith("02_", StringComparison.OrdinalIgnoreCase))
+            return ("2. Équipe Testing & Scans Auto", "Boutons personnalisés & partage", "\uE945", "PRISE EN MAIN");
 
-        if (fileName.EndsWith("Window") || fileName.EndsWith("View") || fileName.EndsWith("MainWindow"))
-            return "Vues (UI)";
+        if (stem.StartsWith("03_", StringComparison.OrdinalIgnoreCase))
+            return ("3. Synthèse & Côte à Côte", "Vérification rapide & PDF fusionnés", "\uE9D2", "ANALYSE DES ÉCARTS");
 
-        if (fileName.EndsWith("Converter") || fileName.EndsWith("Behavior"))
-            return "Convertisseurs (WPF)";
+        if (stem.StartsWith("04_", StringComparison.OrdinalIgnoreCase))
+            return ("4. Paramètres, Mail & Règles", "Dossier rapports, mail & exclusions", "\uE713", "PERSONNALISATION");
 
-        if (fileName == "DocItem" || fileName == "DocumentPair" || fileName == "CompareStatus" || fileName == "DiffModels" || fileName == "Models" || fileName == "ComparisonProfile")
-            return "Modèles (Données)";
+        // Fallback : extraire le premier titre Markdown '# ...' si présent
+        try
+        {
+            string? firstHeading = File.ReadLines(filePath)
+                .FirstOrDefault(l => l.TrimStart().StartsWith("# "));
+            if (!string.IsNullOrWhiteSpace(firstHeading))
+            {
+                return (firstHeading.TrimStart('#', ' ').Trim(), "Guide utilisateur", "\uE8A5", "GUIDES");
+            }
+        }
+        catch
+        {
+            // Ignorer
+        }
 
-        return "Général";
+        return (stem.Replace('_', ' '), "Guide utilisateur", "\uE8A5", "GUIDES");
     }
 
     partial void OnSelectedDocumentChanged(DocItem? value)
@@ -88,7 +106,7 @@ public partial class DocumentationViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                MarkdownContent = $"**Erreur lors de la lecture du fichier :**\n\n{ex.Message}";
+                MarkdownContent = $"**Erreur lors de la lecture du guide :**\n\n{ex.Message}";
             }
         }
     }

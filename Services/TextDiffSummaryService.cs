@@ -22,7 +22,11 @@ public interface ITextDiffSummaryService
         List<List<(string CleanText, List<LetterLoc> Letters)>> targetLinesList,
         VisualHighlights confirmedHighlights,
         IReadOnlyList<PdfWordInfo>? rawSourceWords = null,
-        IReadOnlyList<PdfWordInfo>? rawTargetWords = null);
+        IReadOnlyList<PdfWordInfo>? rawTargetWords = null,
+        string? productName = null,
+        string? channel = null,
+        string? sourcePath = null,
+        string? targetPath = null);
 }
 
 public partial class TextDiffSummaryService : ITextDiffSummaryService
@@ -73,12 +77,18 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         List<List<(string CleanText, List<LetterLoc> Letters)>> targetLinesList,
         VisualHighlights confirmedHighlights,
         IReadOnlyList<PdfWordInfo>? rawSourceWords = null,
-        IReadOnlyList<PdfWordInfo>? rawTargetWords = null)
+        IReadOnlyList<PdfWordInfo>? rawTargetWords = null,
+        string? productName = null,
+        string? channel = null,
+        string? sourcePath = null,
+        string? targetPath = null)
     {
         if (confirmedHighlights.SourceRed.Count == 0 && confirmedHighlights.TargetRed.Count == 0)
         {
             return new List<DiffSummaryBlock>();
         }
+
+        string effectiveProduct = ProductCodeHelper.ResolveEffectiveProductCode(productName, channel, sourcePath, targetPath);
 
         var confirmedSrcRects = new HashSet<(int Page, decimal X, decimal Y)>(
             confirmedHighlights.SourceRed.Select(l => (l.PageNumber, Math.Round((decimal)l.BoundingBox.BottomLeft.X, 1), Math.Round(l.BaselineY, 1))));
@@ -137,13 +147,19 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
                     }
 
                     string combinedTrgDiffText = string.Join(Environment.NewLine, matchedTrgIndices.Select(idx => trgClusters[idx].DiffOnlyText));
+                    var combinedBounds = CombineClusterBounds(sCluster, matchedTrgIndices.Select(idx => trgClusters[idx]).ToList());
                     bool accepted = TryAddVerifiedBlock(
                         verifiedBlocks,
                         pageNum,
                         sCluster.DiffOnlyText,
                         combinedTrgDiffText,
                         sCluster.ContextBefore,
-                        sCluster.ContextAfter);
+                        sCluster.ContextAfter,
+                        combinedBounds,
+                        effectiveProduct,
+                        channel,
+                        sourcePath,
+                        targetPath);
 
                     if (!accepted)
                     {
@@ -157,13 +173,19 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
                 }
                 else
                 {
+                    var srcOnlyBounds = ExtractClusterBounds(sCluster);
                     bool accepted = TryAddVerifiedBlock(
                         verifiedBlocks,
                         pageNum,
                         sCluster.DiffOnlyText,
                         string.Empty,
                         sCluster.ContextBefore,
-                        sCluster.ContextAfter);
+                        sCluster.ContextAfter,
+                        srcOnlyBounds,
+                        effectiveProduct,
+                        channel,
+                        sourcePath,
+                        targetPath);
 
                     if (!accepted)
                     {
@@ -177,13 +199,19 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
             {
                 if (usedTrg[j]) continue;
                 var tCluster = trgClusters[j];
+                var trgOnlyBounds = ExtractClusterBounds(tCluster);
                 bool accepted = TryAddVerifiedBlock(
                     verifiedBlocks,
                     pageNum,
                     string.Empty,
                     tCluster.DiffOnlyText,
                     tCluster.ContextBefore,
-                    tCluster.ContextAfter);
+                    tCluster.ContextAfter,
+                    trgOnlyBounds,
+                    effectiveProduct,
+                    channel,
+                    sourcePath,
+                    targetPath);
 
                 if (!accepted)
                 {
@@ -218,13 +246,92 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
             l.BaselineY <= maxY + 8.0m);
     }
 
+    private readonly record struct ClusterGeoBounds(
+        bool HasBounds,
+        double PdfLeft,
+        double PdfBottom,
+        double PdfRight,
+        double PdfTop,
+        double FieldLeft,
+        double FieldBottom,
+        double FieldRight,
+        double FieldTop);
+
+    private static ClusterGeoBounds ExtractClusterBounds(VisualDiffCluster cluster)
+    {
+        if (!cluster.HasBounds) return default;
+        return new ClusterGeoBounds(
+            true,
+            cluster.DiffLeft,
+            cluster.DiffBottom,
+            cluster.DiffRight,
+            cluster.DiffTop,
+            cluster.FieldLeft,
+            cluster.FieldBottom,
+            cluster.FieldRight,
+            cluster.FieldTop);
+    }
+
+    private static ClusterGeoBounds CombineClusterBounds(VisualDiffCluster srcCluster, IReadOnlyList<VisualDiffCluster> trgClusters)
+    {
+        var srcB = ExtractClusterBounds(srcCluster);
+        var trgWithBounds = trgClusters.Where(t => t.HasBounds).ToList();
+
+        if (trgWithBounds.Count == 0) return srcB;
+
+        var trgB = new ClusterGeoBounds(
+            true,
+            trgWithBounds.Min(t => t.DiffLeft),
+            trgWithBounds.Min(t => t.DiffBottom),
+            trgWithBounds.Max(t => t.DiffRight),
+            trgWithBounds.Max(t => t.DiffTop),
+            trgWithBounds.Min(t => t.FieldLeft),
+            trgWithBounds.Min(t => t.FieldBottom),
+            trgWithBounds.Max(t => t.FieldRight),
+            trgWithBounds.Max(t => t.FieldTop));
+
+        if (!srcB.HasBounds) return trgB;
+
+        double dy = Math.Abs(((srcB.FieldBottom + srcB.FieldTop) * 0.5) - ((trgB.FieldBottom + trgB.FieldTop) * 0.5));
+        if (dy <= 22.0)
+        {
+            return new ClusterGeoBounds(
+                true,
+                Math.Min(srcB.PdfLeft, trgB.PdfLeft),
+                Math.Min(srcB.PdfBottom, trgB.PdfBottom),
+                Math.Max(srcB.PdfRight, trgB.PdfRight),
+                Math.Max(srcB.PdfTop, trgB.PdfTop),
+                Math.Min(srcB.FieldLeft, trgB.FieldLeft),
+                Math.Min(srcB.FieldBottom, trgB.FieldBottom),
+                Math.Max(srcB.FieldRight, trgB.FieldRight),
+                Math.Max(srcB.FieldTop, trgB.FieldTop));
+        }
+
+        // Si un reflux plus haut a décalé la ligne verticalement de > 22pt, conserver l'étendue horizontale commune et la position Cible
+        return new ClusterGeoBounds(
+            true,
+            trgB.PdfLeft,
+            trgB.PdfBottom,
+            trgB.PdfRight,
+            trgB.PdfTop,
+            Math.Min(srcB.FieldLeft, trgB.FieldLeft),
+            trgB.FieldBottom,
+            Math.Max(srcB.FieldRight, trgB.FieldRight),
+            trgB.FieldTop);
+    }
+
     private bool TryAddVerifiedBlock(
         List<DiffSummaryBlock> verifiedBlocks,
         int pageNumber,
         string oldText,
         string newText,
         string ctxBefore,
-        string ctxAfter)
+        string ctxAfter,
+        ClusterGeoBounds geoBounds,
+        string? effectiveProduct,
+        string? channel,
+        string? sourcePath,
+        string? targetPath)
     {
         // Élaguer toute mention d'exemplaire technique (ex: exemplaireAG/1JQ3B/FIB16) qui ne doit jamais être marquée comme différence
         string sanitizedOld = string.IsNullOrWhiteSpace(oldText) ? string.Empty : ExemplaireRoutingRegex().Replace(oldText, string.Empty).Trim();
@@ -236,6 +343,8 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
             foreach (var rule in _configService.ActiveProfile.RegexRules)
             {
                 if (!rule.IsEnabled || rule.MinOccurrences > 1 || string.IsNullOrWhiteSpace(rule.Pattern))
+                    continue;
+                if (!rule.AppliesToProduct(effectiveProduct, channel, sourcePath, targetPath))
                     continue;
                 if (!rule.IsUserRule && !string.Equals(rule.ReplacementMask, "[IGNORED_USER]", StringComparison.Ordinal) && !string.IsNullOrEmpty(rule.ReplacementMask))
                     continue;
@@ -276,21 +385,33 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         var block = new DiffSummaryBlock
         {
             PageNumber = pageNumber,
+            ProductCode = effectiveProduct ?? string.Empty,
+            Channel = channel ?? string.Empty,
             Type = (!string.IsNullOrWhiteSpace(diffOldOnly) && !string.IsNullOrWhiteSpace(diffNewOnly))
                 ? ChangeType.Modified
                 : (!string.IsNullOrWhiteSpace(diffNewOnly) ? ChangeType.Inserted : ChangeType.Deleted),
             OldText = diffOldOnly.Trim(),
             NewText = diffNewOnly.Trim(),
             ContextBefore = updatedBefore,
-            ContextAfter = updatedAfter
+            ContextAfter = updatedAfter,
+            HasPdfBounds = geoBounds.HasBounds,
+            PdfLeft = geoBounds.PdfLeft,
+            PdfBottom = geoBounds.PdfBottom,
+            PdfRight = geoBounds.PdfRight,
+            PdfTop = geoBounds.PdfTop,
+            FieldZoneLeft = geoBounds.FieldLeft,
+            FieldZoneBottom = geoBounds.FieldBottom,
+            FieldZoneRight = geoBounds.FieldRight,
+            FieldZoneTop = geoBounds.FieldTop
         };
 
-        // Vérifier si cette différence exacte a été exclue par une règle utilisateur active
+        // Vérifier si cette différence exacte a été exclue par une règle utilisateur active (globale ou du produit courant)
         if (_configService?.ActiveProfile?.RegexRules != null)
         {
             string candidateSig = ProductDifferenceGroupingService.GetBlockSignature(block);
             if (_configService.ActiveProfile.RegexRules.Any(r =>
                     r.IsEnabled &&
+                    r.AppliesToProduct(effectiveProduct, channel, sourcePath, targetPath) &&
                     !string.IsNullOrWhiteSpace(r.IgnoredDiffSignature) &&
                     string.Equals(r.IgnoredDiffSignature, candidateSig, StringComparison.OrdinalIgnoreCase)))
             {
@@ -496,38 +617,72 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         while (i < blocks.Count)
         {
             var curr = blocks[i];
-            if (i + 1 < blocks.Count &&
-                curr.PageNumber == blocks[i + 1].PageNumber &&
-                curr.Type == ChangeType.Deleted &&
-                blocks[i + 1].Type == ChangeType.Inserted)
+            if (i + 1 < blocks.Count)
             {
                 var next = blocks[i + 1];
-                string cleanOld = PdfLayoutSanitizerService.CleanWord(curr.OldText);
-                string cleanNew = PdfLayoutSanitizerService.CleanWord(next.NewText);
+                bool isSamePageDelIns =
+                    curr.PageNumber == next.PageNumber &&
+                    curr.Type == ChangeType.Deleted &&
+                    next.Type == ChangeType.Inserted;
 
-                if (!string.Equals(cleanOld, cleanNew, StringComparison.Ordinal))
+                bool isCrossPageMovedModification =
+                    Math.Abs(curr.PageNumber - next.PageNumber) == 1 &&
+                    ((curr.Type == ChangeType.Deleted && next.Type == ChangeType.Inserted) ||
+                     (curr.Type == ChangeType.Inserted && next.Type == ChangeType.Deleted)) &&
+                    SharesAdjacentContext(curr, next);
+
+                if (isSamePageDelIns || isCrossPageMovedModification)
                 {
-                    var changed = ExtractActuallyChangedTokens(curr.OldText, next.NewText);
-                    if (changed.Count > 0)
+                    var delPart = curr.Type == ChangeType.Deleted ? curr : next;
+                    var insPart = curr.Type == ChangeType.Inserted ? curr : next;
+
+                    string cleanOld = PdfLayoutSanitizerService.CleanWord(delPart.OldText);
+                    string cleanNew = PdfLayoutSanitizerService.CleanWord(insPart.NewText);
+
+                    if (!string.Equals(cleanOld, cleanNew, StringComparison.Ordinal))
                     {
-                        var modBlock = new DiffSummaryBlock
+                        var changed = ExtractActuallyChangedTokens(delPart.OldText, insPart.NewText);
+                        if (changed.Count > 0)
                         {
-                            PageNumber = curr.PageNumber,
-                            Type = ChangeType.Modified,
-                            OldText = curr.OldText,
-                            NewText = next.NewText,
-                            ContextBefore = !string.IsNullOrWhiteSpace(curr.ContextBefore) ? curr.ContextBefore : next.ContextBefore,
-                            ContextAfter = !string.IsNullOrWhiteSpace(next.ContextAfter) ? next.ContextAfter : curr.ContextAfter
-                        };
-                        ClassifyBlockSeverityAndCategory(modBlock, changed);
-                        if (modBlock.Category != "Formatage Numérique" && modBlock.Category != "Formatage")
-                        {
-                            merged.Add(modBlock);
+                            bool hasBounds = delPart.HasPdfBounds || insPart.HasPdfBounds;
+                            var geoSrc = insPart.HasPdfBounds ? insPart : delPart;
+                            bool mergeSamePageGeo = delPart.PageNumber == insPart.PageNumber &&
+                                                    delPart.HasPdfBounds && insPart.HasPdfBounds &&
+                                                    Math.Abs(((delPart.FieldZoneBottom + delPart.FieldZoneTop) * 0.5) - ((insPart.FieldZoneBottom + insPart.FieldZoneTop) * 0.5)) <= 22.0;
+
+                            var modBlock = new DiffSummaryBlock
+                            {
+                                PageNumber = insPart.PageNumber,
+                                PagesLabel = delPart.PageNumber != insPart.PageNumber
+                                    ? $"Page {delPart.PageNumber} ➔ {insPart.PageNumber}"
+                                    : string.Empty,
+                                ProductCode = !string.IsNullOrWhiteSpace(insPart.ProductCode) ? insPart.ProductCode : delPart.ProductCode,
+                                Channel = !string.IsNullOrWhiteSpace(insPart.Channel) ? insPart.Channel : delPart.Channel,
+                                Type = ChangeType.Modified,
+                                OldText = delPart.OldText,
+                                NewText = insPart.NewText,
+                                ContextBefore = !string.IsNullOrWhiteSpace(delPart.ContextBefore) ? delPart.ContextBefore : insPart.ContextBefore,
+                                ContextAfter = !string.IsNullOrWhiteSpace(insPart.ContextAfter) ? insPart.ContextAfter : delPart.ContextAfter,
+                                HasPdfBounds = hasBounds,
+                                PdfLeft = mergeSamePageGeo ? Math.Min(delPart.PdfLeft, insPart.PdfLeft) : geoSrc.PdfLeft,
+                                PdfBottom = mergeSamePageGeo ? Math.Min(delPart.PdfBottom, insPart.PdfBottom) : geoSrc.PdfBottom,
+                                PdfRight = mergeSamePageGeo ? Math.Max(delPart.PdfRight, insPart.PdfRight) : geoSrc.PdfRight,
+                                PdfTop = mergeSamePageGeo ? Math.Max(delPart.PdfTop, insPart.PdfTop) : geoSrc.PdfTop,
+                                FieldZoneLeft = mergeSamePageGeo ? Math.Min(delPart.FieldZoneLeft, insPart.FieldZoneLeft) : geoSrc.FieldZoneLeft,
+                                FieldZoneBottom = mergeSamePageGeo ? Math.Min(delPart.FieldZoneBottom, insPart.FieldZoneBottom) : geoSrc.FieldZoneBottom,
+                                FieldZoneRight = mergeSamePageGeo ? Math.Max(delPart.FieldZoneRight, insPart.FieldZoneRight) : geoSrc.FieldZoneRight,
+                                FieldZoneTop = mergeSamePageGeo ? Math.Max(delPart.FieldZoneTop, insPart.FieldZoneTop) : geoSrc.FieldZoneTop
+                            };
+                            ClassifyBlockSeverityAndCategory(modBlock, changed);
+                            if (modBlock.Category != "Formatage Numérique" && modBlock.Category != "Formatage")
+                            {
+                                merged.Add(modBlock);
+                            }
                         }
                     }
+                    i += 2;
+                    continue;
                 }
-                i += 2;
-                continue;
             }
 
             merged.Add(curr);
@@ -535,6 +690,31 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         }
 
         return merged;
+    }
+
+    private static bool SharesAdjacentContext(DiffSummaryBlock a, DiffSummaryBlock b)
+    {
+        if (!string.IsNullOrWhiteSpace(a.ContextBefore) && !string.IsNullOrWhiteSpace(b.ContextBefore))
+        {
+            string lastA = PdfLayoutSanitizerService.CleanWord(a.ContextBefore.Split(' ', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? string.Empty);
+            string lastB = PdfLayoutSanitizerService.CleanWord(b.ContextBefore.Split(' ', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? string.Empty);
+            if (!string.IsNullOrEmpty(lastA) && string.Equals(lastA, lastB, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(a.ContextAfter) && !string.IsNullOrWhiteSpace(b.ContextAfter))
+        {
+            string firstA = PdfLayoutSanitizerService.CleanWord(a.ContextAfter.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty);
+            string firstB = PdfLayoutSanitizerService.CleanWord(b.ContextAfter.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty);
+            if (!string.IsNullOrEmpty(firstA) && string.Equals(firstA, firstB, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private sealed class ReadableVisualLine
@@ -549,6 +729,15 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         public bool HasDiff { get; set; }
         public string ContextBefore { get; set; } = string.Empty;
         public string ContextAfter { get; set; } = string.Empty;
+        public bool HasBounds { get; init; }
+        public double DiffLeft { get; init; }
+        public double DiffBottom { get; init; }
+        public double DiffRight { get; init; }
+        public double DiffTop { get; init; }
+        public double FieldLeft { get; init; }
+        public double FieldBottom { get; init; }
+        public double FieldRight { get; init; }
+        public double FieldTop { get; init; }
     }
 
     private sealed class VisualDiffCluster
@@ -560,6 +749,15 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         public string DiffOnlyText { get; set; } = string.Empty;
         public string ContextBefore { get; set; } = string.Empty;
         public string ContextAfter { get; set; } = string.Empty;
+        public bool HasBounds { get; init; }
+        public double DiffLeft { get; init; }
+        public double DiffBottom { get; init; }
+        public double DiffRight { get; init; }
+        public double DiffTop { get; init; }
+        public double FieldLeft { get; init; }
+        public double FieldBottom { get; init; }
+        public double FieldRight { get; init; }
+        public double FieldTop { get; init; }
     }
 
     private static List<VisualDiffCluster> BuildConsecutiveDiffClusters(List<ReadableVisualLine> pageLines)
@@ -601,6 +799,7 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
     {
         var first = group[0];
         var last = group[^1];
+        var bounded = group.Where(l => l.HasBounds).ToList();
 
         return new VisualDiffCluster
         {
@@ -609,8 +808,26 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
             MaxY = group.Max(l => l.ReferenceY),
             DiffOnlyText = string.Join(Environment.NewLine, group.Select(l => l.DiffOnlyText.Trim()).Where(t => !string.IsNullOrEmpty(t))),
             ContextBefore = first.ContextBefore,
-            ContextAfter = last.ContextAfter
+            ContextAfter = last.ContextAfter,
+            HasBounds = bounded.Count > 0,
+            DiffLeft = bounded.Count > 0 ? bounded.Min(l => l.DiffLeft) : 0,
+            DiffBottom = bounded.Count > 0 ? bounded.Min(l => l.DiffBottom) : 0,
+            DiffRight = bounded.Count > 0 ? bounded.Max(l => l.DiffRight) : 0,
+            DiffTop = bounded.Count > 0 ? bounded.Max(l => l.DiffTop) : 0,
+            FieldLeft = bounded.Count > 0 ? bounded.Min(l => l.FieldLeft) : 0,
+            FieldBottom = bounded.Count > 0 ? bounded.Min(l => l.FieldBottom) : 0,
+            FieldRight = bounded.Count > 0 ? bounded.Max(l => l.FieldRight) : 0,
+            FieldTop = bounded.Count > 0 ? bounded.Max(l => l.FieldTop) : 0
         };
+    }
+
+    private sealed class LineColumnSpan
+    {
+        public double Left { get; set; }
+        public double Bottom { get; set; }
+        public double Right { get; set; }
+        public double Top { get; set; }
+        public bool HasHighlighted { get; set; }
     }
 
     private static List<ReadableVisualLine> BuildReadableVisualLines(
@@ -670,6 +887,10 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
                     string lastWordText = string.Empty;
 
                     var wordEntries = new List<(string Text, bool IsHighlighted)>(sortedW.Count);
+                    var colSpans = new List<LineColumnSpan>();
+                    double diffMinX = double.MaxValue, diffMinY = double.MaxValue;
+                    double diffMaxX = double.MinValue, diffMaxY = double.MinValue;
+                    bool hasAnyHiBounds = false;
 
                     foreach (var w in sortedW)
                     {
@@ -683,6 +904,54 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
                             continue;
                         }
 
+                        double wLeft = double.MaxValue, wBottom = double.MaxValue;
+                        double wRight = double.MinValue, wTop = double.MinValue;
+                        int highlightedLettersCount = 0;
+
+                        foreach (var let in w.Letters)
+                        {
+                            double lx1 = Math.Min(let.GlyphRectangle.BottomLeft.X, let.GlyphRectangle.TopRight.X);
+                            double lx2 = Math.Max(let.GlyphRectangle.BottomLeft.X, let.GlyphRectangle.TopRight.X);
+                            double ly1 = Math.Min(let.GlyphRectangle.BottomLeft.Y, let.GlyphRectangle.TopRight.Y);
+                            double ly2 = Math.Max(let.GlyphRectangle.BottomLeft.Y, let.GlyphRectangle.TopRight.Y);
+
+                            if (lx1 < wLeft) wLeft = lx1;
+                            if (lx2 > wRight) wRight = lx2;
+                            if (ly1 < wBottom) wBottom = ly1;
+                            if (ly2 > wTop) wTop = ly2;
+
+                            var key = (pageNum, Math.Round((decimal)let.GlyphRectangle.BottomLeft.X, 1), Math.Round((decimal)let.Location.Y, 1));
+                            if (confirmedHighlightSet.Contains(key))
+                            {
+                                highlightedLettersCount++;
+                                hasAnyHiBounds = true;
+                                if (lx1 < diffMinX) diffMinX = lx1;
+                                if (lx2 > diffMaxX) diffMaxX = lx2;
+                                if (ly1 < diffMinY) diffMinY = ly1;
+                                if (ly2 > diffMaxY) diffMaxY = ly2;
+                            }
+                        }
+
+                        if (colSpans.Count == 0 || (wLeft - colSpans[^1].Right >= 22.0))
+                        {
+                            colSpans.Add(new LineColumnSpan
+                            {
+                                Left = wLeft,
+                                Bottom = wBottom,
+                                Right = wRight,
+                                Top = wTop,
+                                HasHighlighted = highlightedLettersCount > 0
+                            });
+                        }
+                        else
+                        {
+                            var lastCol = colSpans[^1];
+                            lastCol.Right = Math.Max(lastCol.Right, wRight);
+                            lastCol.Bottom = Math.Min(lastCol.Bottom, wBottom);
+                            lastCol.Top = Math.Max(lastCol.Top, wTop);
+                            if (highlightedLettersCount > 0) lastCol.HasHighlighted = true;
+                        }
+
                         lastLeftX = leftX;
                         lastWordText = w.Text;
 
@@ -692,16 +961,6 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
                         }
                         fullSb.Append(w.Text);
                         lastRightX = w.Letters[^1].GlyphRectangle.TopRight.X;
-
-                        int highlightedLettersCount = 0;
-                        foreach (var let in w.Letters)
-                        {
-                            var key = (pageNum, Math.Round((decimal)let.GlyphRectangle.BottomLeft.X, 1), Math.Round((decimal)let.Location.Y, 1));
-                            if (confirmedHighlightSet.Contains(key))
-                            {
-                                highlightedLettersCount++;
-                            }
-                        }
 
                         if (highlightedLettersCount == 0)
                         {
@@ -725,6 +984,7 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
                     string diffOnlyText = string.Empty;
                     string sameLinePrefix = string.Empty;
                     string sameLineSuffix = string.Empty;
+                    double fieldLeft = 0, fieldBottom = 0, fieldRight = 0, fieldTop = 0;
 
                     if (hasDiff)
                     {
@@ -743,8 +1003,45 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
                         {
                             sameLineSuffix = string.Join(" ", wordEntries.Skip(lastDiffIdx + 1).Take(4).Select(x => x.Text)).Trim();
                         }
+
+                        if (hasAnyHiBounds)
+                        {
+                            int firstCol = colSpans.FindIndex(c => c.HasHighlighted);
+                            int lastCol = colSpans.FindLastIndex(c => c.HasHighlighted);
+                            if (firstCol != -1 && lastCol != -1)
+                            {
+                                double rawColLeft = colSpans[firstCol].Left;
+                                double rawColRight = colSpans[lastCol].Right;
+                                double rawColBottom = colSpans.Skip(firstCol).Take(lastCol - firstCol + 1).Min(c => c.Bottom);
+                                double rawColTop = colSpans.Skip(firstCol).Take(lastCol - firstCol + 1).Max(c => c.Top);
+
+                                double extendedRight;
+                                if (lastCol + 1 < colSpans.Count)
+                                {
+                                    double nextColLeft = colSpans[lastCol + 1].Left;
+                                    extendedRight = Math.Min(rawColRight + 10.0, (rawColRight + nextColLeft) * 0.5);
+                                }
+                                else
+                                {
+                                    extendedRight = Math.Max(rawColRight + 18.0, Math.Min(566.0, rawColLeft + 320.0));
+                                }
+
+                                fieldLeft = Math.Max(0, rawColLeft - 3.0);
+                                fieldRight = Math.Max(fieldLeft + 10.0, extendedRight);
+                                fieldBottom = Math.Max(0, rawColBottom - 2.5);
+                                fieldTop = rawColTop + 2.5;
+                            }
+                            else
+                            {
+                                fieldLeft = Math.Max(0, diffMinX - 3.0);
+                                fieldRight = diffMaxX + 18.0;
+                                fieldBottom = Math.Max(0, diffMinY - 2.5);
+                                fieldTop = diffMaxY + 2.5;
+                            }
+                        }
                     }
 
+                    bool validDiff = hasDiff && !string.IsNullOrWhiteSpace(diffOnlyText);
                     orderedPageLines.Add(new ReadableVisualLine
                     {
                         PageNumber = pageNum,
@@ -754,7 +1051,16 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
                         DiffOnlyText = diffOnlyText,
                         SameLinePrefixContext = sameLinePrefix,
                         SameLineSuffixContext = sameLineSuffix,
-                        HasDiff = hasDiff && !string.IsNullOrWhiteSpace(diffOnlyText)
+                        HasDiff = validDiff,
+                        HasBounds = validDiff && hasAnyHiBounds,
+                        DiffLeft = hasAnyHiBounds ? diffMinX : 0,
+                        DiffBottom = hasAnyHiBounds ? diffMinY : 0,
+                        DiffRight = hasAnyHiBounds ? diffMaxX : 0,
+                        DiffTop = hasAnyHiBounds ? diffMaxY : 0,
+                        FieldLeft = fieldLeft,
+                        FieldBottom = fieldBottom,
+                        FieldRight = fieldRight,
+                        FieldTop = fieldTop
                     });
                 }
 
@@ -786,15 +1092,29 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
             int pageNum = line[0].Letters[0].PageNumber;
             decimal refY = line[0].Letters[0].BaselineY;
 
-            var highlightedWords = line
+            var hiWordTuples = line
                 .Where(w => w.Letters.Any(l =>
                     confirmedHighlightSet.Contains((l.PageNumber, Math.Round((decimal)l.BoundingBox.BottomLeft.X, 1), Math.Round(l.BaselineY, 1)))))
-                .Select(w => w.CleanText)
                 .ToList();
 
-            bool hasDiff = highlightedWords.Count > 0;
+            bool hasDiff = hiWordTuples.Count > 0;
             string fullText = string.Join(" ", line.Select(w => w.CleanText));
-            string diffOnly = string.Join(" ", highlightedWords);
+            string diffOnly = string.Join(" ", hiWordTuples.Select(w => w.CleanText));
+
+            double dLeft = 0, dBottom = 0, dRight = 0, dTop = 0;
+            bool hasB = false;
+            if (hasDiff)
+            {
+                var allHiLetters = hiWordTuples.SelectMany(w => w.Letters).ToList();
+                if (allHiLetters.Count > 0)
+                {
+                    hasB = true;
+                    dLeft = allHiLetters.Min(l => Math.Min(l.BoundingBox.BottomLeft.X, l.BoundingBox.TopRight.X));
+                    dRight = allHiLetters.Max(l => Math.Max(l.BoundingBox.BottomLeft.X, l.BoundingBox.TopRight.X));
+                    dBottom = allHiLetters.Min(l => Math.Min(l.BoundingBox.BottomLeft.Y, l.BoundingBox.TopRight.Y));
+                    dTop = allHiLetters.Max(l => Math.Max(l.BoundingBox.BottomLeft.Y, l.BoundingBox.TopRight.Y));
+                }
+            }
 
             result.Add(new ReadableVisualLine
             {
@@ -803,7 +1123,16 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
                 ReferenceY = refY,
                 ReadableText = fullText,
                 DiffOnlyText = diffOnly,
-                HasDiff = hasDiff
+                HasDiff = hasDiff,
+                HasBounds = hasB,
+                DiffLeft = dLeft,
+                DiffBottom = dBottom,
+                DiffRight = dRight,
+                DiffTop = dTop,
+                FieldLeft = hasB ? Math.Max(0, dLeft - 3.0) : 0,
+                FieldBottom = hasB ? Math.Max(0, dBottom - 2.5) : 0,
+                FieldRight = hasB ? Math.Max(dRight + 18.0, Math.Min(566.0, dLeft + 300.0)) : 0,
+                FieldTop = hasB ? dTop + 2.5 : 0
             });
         }
 

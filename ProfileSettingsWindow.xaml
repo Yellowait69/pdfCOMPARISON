@@ -2,26 +2,29 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:PDFComparison.ViewModels"
-        Title="Configuration Dynamique des Exclusions &amp; Tolérances"
-        Height="820" Width="1220"
-        WindowStartupLocation="CenterOwner"
+        Title="Règles Métier &amp; Exclusions"
+        Height="840" Width="1280"
+        WindowState="Maximized"
+        WindowStartupLocation="CenterScreen"
         Background="#F8FAFC"
         FontFamily="Segoe UI Variable, Segoe UI"
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="ClearType">
 
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
         <Style TargetType="Button" x:Key="PrimaryBtn">
             <Setter Property="Background" Value="#2563EB"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="Padding" Value="18,9"/>
+            <Setter Property="Padding" Value="16,8"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Border" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -35,75 +38,630 @@
         </Style>
 
         <Style TargetType="Button" x:Key="SecondaryBtn" BasedOn="{StaticResource PrimaryBtn}">
-            <Setter Property="Background" Value="#E2E8F0"/>
-            <Setter Property="Foreground" Value="#1E293B"/>
-            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="Background" Value="#F1F5F9"/>
+            <Setter Property="Foreground" Value="#334155"/>
+            <Setter Property="BorderBrush" Value="#E2E8F0"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,6"/>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#CBD5E1"/>
+                    <Setter Property="Background" Value="#E2E8F0"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="Button" x:Key="AccentProductBtn" BasedOn="{StaticResource PrimaryBtn}">
+            <Setter Property="Background" Value="#EFF6FF"/>
+            <Setter Property="Foreground" Value="#1D4ED8"/>
+            <Setter Property="BorderBrush" Value="#BFDBFE"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,6"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#DBEAFE"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="Button" x:Key="PresetChipBtn" BasedOn="{StaticResource PrimaryBtn}">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="#475569"/>
+            <Setter Property="BorderBrush" Value="#CBD5E1"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="9,4"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#EFF6FF"/>
+                    <Setter Property="Foreground" Value="#1D4ED8"/>
+                    <Setter Property="BorderBrush" Value="#93C5FD"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
 
         <Style TargetType="Button" x:Key="DangerBtn" BasedOn="{StaticResource PrimaryBtn}">
-            <Setter Property="Background" Value="#FEE2E2"/>
+            <Setter Property="Background" Value="#FEF2F2"/>
             <Setter Property="Foreground" Value="#DC2626"/>
-            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="BorderBrush" Value="#FECACA"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,6"/>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#FECACA"/>
+                    <Setter Property="Background" Value="#FEE2E2"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="Button" x:Key="RowDeleteBtn" BasedOn="{StaticResource PrimaryBtn}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#94A3B8"/>
+            <Setter Property="Padding" Value="7,3"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#FEE2E2"/>
+                    <Setter Property="Foreground" Value="#DC2626"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
 
         <Style TargetType="TextBox">
-            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="Padding" Value="8,5"/>
             <Setter Property="BorderBrush" Value="#CBD5E1"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Background" Value="White"/>
             <Setter Property="Foreground" Value="#0F172A"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="#F8FAFC"/>
+            <Setter Property="Foreground" Value="#475569"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="BorderBrush" Value="#E2E8F0"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
         </Style>
     </Window.Resources>
 
-    <Grid Margin="24">
+    <Grid Margin="20,14">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- En-tête + Actions de Profil JSON -->
-        <DockPanel Grid.Row="0" Margin="0,0,0,18">
-            <StackPanel Orientation="Vertical">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="24" Foreground="#2563EB" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="Exclusions Dynamiques &amp; Règles Métier" FontSize="22" FontWeight="Bold" Foreground="#0F172A" VerticalAlignment="Center"/>
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="34,4,0,0">
-                    <TextBlock Text="Profil actif :" Foreground="#64748B" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBox Text="{Binding Profile.ProfileName, UpdateSourceTrigger=PropertyChanged}" Width="240" FontWeight="SemiBold"/>
+        <!-- En-tête unique épuré -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,10">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Border Width="34" Height="34" CornerRadius="8" Background="#DBEAFE" Margin="0,0,10,0">
+                    <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="17" Foreground="#2563EB" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Règles Métier &amp; Exclusions" FontSize="19" FontWeight="Bold" Foreground="#0F172A"/>
+                    <TextBlock Text="{Binding HeaderRulesSummaryText}" FontSize="12" Foreground="#64748B"/>
                 </StackPanel>
             </StackPanel>
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <Button Content="Importer JSON..." Command="{Binding ImportProfileCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,0,8,0"/>
-                <Button Content="Exporter JSON..." Command="{Binding ExportProfileCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,0,8,0"/>
-                <Button Content="Valeurs par défaut" Command="{Binding ResetProfileCommand}" Style="{StaticResource DangerBtn}" Margin="0,0,12,0"/>
-                <Button Content="Enregistrer &amp; Appliquer" Command="{Binding SaveProfileCommand}" Style="{StaticResource PrimaryBtn}"/>
+                <Button Content="Importer..." Command="{Binding ImportProfileCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,0,6,0"
+                        ToolTip="Importer un fichier de règles JSON"/>
+                <Button Content="Exporter..." Command="{Binding ExportProfileCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,0,6,0"
+                        ToolTip="Exporter vos règles en JSON pour les partager"/>
+                <Button Content="Par défaut" Command="{Binding ResetProfileCommand}" Style="{StaticResource DangerBtn}" Margin="0,0,12,0"
+                        ToolTip="Réinitialiser aux règles d'origine"/>
+                <Button Content="Enregistrer &amp; Appliquer" Click="OnSaveAndCloseClick" Style="{StaticResource PrimaryBtn}" FontSize="13"/>
             </StackPanel>
         </DockPanel>
 
-        <!-- Onglets de Configuration -->
-        <TabControl Grid.Row="1" BorderThickness="0" Background="Transparent">
+        <!-- Barre légère : Filtre de portée + Statut + Produit cible -->
+        <Border Grid.Row="1" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="12,7" Margin="0,0,0,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
-            <!-- ONGLET 1 : ZONES D'EXCLUSION GEOMETRIQUES (X/Y) & EDITEUR VISUEL -->
-            <TabItem Header="  1. Zones d'Exclusion Géométriques (X / Y &amp; Dessin Souris)  " FontSize="13" FontWeight="SemiBold">
-                <Border Background="White" CornerRadius="10" Padding="18" Margin="0,8,0,0">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Afficher :" FontWeight="SemiBold" FontSize="12" Foreground="#64748B" VerticalAlignment="Center" Margin="0,0,8,0"/>
+
+                    <Button Content="Toutes" Command="{Binding SetRuleScopeFilterCommand}" CommandParameter="ALL" Padding="11,4" FontSize="12" Margin="0,0,5,0">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource SecondaryBtn}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsFilterAll}" Value="True">
+                                        <Setter Property="Background" Value="#2563EB"/>
+                                        <Setter Property="Foreground" Value="White"/>
+                                        <Setter Property="BorderBrush" Value="#2563EB"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+
+                    <Button Content="Globales (Tous)" Command="{Binding SetRuleScopeFilterCommand}" CommandParameter="GLOBAL" Padding="11,4" FontSize="12" Margin="0,0,5,0">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource SecondaryBtn}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsFilterGlobal}" Value="True">
+                                        <Setter Property="Background" Value="#059669"/>
+                                        <Setter Property="Foreground" Value="White"/>
+                                        <Setter Property="BorderBrush" Value="#059669"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+
+                    <Button Content="Par Produit" Command="{Binding SetRuleScopeFilterCommand}" CommandParameter="PRODUCT" Padding="11,4" FontSize="12">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource SecondaryBtn}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsFilterProduct}" Value="True">
+                                        <Setter Property="Background" Value="#1D4ED8"/>
+                                        <Setter Property="Foreground" Value="White"/>
+                                        <Setter Property="BorderBrush" Value="#1D4ED8"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </StackPanel>
+
+                <TextBlock Grid.Column="1" Text="{Binding StatusBannerText}" Foreground="#2563EB" FontSize="12" FontWeight="SemiBold"
+                           VerticalAlignment="Center" Margin="16,0" TextTrimming="CharacterEllipsis"
+                           ToolTip="{Binding StatusBannerText}"/>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Produit cible :" FontSize="12" FontWeight="SemiBold" Foreground="#475569" VerticalAlignment="Center" Margin="0,0,7,0"/>
+                    <ComboBox ItemsSource="{Binding KnownProductCodes}"
+                              Text="{Binding TargetProductForNewRule, UpdateSourceTrigger=PropertyChanged}"
+                              IsEditable="True" Width="185" Padding="6,3" FontSize="12" FontWeight="SemiBold"
+                              ToolTip="Code produit utilisé quand vous créez une règle ciblée « Produit cible » (ex: SP.EFP, SP.017)"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Onglets épurés (Règles Métier & Regex affiché en premier) -->
+        <TabControl Grid.Row="2" BorderThickness="0" Background="Transparent">
+
+            <!-- ========================================================================= -->
+            <!-- ONGLET 1 : REGLES METIER & REGEX (SIMPLIFIE & ALLEGE)                     -->
+            <!-- ========================================================================= -->
+            <TabItem Header="  1. Règles Métier &amp; Regex  " FontSize="13" FontWeight="SemiBold">
+                <Border Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="16,14" Margin="0,6,0,0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Assistant léger de création rapide en 1 clic -->
+                        <Border Grid.Row="0" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,12">
+                            <StackPanel>
+                                <!-- Ligne 1 : Choix du type de règle + Portée -->
+                                <DockPanel Margin="0,0,0,8">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="Nouvelle règle :" FontWeight="Bold" FontSize="12.5" Foreground="#0F172A" VerticalAlignment="Center" Margin="0,0,10,0"/>
+
+                                        <Button Content="Ignorer un texte / mot" Command="{Binding SetQuickRuleModeCommand}" CommandParameter="IGNORE" Padding="11,4" FontSize="12" Margin="0,0,6,0">
+                                            <Button.Style>
+                                                <Style TargetType="Button" BasedOn="{StaticResource SecondaryBtn}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsQuickModeIgnore}" Value="True">
+                                                            <Setter Property="Background" Value="#2563EB"/>
+                                                            <Setter Property="Foreground" Value="White"/>
+                                                            <Setter Property="BorderBrush" Value="#2563EB"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Button.Style>
+                                        </Button>
+
+                                        <Button Content="Équivalence métier (A = B)" Command="{Binding SetQuickRuleModeCommand}" CommandParameter="EQUIV" Padding="11,4" FontSize="12" Margin="0,0,6,0">
+                                            <Button.Style>
+                                                <Style TargetType="Button" BasedOn="{StaticResource SecondaryBtn}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsQuickModeEquiv}" Value="True">
+                                                            <Setter Property="Background" Value="#2563EB"/>
+                                                            <Setter Property="Foreground" Value="White"/>
+                                                            <Setter Property="BorderBrush" Value="#2563EB"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Button.Style>
+                                        </Button>
+
+                                        <Button Content="Expression Regex" Command="{Binding SetQuickRuleModeCommand}" CommandParameter="REGEX" Padding="11,4" FontSize="12">
+                                            <Button.Style>
+                                                <Style TargetType="Button" BasedOn="{StaticResource SecondaryBtn}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsQuickModeRegex}" Value="True">
+                                                            <Setter Property="Background" Value="#2563EB"/>
+                                                            <Setter Property="Foreground" Value="White"/>
+                                                            <Setter Property="BorderBrush" Value="#2563EB"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Button.Style>
+                                        </Button>
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                        <TextBlock Text="Portée :" FontSize="12" FontWeight="SemiBold" Foreground="#475569" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <RadioButton Content="Globale (Tous les PDF)" IsChecked="{Binding NewRuleGlobal, Mode=OneWay}"
+                                                     Command="{Binding SetNewRuleScopeCommand}" CommandParameter="GLOBAL"
+                                                     VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" Foreground="#047857" Margin="0,0,12,0"/>
+                                        <RadioButton Content="Produit cible uniquement" IsChecked="{Binding NewRuleForProduct}"
+                                                     VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" Foreground="#1D4ED8"/>
+                                    </StackPanel>
+                                </DockPanel>
+
+                                <!-- Ligne 2 : Champs de saisie selon le mode choisi + bouton Ajouter -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="210"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- Mode 1 : Ignorer un texte / mot (sans Regex) -->
+                                    <Grid Grid.Column="0" Visibility="{Binding IsQuickModeIgnore, Converter={StaticResource BoolToVis}}" Margin="0,0,8,0">
+                                        <TextBox x:Name="QuickIgnoreBox"
+                                                 Text="{Binding QuickIgnoreText, UpdateSourceTrigger=PropertyChanged}"
+                                                 KeyDown="OnQuickInputKeyDown" FontSize="12.5"/>
+                                        <TextBlock Text="Tapez le mot ou la phrase à toujours ignorer (ex : exemplaire courtier, Sous réserve...)"
+                                                   Foreground="#94A3B8" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Text.IsEmpty, ElementName=QuickIgnoreBox}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Grid>
+
+                                    <!-- Mode 2 : Équivalence métier (A = B) -->
+                                    <Grid Grid.Column="0" Visibility="{Binding IsQuickModeEquiv, Converter={StaticResource BoolToVis}}" Margin="0,0,8,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <Grid Grid.Column="0">
+                                            <TextBox x:Name="QuickEquivLeftBox"
+                                                     Text="{Binding QuickEquivLeft, UpdateSourceTrigger=PropertyChanged}"
+                                                     KeyDown="OnQuickInputKeyDown" FontSize="12.5"/>
+                                            <TextBlock Text="Texte attendu (ex : R)" Foreground="#94A3B8" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Text.IsEmpty, ElementName=QuickEquivLeftBox}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Grid>
+
+                                        <TextBlock Grid.Column="1" Text="=" FontSize="15" FontWeight="Bold" Foreground="#2563EB" VerticalAlignment="Center" Margin="10,0"/>
+
+                                        <Grid Grid.Column="2">
+                                            <TextBox x:Name="QuickEquivRightBox"
+                                                     Text="{Binding QuickEquivRight, UpdateSourceTrigger=PropertyChanged}"
+                                                     KeyDown="OnQuickInputKeyDown" FontSize="12.5"/>
+                                            <TextBlock Text="Texte équivalent (ex : Rue du)" Foreground="#94A3B8" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Text.IsEmpty, ElementName=QuickEquivRightBox}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Grid>
+                                    </Grid>
+
+                                    <!-- Mode 3 : Expression Regex + Modèles 1-clic -->
+                                    <Grid Grid.Column="0" Visibility="{Binding IsQuickModeRegex, Converter={StaticResource BoolToVis}}" Margin="0,0,8,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <Grid Grid.Column="0">
+                                            <TextBox x:Name="QuickRegexBox"
+                                                     Text="{Binding QuickRegexPattern, UpdateSourceTrigger=PropertyChanged}"
+                                                     KeyDown="OnQuickInputKeyDown" FontFamily="Consolas" FontSize="12.5"/>
+                                            <TextBlock Text="Ex : \b\d{6,12}\b ou choisissez un modèle ➔" Foreground="#94A3B8" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Text.IsEmpty, ElementName=QuickRegexBox}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Grid>
+
+                                        <TextBlock Grid.Column="1" Text="{Binding QuickRegexValidationText}" VerticalAlignment="Center" FontSize="11.5" FontWeight="SemiBold" Margin="8,0,4,0"
+                                                   Visibility="{Binding HasQuickRegexInput, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="#059669"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsQuickRegexValid}" Value="False">
+                                                            <Setter Property="Foreground" Value="#DC2626"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
+                                            <Button Content="Chiffres (6+)" Command="{Binding ApplyRegexPresetCommand}" CommandParameter="DIGITS" Style="{StaticResource PresetChipBtn}" Margin="0,0,4,0"/>
+                                            <Button Content="Code Réf." Command="{Binding ApplyRegexPresetCommand}" CommandParameter="REF" Style="{StaticResource PresetChipBtn}" Margin="0,0,4,0"/>
+                                            <Button Content="IBAN" Command="{Binding ApplyRegexPresetCommand}" CommandParameter="IBAN" Style="{StaticResource PresetChipBtn}" Margin="0,0,4,0"/>
+                                            <Button Content="Date" Command="{Binding ApplyRegexPresetCommand}" CommandParameter="DATE" Style="{StaticResource PresetChipBtn}"/>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- Nom optionnel de la règle -->
+                                    <Grid Grid.Column="1" Margin="0,0,8,0">
+                                        <TextBox x:Name="QuickNameBox"
+                                                 Text="{Binding QuickRuleCustomName, UpdateSourceTrigger=PropertyChanged}"
+                                                 KeyDown="OnQuickInputKeyDown" FontSize="12"/>
+                                        <TextBlock Text="Nom (optionnel)" Foreground="#94A3B8" FontSize="11.5" Margin="9,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Text.IsEmpty, ElementName=QuickNameBox}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Grid>
+
+                                    <Button Grid.Column="2" Content="+ Ajouter" Command="{Binding CreateQuickRuleCommand}" Style="{StaticResource PrimaryBtn}" Padding="16,6"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- En-tête léger de la liste des règles + Option noms clients intégrée proprement -->
+                        <DockPanel Grid.Row="1" Margin="0,0,0,8">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="Règles configurées" FontSize="14" FontWeight="Bold" Foreground="#1E293B" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                <Button Content="+ Ligne vide" Command="{Binding AddGlobalRegexRuleCommand}" Style="{StaticResource SecondaryBtn}" Padding="9,3" FontSize="11.5"
+                                        ToolTip="Insérer directement une ligne modifiable dans le tableau"/>
+                            </StackPanel>
+
+                            <CheckBox HorizontalAlignment="Right" VerticalAlignment="Center"
+                                      Content="Ignorer automatiquement les noms et prénoms clients"
+                                      IsChecked="{Binding Profile.EnableDynamicClientNameMasking, UpdateSourceTrigger=PropertyChanged}"
+                                      FontWeight="SemiBold" FontSize="12.5" Foreground="#334155"
+                                      ToolTip="Masque automatiquement les noms/prénoms situés après Souscripteur, Preneur, Assuré, Versicherungsnehmer, Verzekeringnemer..."/>
+                        </DockPanel>
+
+                        <!-- Tableau épuré des règles Métier & Regex -->
+                        <DataGrid x:Name="RegexRulesGrid" Grid.Row="2"
+                                  ItemsSource="{Binding FilteredRegexRulesView}"
+                                  SelectedItem="{Binding SelectedRegexRule}"
+                                  AutoGenerateColumns="False" CanUserAddRows="False"
+                                  RowBackground="White" AlternatingRowBackground="#FAFBFD"
+                                  GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#F1F5F9"
+                                  HeadersVisibility="Column"
+                                  BorderBrush="#E2E8F0" BorderThickness="1" RowHeight="38">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="Actif" Binding="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" Width="52"/>
+
+                                <!-- Portée : Globale ou Produit -->
+                                <DataGridTemplateColumn Header="Portée / Produit" Width="180">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="4,3">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <ComboBox x:Name="RegexProdCombo" Grid.Column="0"
+                                                          ItemsSource="{Binding DataContext.KnownProductCodes, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                          Text="{Binding ProductFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                          IsEditable="True" FontSize="11.5" FontWeight="SemiBold" Foreground="#1D4ED8"
+                                                          VerticalContentAlignment="Center" Padding="4,1"
+                                                          ToolTip="Vide = Règle Globale (tous les produits). Saisissez un code (ex: SP.EFP ou SP.017) pour cibler un produit."/>
+                                                <Border Grid.Column="0" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1"
+                                                        CornerRadius="4" Padding="6,1" Margin="5,0,22,0"
+                                                        HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False">
+                                                    <Border.Style>
+                                                        <Style TargetType="Border">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                            <Style.Triggers>
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding IsGlobalRule}" Value="True"/>
+                                                                        <Condition Binding="{Binding IsKeyboardFocusWithin, ElementName=RegexProdCombo}" Value="False"/>
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </MultiDataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Border.Style>
+                                                    <TextBlock Text="Globale (Tous)" Foreground="#047857" FontSize="10.5" FontWeight="Bold"/>
+                                                </Border>
+                                                <Button Grid.Column="1" Content="✕"
+                                                        Command="{Binding DataContext.ClearRegexProductFilterCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}"
+                                                        Visibility="{Binding IsProductSpecificRule, Converter={StaticResource BoolToVis}}"
+                                                        Style="{StaticResource SecondaryBtn}" Padding="5,1" Margin="3,0,0,0" FontSize="10"
+                                                        ToolTip="Repasser cette règle en Globale (tous produits)"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+
+                                <!-- Nom clair de la règle -->
+                                <DataGridTemplateColumn Header="Nom de la règle" Width="265">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBox Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                     BorderThickness="0" Background="Transparent" FontWeight="SemiBold" Foreground="#1E293B"
+                                                     Padding="6,4" VerticalContentAlignment="Center"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+
+                                <!-- Texte ou Expression Regex (avec indicateur de validité et badge répétition) -->
+                                <DataGridTemplateColumn Header="Texte ciblé / Expression Regex" Width="*">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="4,3">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="PatternCellBox" Grid.Column="0"
+                                                         Text="{Binding Pattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                         FontFamily="Consolas" FontSize="12" Padding="6,3"
+                                                         BorderBrush="#E2E8F0" BorderThickness="1" Background="#F8FAFC">
+                                                    <TextBox.Style>
+                                                        <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsPatternInvalid}" Value="True">
+                                                                    <Setter Property="BorderBrush" Value="#DC2626"/>
+                                                                    <Setter Property="Background" Value="#FEF2F2"/>
+                                                                    <Setter Property="ToolTip" Value="Expression Regex invalide : vérifiez les parenthèses ou crochets."/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBox.Style>
+                                                </TextBox>
+                                                <Border Grid.Column="1" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1"
+                                                        CornerRadius="4" Padding="5,1" Margin="5,0,2,0" VerticalAlignment="Center"
+                                                        Visibility="{Binding HasRepeatRequirement, Converter={StaticResource BoolToVis}}"
+                                                        ToolTip="Masqué uniquement si la même valeur apparaît au moins ce nombre de fois dans le document">
+                                                    <TextBlock Text="{Binding RepeatBadgeText}" Foreground="#1D4ED8" FontSize="10.5" FontWeight="Bold"/>
+                                                </Border>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+
+                                <!-- Remplacement (vide = supprimer / ignorer) -->
+                                <DataGridTemplateColumn Header="Remplacement" Width="165">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="4,3">
+                                                <TextBox x:Name="MaskCellBox"
+                                                         Text="{Binding ReplacementMask, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                         FontFamily="Consolas" FontSize="11.5" Padding="6,3"
+                                                         BorderBrush="#E2E8F0" BorderThickness="1" Background="White"
+                                                         ToolTip="Laissez vide pour ignorer/supprimer complètement le texte trouvé, ou mettez un jeton commun (ex: [EQUI_IGNORE]) pour une équivalence A = B."/>
+                                                <TextBlock Text="Vide = ignorer" Foreground="#94A3B8" FontStyle="Italic" FontSize="11"
+                                                           Margin="8,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                            <Style.Triggers>
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding IsReplacementEmpty}" Value="True"/>
+                                                                        <Condition Binding="{Binding IsKeyboardFocusWithin, ElementName=MaskCellBox}" Value="False"/>
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </MultiDataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+
+                                <!-- Suppression directe sur la ligne -->
+                                <DataGridTemplateColumn Header="" Width="46">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <Button Content="✕"
+                                                    Command="{Binding DataContext.DeleteRegexRuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"
+                                                    Style="{StaticResource RowDeleteBtn}"
+                                                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                    ToolTip="Supprimer cette règle"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <!-- Bandeau compact de test en direct (auto-évalué pendant la frappe) -->
+                        <Border Grid.Row="3" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,10,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="14"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <DockPanel Margin="0,0,0,4">
+                                        <TextBlock Text="Tester vos règles en direct (collez un extrait)" FontSize="11.5" FontWeight="Bold" Foreground="#475569" VerticalAlignment="Center"/>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <TextBlock Text="Produit simulé :" FontSize="11" Foreground="#64748B" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                            <ComboBox ItemsSource="{Binding KnownProductCodes}"
+                                                      Text="{Binding RegexTestProduct, UpdateSourceTrigger=PropertyChanged}"
+                                                      IsEditable="True" Width="125" Padding="4,1" FontSize="11"
+                                                      ToolTip="Vide = règles Globales seules. Renseignez un code produit pour tester aussi ses règles dédiées."/>
+                                        </StackPanel>
+                                    </DockPanel>
+                                    <TextBox Text="{Binding SampleTestInput, UpdateSourceTrigger=PropertyChanged}"
+                                             AcceptsReturn="True" Height="52" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                             FontFamily="Consolas" FontSize="11.5" Padding="6,4"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Résultat vu par le comparateur après filtrage" FontSize="11.5" FontWeight="Bold" Foreground="#059669" Margin="0,2,0,5"/>
+                                    <TextBox Text="{Binding SampleTestOutput, Mode=OneWay}" IsReadOnly="True" Background="#F0FDF4" BorderBrush="#BBF7D0"
+                                             AcceptsReturn="True" Height="52" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                             FontFamily="Consolas" FontSize="11.5" Padding="6,4"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+            </TabItem>
+
+            <!-- ========================================================================= -->
+            <!-- ONGLET 2 : ZONES D'EXCLUSION GEOMETRIQUES (ADRESSES / SCRAMBLE)           -->
+            <!-- ========================================================================= -->
+            <TabItem Header="  2. Zones Géométriques (Adresses / Scramble)  " FontSize="13" FontWeight="SemiBold">
+                <Border Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="16,14" Margin="0,6,0,0">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="20"/>
-                            <ColumnDefinition Width="450"/>
+                            <ColumnDefinition Width="18"/>
+                            <ColumnDefinition Width="454"/>
                         </Grid.ColumnDefinitions>
 
                         <!-- Liste & Édition des Zones -->
@@ -115,20 +673,67 @@
                             </Grid.RowDefinitions>
 
                             <DockPanel Grid.Row="0" Margin="0,0,0,10">
-                                <TextBlock Text="Zones d'exclusion configurées" FontSize="15" FontWeight="Bold" Foreground="#1E293B" VerticalAlignment="Center"/>
+                                <TextBlock Text="Zones exclues sur la page PDF" FontSize="14.5" FontWeight="Bold" Foreground="#1E293B" VerticalAlignment="Center"/>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                    <Button Content="+ Ajouter une zone" Command="{Binding AddZoneCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,0,8,0"/>
-                                    <Button Content="Supprimer la zone" Command="{Binding RemoveZoneCommand}" Style="{StaticResource DangerBtn}"/>
+                                    <Button Content="+ Zone Globale" Command="{Binding AddGlobalZoneCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,0,6,0"/>
+                                    <Button Content="+ Zone Produit cible" Command="{Binding AddProductZoneCommand}" Style="{StaticResource AccentProductBtn}"/>
                                 </StackPanel>
                             </DockPanel>
 
-                            <DataGrid Grid.Row="1" ItemsSource="{Binding Profile.ExclusionZones}"
+                            <DataGrid x:Name="ZonesGrid" Grid.Row="1"
+                                      ItemsSource="{Binding FilteredZonesView}"
                                       SelectedItem="{Binding SelectedZone}"
                                       AutoGenerateColumns="False" CanUserAddRows="False"
-                                      RowBackground="White" AlternatingRowBackground="#F8FAFC"
+                                      RowBackground="White" AlternatingRowBackground="#FAFBFD"
+                                      GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#F1F5F9"
+                                      HeadersVisibility="Column"
                                       BorderBrush="#E2E8F0" BorderThickness="1" RowHeight="36">
                                 <DataGrid.Columns>
-                                    <DataGridCheckBoxColumn Header="Actif" Binding="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" Width="50"/>
+                                    <DataGridCheckBoxColumn Header="Actif" Binding="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" Width="48"/>
+
+                                    <DataGridTemplateColumn Header="Portée / Produit" Width="175">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="3,2">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <ComboBox x:Name="ZoneProdCombo" Grid.Column="0"
+                                                              ItemsSource="{Binding DataContext.KnownProductCodes, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                              Text="{Binding ProductFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              IsEditable="True" FontSize="11.5" FontWeight="SemiBold" Foreground="#1D4ED8"
+                                                              VerticalContentAlignment="Center" Padding="4,1"/>
+                                                    <Border Grid.Column="0" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1"
+                                                            CornerRadius="4" Padding="6,1" Margin="5,0,22,0"
+                                                            HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False">
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                <Style.Triggers>
+                                                                    <MultiDataTrigger>
+                                                                        <MultiDataTrigger.Conditions>
+                                                                            <Condition Binding="{Binding IsGlobalRule}" Value="True"/>
+                                                                            <Condition Binding="{Binding IsKeyboardFocusWithin, ElementName=ZoneProdCombo}" Value="False"/>
+                                                                        </MultiDataTrigger.Conditions>
+                                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                                    </MultiDataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Border.Style>
+                                                        <TextBlock Text="Globale (Tous)" Foreground="#047857" FontSize="10.5" FontWeight="Bold"/>
+                                                    </Border>
+                                                    <Button Grid.Column="1" Content="✕"
+                                                            Command="{Binding DataContext.ClearZoneProductFilterCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}"
+                                                            Visibility="{Binding IsProductSpecificRule, Converter={StaticResource BoolToVis}}"
+                                                            Style="{StaticResource SecondaryBtn}" Padding="5,1" Margin="3,0,0,0" FontSize="10"
+                                                            ToolTip="Repasser en zone Globale"/>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+
                                     <DataGridTextColumn Header="Nom de la zone" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
                                     <DataGridComboBoxColumn Header="Pages" SelectedItemBinding="{Binding Scope, UpdateSourceTrigger=PropertyChanged}" Width="115">
                                         <DataGridComboBoxColumn.ElementStyle>
@@ -142,29 +747,30 @@
                                             </Style>
                                         </DataGridComboBoxColumn.EditingElementStyle>
                                     </DataGridComboBoxColumn>
-                                    <DataGridComboBoxColumn Header="Origine" SelectedItemBinding="{Binding Origin, UpdateSourceTrigger=PropertyChanged}" Width="95">
-                                        <DataGridComboBoxColumn.ElementStyle>
-                                            <Style TargetType="ComboBox">
-                                                <Setter Property="ItemsSource" Value="{Binding DataContext.ZoneOrigins, RelativeSource={RelativeSource AncestorType=Window}}"/>
-                                            </Style>
-                                        </DataGridComboBoxColumn.ElementStyle>
-                                        <DataGridComboBoxColumn.EditingElementStyle>
-                                            <Style TargetType="ComboBox">
-                                                <Setter Property="ItemsSource" Value="{Binding DataContext.ZoneOrigins, RelativeSource={RelativeSource AncestorType=Window}}"/>
-                                            </Style>
-                                        </DataGridComboBoxColumn.EditingElementStyle>
-                                    </DataGridComboBoxColumn>
-                                    <DataGridTextColumn Header="X" Binding="{Binding X, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
-                                    <DataGridTextColumn Header="Y" Binding="{Binding Y, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
-                                    <DataGridTextColumn Header="Largeur" Binding="{Binding Width, UpdateSourceTrigger=PropertyChanged}" Width="65"/>
-                                    <DataGridTextColumn Header="Hauteur" Binding="{Binding Height, UpdateSourceTrigger=PropertyChanged}" Width="65"/>
-                                    <DataGridCheckBoxColumn Header="Dates En-tête" Binding="{Binding CollectDatesInZone, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
+                                    <DataGridTextColumn Header="N° Page" Binding="{Binding CustomPageStart, UpdateSourceTrigger=PropertyChanged}" Width="62"/>
+                                    <DataGridTextColumn Header="X" Binding="{Binding X, UpdateSourceTrigger=PropertyChanged}" Width="52"/>
+                                    <DataGridTextColumn Header="Y" Binding="{Binding Y, UpdateSourceTrigger=PropertyChanged}" Width="52"/>
+                                    <DataGridTextColumn Header="Larg." Binding="{Binding Width, UpdateSourceTrigger=PropertyChanged}" Width="56"/>
+                                    <DataGridTextColumn Header="Haut." Binding="{Binding Height, UpdateSourceTrigger=PropertyChanged}" Width="56"/>
+
+                                    <DataGridTemplateColumn Header="" Width="44">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Button Content="✕"
+                                                        Command="{Binding DataContext.DeleteZoneCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}"
+                                                        Style="{StaticResource RowDeleteBtn}"
+                                                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                        ToolTip="Supprimer cette zone"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
                                 </DataGrid.Columns>
                             </DataGrid>
 
-                            <Border Grid.Row="2" Background="#EFF6FF" CornerRadius="8" Padding="12" Margin="0,12,0,0">
-                                <TextBlock Foreground="#1E40AF" FontSize="12" TextWrapping="Wrap"
-                                           Text="Astuce : Vous pouvez soit saisir les coordonnées X/Y directement dans le tableau, soit tracer un rectangle avec le clic gauche de la souris sur l'aperçu de page à droite pour créer automatiquement une zone d'exclusion."/>
+                            <Border Grid.Row="2" Background="#EFF6FF" CornerRadius="8" Padding="10,8" Margin="0,10,0,0">
+                                <TextBlock Foreground="#1E40AF" FontSize="11.5" TextWrapping="Wrap"
+                                           Text="Astuce : Chargez un PDF témoin à droite, choisissez « Produit cible » puis tracez simplement un rectangle à la souris autour de l'adresse ou du bloc scramblé à ignorer."/>
                             </Border>
                         </Grid>
 
@@ -173,15 +779,16 @@
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="*"/>
                                     <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
 
-                                <DockPanel Grid.Row="0" Margin="0,0,0,8">
-                                    <Button Content="Charger un PDF témoin..." Command="{Binding LoadSamplePdfCommand}" Style="{StaticResource SecondaryBtn}"/>
+                                <DockPanel Grid.Row="0" Margin="0,0,0,6">
+                                    <Button Content="Charger PDF témoin..." Command="{Binding LoadSamplePdfCommand}" Style="{StaticResource SecondaryBtn}" Padding="10,5" FontSize="12"/>
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                                         <Button Content="◄" Command="{Binding PreviousPreviewPageCommand}" Style="{StaticResource SecondaryBtn}" Padding="8,4"/>
-                                        <TextBlock VerticalAlignment="Center" Margin="8,0" FontWeight="SemiBold" Foreground="#334155">
+                                        <TextBlock VerticalAlignment="Center" Margin="8,0" FontWeight="SemiBold" Foreground="#334155" FontSize="12">
                                             <TextBlock.Text>
                                                 <MultiBinding StringFormat="Page {0} / {1}">
                                                     <Binding Path="CurrentPreviewPage"/>
@@ -193,10 +800,26 @@
                                     </StackPanel>
                                 </DockPanel>
 
-                                <!-- Feuille A4 interactive -->
-                                <Border Grid.Row="1" Width="420" Height="594" Background="White" BorderBrush="#94A3B8" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center" ClipToBounds="True">
+                                <DockPanel Grid.Row="1" Margin="0,0,0,6">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="Dessin :" FontSize="11.5" FontWeight="SemiBold" Foreground="#475569" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                        <RadioButton Content="Globale" IsChecked="{Binding DrawLassoGlobal, Mode=OneWay}"
+                                                     Command="{Binding SetDrawLassoScopeCommand}" CommandParameter="GLOBAL"
+                                                     VerticalAlignment="Center" FontSize="11.5" Margin="0,0,8,0"/>
+                                        <RadioButton Content="Produit cible" IsChecked="{Binding DrawLassoForProduct}"
+                                                     VerticalAlignment="Center" FontSize="11.5" FontWeight="SemiBold" Foreground="#1D4ED8"/>
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                        <TextBlock Text="Aperçu :" FontSize="11" Foreground="#64748B" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                        <ComboBox ItemsSource="{Binding KnownProductCodes}"
+                                                  Text="{Binding PreviewSimulatedProduct, UpdateSourceTrigger=PropertyChanged}"
+                                                  IsEditable="True" Width="118" FontSize="11" Padding="4,2"/>
+                                    </StackPanel>
+                                </DockPanel>
+
+                                <Border Grid.Row="2" Width="420" Height="594" Background="White" BorderBrush="#94A3B8" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center" ClipToBounds="True">
                                     <Grid>
-                                        <!-- Mots extraits du PDF témoin (Vert = conservé, Rouge = exclu par une zone) -->
                                         <ItemsControl ItemsSource="{Binding PreviewWords}">
                                             <ItemsControl.ItemsPanel>
                                                 <ItemsPanelTemplate>
@@ -224,7 +847,6 @@
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
 
-                                        <!-- Zones d'exclusion actives superposées -->
                                         <ItemsControl ItemsSource="{Binding PreviewZones}">
                                             <ItemsControl.ItemsPanel>
                                                 <ItemsPanelTemplate>
@@ -239,16 +861,22 @@
                                             </ItemsControl.ItemContainerStyle>
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Border Width="{Binding CanvasWidth}" Height="{Binding CanvasHeight}"
-                                                            Background="#30EF4444" BorderBrush="#DC2626" BorderThickness="1.5">
-                                                        <TextBlock Text="{Binding Name}" Background="#CCDC2626" Foreground="White"
+                                                    <Border x:Name="ZoneOverlayBorder" Width="{Binding CanvasWidth}" Height="{Binding CanvasHeight}"
+                                                            Background="#2AEF4444" BorderBrush="#DC2626" BorderThickness="1.5">
+                                                        <TextBlock x:Name="ZoneOverlayLabel" Text="{Binding DisplayLabel}" Background="#CCDC2626" Foreground="White"
                                                                    FontSize="9" Padding="3,1" HorizontalAlignment="Left" VerticalAlignment="Top"/>
                                                     </Border>
+                                                    <DataTemplate.Triggers>
+                                                        <DataTrigger Binding="{Binding IsProductSpecific}" Value="True">
+                                                            <Setter TargetName="ZoneOverlayBorder" Property="Background" Value="#2A2563EB"/>
+                                                            <Setter TargetName="ZoneOverlayBorder" Property="BorderBrush" Value="#1D4ED8"/>
+                                                            <Setter TargetName="ZoneOverlayLabel" Property="Background" Value="#DD1D4ED8"/>
+                                                        </DataTrigger>
+                                                    </DataTemplate.Triggers>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
 
-                                        <!-- Surface de dessin Lasso à la souris -->
                                         <Canvas x:Name="LassoCanvas" Background="#01FFFFFF" Cursor="Cross"
                                                 MouseLeftButtonDown="OnLassoMouseDown"
                                                 MouseMove="OnLassoMouseMove"
@@ -259,14 +887,16 @@
                                     </Grid>
                                 </Border>
 
-                                <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,0">
-                                    <TextBlock Foreground="#059669" FontWeight="SemiBold" FontSize="12" Margin="0,0,15,0">
-                                        <Run Text="● Mots conservés : "/>
+                                <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,0">
+                                    <TextBlock Foreground="#059669" FontWeight="SemiBold" FontSize="11.5" Margin="0,0,12,0">
+                                        <Run Text="● Conservés : "/>
                                         <Run Text="{Binding KeptWordsCount, Mode=OneWay}"/>
                                     </TextBlock>
-                                    <TextBlock Foreground="#DC2626" FontWeight="SemiBold" FontSize="12">
-                                        <Run Text="● Mots exclus : "/>
+                                    <TextBlock Foreground="#DC2626" FontWeight="SemiBold" FontSize="11.5" Margin="0,0,12,0" Text="■ Zone Globale"/>
+                                    <TextBlock Foreground="#1D4ED8" FontWeight="SemiBold" FontSize="11.5">
+                                        <Run Text="■ Zone Produit ("/>
                                         <Run Text="{Binding ExcludedWordsCount, Mode=OneWay}"/>
+                                        <Run Text=" mots exclus)"/>
                                     </TextBlock>
                                 </StackPanel>
                             </Grid>
@@ -275,249 +905,93 @@
                 </Border>
             </TabItem>
 
-            <!-- ONGLET 2 : MASQUAGE PAR EXPRESSIONS REGULIERES (REGEX) -->
-            <TabItem Header="  2. Masquage Dynamique par Regex (Dates, Factures, Références)  " FontSize="13" FontWeight="SemiBold">
-                <Border Background="White" CornerRadius="10" Padding="18" Margin="0,8,0,0">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="200"/>
-                        </Grid.RowDefinitions>
-
-                        <DockPanel Grid.Row="0" Margin="0,0,0,10">
-                            <TextBlock Text="Règles de masquage par Expressions Régulières" FontSize="15" FontWeight="Bold" Foreground="#1E293B" VerticalAlignment="Center"/>
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                <Button Content="+ Ajouter une règle Regex" Command="{Binding AddRegexRuleCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,0,8,0"/>
-                                <Button Content="Supprimer la règle" Command="{Binding RemoveRegexRuleCommand}" Style="{StaticResource DangerBtn}"/>
-                            </StackPanel>
-                        </DockPanel>
-
-                        <DataGrid Grid.Row="1" ItemsSource="{Binding Profile.RegexRules}"
-                                  SelectedItem="{Binding SelectedRegexRule}"
-                                  AutoGenerateColumns="False" CanUserAddRows="False"
-                                  RowBackground="White" AlternatingRowBackground="#F8FAFC"
-                                  BorderBrush="#E2E8F0" BorderThickness="1" RowHeight="36">
-                            <DataGrid.Columns>
-                                <DataGridCheckBoxColumn Header="Actif" Binding="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
-                                <DataGridTextColumn Header="Description de la règle" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="220"/>
-                                <DataGridTextColumn Header="Expression Régulière (Pattern)" Binding="{Binding Pattern, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
-                                <DataGridTextColumn Header="Jeton de remplacement" Binding="{Binding ReplacementMask, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
-                                <DataGridTextColumn Header="Occurrences min." Binding="{Binding MinOccurrences, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
-                                <DataGridCheckBoxColumn Header="Ignorer casse" Binding="{Binding IgnoreCase, UpdateSourceTrigger=PropertyChanged}" Width="95"/>
-                            </DataGrid.Columns>
-                        </DataGrid>
-
-                        <!-- Masquage dynamique des noms de clients -->
-                        <Border Grid.Row="2" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,12">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="250"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <CheckBox Content="Masquer automatiquement les noms de clients (Souscripteur / Auftraggeber)"
-                                          IsChecked="{Binding Profile.EnableDynamicClientNameMasking}"
-                                          VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#334155" Margin="0,0,20,0"/>
-                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <TextBlock Text="Jeton :" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#64748B"/>
-                                    <TextBox Text="{Binding Profile.ClientNameReplacementMask, UpdateSourceTrigger=PropertyChanged}" Width="140"/>
-                                </StackPanel>
-                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <TextBlock Text="Regex mots-clés client :" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#64748B"/>
-                                    <TextBox Text="{Binding Profile.ClientKeywordsPattern, UpdateSourceTrigger=PropertyChanged}" Width="350"/>
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-
-                        <!-- Testeur de Regex en temps réel -->
-                        <Grid Grid.Row="3">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="16"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-
-                            <StackPanel Grid.Column="0">
-                                <DockPanel Margin="0,0,0,6">
-                                    <TextBlock Text="Banc de test : Texte d'entrée (Source / Target)" FontWeight="Bold" Foreground="#334155"/>
-                                    <Button Content="Tester les règles" Command="{Binding RunRegexPreviewCommand}" Style="{StaticResource SecondaryBtn}" HorizontalAlignment="Right" Padding="10,3"/>
-                                </DockPanel>
-                                <TextBox Text="{Binding SampleTestInput, UpdateSourceTrigger=PropertyChanged}"
-                                         AcceptsReturn="True" Height="150" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
-                            </StackPanel>
-
-                            <StackPanel Grid.Column="2">
-                                <TextBlock Text="Résultat après application des masques dynamiques :" FontWeight="Bold" Foreground="#059669" Margin="0,0,0,6"/>
-                                <TextBox Text="{Binding SampleTestOutput, Mode=OneWay}" IsReadOnly="True" Background="#F0FDF4"
-                                         AcceptsReturn="True" Height="150" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
-                            </StackPanel>
-                        </Grid>
-                    </Grid>
-                </Border>
-            </TabItem>
-
-            <!-- ONGLET 3 : REGRESSION VISUELLE SSIM, TOLERANCES, FILIGRANES & APPAIRAGE -->
-            <TabItem Header="  3. Moteur Visuel SSIM, Anti-Aliasing, Filigranes &amp; Tolérances  " FontSize="13" FontWeight="SemiBold">
-                <Border Background="White" CornerRadius="10" Padding="22" Margin="0,8,0,0">
+            <!-- ========================================================================= -->
+            <!-- ONGLET 3 : OPTIONS AVANCEES (TOLERANCES, FILIGRANES & MOTS-CLES CLIENTS)  -->
+            <!-- ========================================================================= -->
+            <TabItem Header="  3. Options avancées  " FontSize="13" FontWeight="SemiBold">
+                <Border Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="22,18" Margin="0,6,0,0">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
-                            <!-- NOUVELLE SECTION : MOTEUR DE REGRESSION VISUELLE PERCEPTUELLE (SSIM + YIQ + ANTI-ALIASING) -->
-                            <TextBlock Text="Moteur de Régression Visuelle Perceptuelle (SSIM, YIQ &amp; Anti-Aliasing)" FontSize="16" FontWeight="Bold" Foreground="#0F172A" Margin="0,0,0,12"/>
+                            <TextBlock Text="Tolérances d'alignement &amp; sauts de ligne" FontSize="15" FontWeight="Bold" Foreground="#0F172A" Margin="0,0,0,10"/>
 
-                            <Grid Margin="0,0,0,20">
+                            <Grid Margin="0,0,0,16">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="380"/>
-                                    <ColumnDefinition Width="140"/>
+                                    <ColumnDefinition Width="360"/>
+                                    <ColumnDefinition Width="120"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="36"/>
                                     <RowDefinition Height="36"/>
                                     <RowDefinition Height="36"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
                                 </Grid.RowDefinitions>
 
-                                <CheckBox Grid.Row="0" Grid.ColumnSpan="3"
-                                          Content="Activer le moteur de validation visuelle SSIM &amp; détection des changements graphiques (images, logos, signatures)"
-                                          IsChecked="{Binding Profile.EnableVisualSsimEngine}" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#1E293B"/>
-
-                                <CheckBox Grid.Row="1" Grid.ColumnSpan="3"
-                                          Content="Ignorer automatiquement l'anti-aliasing des polices et courbes (Algorithme de Vysniauskas / Pixelmatch)"
-                                          IsChecked="{Binding Profile.IgnoreAntiAliasingPixels}" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#334155"/>
-
-                                <CheckBox Grid.Row="2" Grid.ColumnSpan="3"
-                                          Content="Activer le recalage automatique par translation (dx, dy) &amp; générer les captures visuelles dans le Rapport Global"
-                                          IsChecked="{Binding Profile.GenerateVisualSnapshotsInGlobalReport}" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#334155"/>
-
-                                <TextBlock Grid.Row="3" Text="Seuil de similarité structurelle SSIM [0.0 .. 1.0] :" VerticalAlignment="Center" Foreground="#334155"/>
-                                <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Profile.SsimSimilarityThreshold, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Row="3" Grid.Column="2" Text="0.94 recommandé. Plus la valeur est basse, plus le moteur est tolérant aux variations de rendu." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
-
-                                <TextBlock Grid.Row="4" Text="Seuil de tolérance colorimétrique perceptuelle YIQ [0.0 .. 1.0] :" VerticalAlignment="Center" Foreground="#334155"/>
-                                <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Profile.PerceptualYiqThreshold, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Row="4" Grid.Column="2" Text="0.10 recommandé. Ignore les écarts de compression/couleur imperceptibles à l'œil humain." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
-
-                                <TextBlock Grid.Row="5" Text="Décalage maximal d'auto-alignement (en pixels) :" VerticalAlignment="Center" Foreground="#334155"/>
-                                <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Profile.MaxAutoAlignmentShiftPx, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Row="5" Grid.Column="2" Text="Compense les micro-décalages globaux de marges entre Source et Target." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
-
-                                <TextBlock Grid.Row="6" Text="Surface minimale d'un cluster de différence (en pixels²) :" VerticalAlignment="Center" Foreground="#334155"/>
-                                <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding Profile.MinVisualClusterAreaPx, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Row="6" Grid.Column="2" Text="Élimine les poussières ou artefacts isolés de quelques pixels." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
-
-                                <TextBlock Grid.Row="7" Text="Résolution de rastérisation visuelle (DPI) :" VerticalAlignment="Center" Foreground="#334155"/>
-                                <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Profile.VisualRenderDpi, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Row="7" Grid.Column="2" Text="120 DPI recommandé (équilibre optimal entre vitesse d'exécution et précision)." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
-                            </Grid>
-
-                            <Separator Background="#E2E8F0" Margin="0,5,0,15"/>
-
-                            <TextBlock Text="Tolérances Structurelles &amp; Anti-Faux-Positifs (Reflow / Alignement)" FontSize="16" FontWeight="Bold" Foreground="#0F172A" Margin="0,0,0,12"/>
-
-                            <Grid Margin="0,0,0,20">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="380"/>
-                                    <ColumnDefinition Width="140"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                </Grid.RowDefinitions>
-
-                                <TextBlock Grid.Row="0" Text="Tolérance de décalage de lignes entières (nb lignes) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBlock Grid.Row="0" Text="Tolérance de décalage de lignes entières :" VerticalAlignment="Center" Foreground="#334155"/>
                                 <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Profile.MaxLineShiftForFullLine, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Row="0" Grid.Column="2" Text="Absorbe l'insertion d'un bloc plus haut dans la page sans marquer le reste en faux positif." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="Absorbe l'ajout d'un paragraphe plus haut sans fausser le reste de la page." VerticalAlignment="Center" Foreground="#64748B" Margin="14,0,0,0"/>
 
-                                <TextBlock Grid.Row="1" Text="Tolérance de décalage pour les séquences de mots :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBlock Grid.Row="1" Text="Tolérance pour les séquences de mots :" VerticalAlignment="Center" Foreground="#334155"/>
                                 <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Profile.MaxLineShiftForSequence, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Row="1" Grid.Column="2" Text="Absorbe les différences de retour à la ligne automatique (word-wrap reflow)." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="Absorbe les retours à la ligne automatiques." VerticalAlignment="Center" Foreground="#64748B" Margin="14,0,0,0"/>
 
-                                <TextBlock Grid.Row="2" Text="Tolérance de décalage pour un mot isolé :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBlock Grid.Row="2" Text="Tolérance pour un mot isolé :" VerticalAlignment="Center" Foreground="#334155"/>
                                 <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Profile.MaxLineShiftForSingleWord, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Row="2" Grid.Column="2" Text="Réconcilie un mot ayant basculé de la fin de la ligne N au début de la ligne N+1." VerticalAlignment="Center" Foreground="#64748B" Margin="15,0,0,0"/>
-
-                                <TextBlock Grid.Row="3" Text="Proximité verticale minimale (en points PDF) :" VerticalAlignment="Center" Foreground="#334155"/>
-                                <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Profile.LocalProximityMinY, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
-
-                                <TextBlock Grid.Row="4" Text="Proximité horizontale maximale (en points PDF) :" VerticalAlignment="Center" Foreground="#334155"/>
-                                <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Profile.LocalProximityMaxX, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="2" Grid.Column="2" Text="Réconcilie un mot passé de la fin d'une ligne au début de la suivante." VerticalAlignment="Center" Foreground="#64748B" Margin="14,0,0,0"/>
                             </Grid>
 
-                            <Separator Background="#E2E8F0" Margin="0,5,0,15"/>
+                            <Separator Background="#E2E8F0" Margin="0,4,0,14"/>
 
-                            <TextBlock Text="Filtrage des Filigranes (Watermarks) &amp; Tailles de Police" FontSize="16" FontWeight="Bold" Foreground="#0F172A" Margin="0,0,0,12"/>
+                            <TextBlock Text="Filigranes (SPECIMEN) &amp; textes invisibles" FontSize="15" FontWeight="Bold" Foreground="#0F172A" Margin="0,0,0,10"/>
 
-                            <Grid Margin="0,0,0,20">
+                            <Grid Margin="0,0,0,16">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="380"/>
+                                    <ColumnDefinition Width="360"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="36"/>
+                                    <RowDefinition Height="36"/>
+                                    <RowDefinition Height="36"/>
+                                    <RowDefinition Height="34"/>
                                 </Grid.RowDefinitions>
 
-                                <TextBlock Grid.Row="0" Text="Mots de filigrane exacts (séparés par des virgules) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBlock Grid.Row="0" Text="Mots de filigrane exacts (séparés par virgule) :" VerticalAlignment="Center" Foreground="#334155"/>
                                 <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Profile.ExactWatermarkWordsCsv, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
 
                                 <TextBlock Grid.Row="1" Text="Fragments de filigrane grande police :" VerticalAlignment="Center" Foreground="#334155"/>
                                 <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Profile.LargeWatermarkFragmentsCsv, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
 
-                                <TextBlock Grid.Row="2" Text="Taille de police min. des fragments de filigrane (pt) :" VerticalAlignment="Center" Foreground="#334155"/>
-                                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Profile.WatermarkFragmentMinFontSizePt, UpdateSourceTrigger=PropertyChanged}" Width="140" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="2" Text="Taille de police min. des fragments (pt) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Profile.WatermarkFragmentMinFontSizePt, UpdateSourceTrigger=PropertyChanged}" Width="120" HorizontalAlignment="Left" VerticalAlignment="Center"/>
 
-                                <TextBlock Grid.Row="3" Text="Taille de police max. autorisée avant exclusion (pt) :" VerticalAlignment="Center" Foreground="#334155"/>
-                                <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Profile.MaxAllowedFontSizePt, UpdateSourceTrigger=PropertyChanged}" Width="140" HorizontalAlignment="Left" VerticalAlignment="Center"/>
-
-                                <CheckBox Grid.Row="4" Grid.Column="1" Content="Ignorer les textes invisibles écrits en blanc sur fond blanc (RGB >= 0.98)"
-                                          IsChecked="{Binding Profile.IgnoreWhiteOnWhiteText}" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#334155"/>
+                                <CheckBox Grid.Row="3" Grid.Column="1" Content="Ignorer les textes invisibles écrits en blanc sur fond blanc"
+                                          IsChecked="{Binding Profile.IgnoreWhiteOnWhiteText, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#334155"/>
                             </Grid>
 
-                            <Separator Background="#E2E8F0" Margin="0,5,0,15"/>
+                            <Separator Background="#E2E8F0" Margin="0,4,0,14"/>
 
-                            <TextBlock Text="Appairage des Fichiers &amp; Alertes Mots Sensibles" FontSize="16" FontWeight="Bold" Foreground="#0F172A" Margin="0,0,0,12"/>
+                            <TextBlock Text="Détection avancée des noms clients &amp; clés PDF" FontSize="15" FontWeight="Bold" Foreground="#0F172A" Margin="0,0,0,10"/>
 
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="380"/>
+                                    <ColumnDefinition Width="360"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="40"/>
-                                    <RowDefinition Height="40"/>
+                                    <RowDefinition Height="36"/>
+                                    <RowDefinition Height="36"/>
                                 </Grid.RowDefinitions>
 
-                                <TextBlock Grid.Row="0" Text="Regex d'extraction de clé de fichier PDF :" VerticalAlignment="Center" Foreground="#334155"/>
-                                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Profile.FileMatchingRegex, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="0" Text="Mots-clés précédant un nom client (Regex) :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Profile.ClientKeywordsPattern, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" VerticalAlignment="Center"/>
 
-                                <TextBlock Grid.Row="1" Text="Regex des mots critiques (Rapport Global) :" VerticalAlignment="Center" Foreground="#334155"/>
-                                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Profile.CriticalKeywordsRegex, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="1" Text="Regex d'extraction de clé de fichier PDF :" VerticalAlignment="Center" Foreground="#334155"/>
+                                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Profile.FileMatchingRegex, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" VerticalAlignment="Center"/>
                             </Grid>
                         </StackPanel>
                     </ScrollViewer>
                 </Border>
             </TabItem>
         </TabControl>
-
-        <!-- Barre de statut inférieure -->
-        <Border Grid.Row="2" Background="#EFF6FF" CornerRadius="8" Padding="14,10" Margin="0,14,0,0">
-            <DockPanel>
-                <TextBlock Text="{Binding StatusBannerText}" Foreground="#1E40AF" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                <Button Content="Fermer" Click="OnCloseClick" Style="{StaticResource SecondaryBtn}" HorizontalAlignment="Right"/>
-            </DockPanel>
-        </Border>
     </Grid>
 </Window>

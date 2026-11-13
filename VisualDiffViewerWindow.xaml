@@ -81,27 +81,23 @@
                             <Border Background="#0F172A" BorderBrush="#334155" BorderThickness="1" CornerRadius="6" Padding="8,4" Margin="0,2" Cursor="Hand">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="65"/>
-                                        <ColumnDefinition Width="125"/>
-                                        <ColumnDefinition Width="155"/>
+                                        <ColumnDefinition Width="72"/>
+                                        <ColumnDefinition Width="165"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="26"/>
                                         <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <Border Grid.Column="0" Background="#1E3A8A" CornerRadius="4" Padding="6,2" HorizontalAlignment="Left" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding PageNumber, StringFormat=Page {0}}" Foreground="#93C5FD" FontWeight="Bold" FontSize="11.5"/>
                                     </Border>
-                                    <TextBlock Grid.Column="1" Text="{Binding Category}" Foreground="#C084FC" FontWeight="Bold" FontSize="11.5" VerticalAlignment="Center" Margin="6,0" TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock Grid.Column="2" Text="{Binding ContextBefore}" Foreground="#94A3B8" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,8,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding ContextBefore}"/>
-                                    <Border Grid.Column="3" Background="#450A0A" BorderBrush="#991B1B" BorderThickness="1" CornerRadius="4" Padding="8,3" VerticalAlignment="Center">
+                                    <TextBlock Grid.Column="1" Text="{Binding ContextBefore}" Foreground="#94A3B8" FontSize="11.5" VerticalAlignment="Center" Margin="6,0,8,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding ContextBefore}"/>
+                                    <Border Grid.Column="2" Background="#450A0A" BorderBrush="#991B1B" BorderThickness="1" CornerRadius="4" Padding="8,3" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding OldText}" Foreground="#FECACA" FontWeight="Bold" FontSize="12" TextWrapping="Wrap" ToolTip="{Binding OldText}"/>
                                     </Border>
-                                    <TextBlock Grid.Column="4" Text="➔" Foreground="#94A3B8" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    <Border Grid.Column="5" Background="#064E3B" BorderBrush="#059669" BorderThickness="1" CornerRadius="4" Padding="8,3" VerticalAlignment="Center">
+                                    <TextBlock Grid.Column="3" Text="➔" Foreground="#94A3B8" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <Border Grid.Column="4" Background="#064E3B" BorderBrush="#059669" BorderThickness="1" CornerRadius="4" Padding="8,3" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding NewText}" Foreground="#A7F3D0" FontWeight="Bold" FontSize="12" TextWrapping="Wrap" ToolTip="{Binding NewText}"/>
                                     </Border>
-                                    <TextBlock Grid.Column="6" Text="{Binding FinancialDelta}" Foreground="#FBBF24" FontWeight="Bold" FontSize="11.5" VerticalAlignment="Center" Margin="8,0,0,0"/>
                                 </Grid>
                             </Border>
                         </DataTemplate>

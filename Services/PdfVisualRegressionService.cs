@@ -61,6 +61,8 @@ public class PdfVisualRegressionService : IPdfVisualRegressionService
         int dpi = Math.Clamp(profile.VisualRenderDpi, 72, 200);
         double scale = dpi / 72.0;
 
+        lock (PdfPigSync.Gate)
+        {
         using var sourceDoc = PdfDocument.Open(sourcePath, new ParsingOptions { ClipPaths = false });
         using var targetDoc = PdfDocument.Open(targetPath, new ParsingOptions { ClipPaths = false });
 
@@ -237,6 +239,7 @@ public class PdfVisualRegressionService : IPdfVisualRegressionService
 
         analysisResult.OverallSsimScore = minSsimAcrossPages;
         analysisResult.Summary.OverallSsimScore = minSsimAcrossPages;
+        }
     }
 
     public (byte[] SourcePng, byte[] TargetPng, byte[] HeatmapPng, double PageSsim, int TotalPages) RenderInteractiveInspectionPage(
@@ -247,43 +250,60 @@ public class PdfVisualRegressionService : IPdfVisualRegressionService
         var profile = Profile;
         double scale = Math.Clamp(profile.VisualRenderDpi, 96, 150) / 72.0;
 
-        using var sourceDoc = PdfDocument.Open(sourcePath, new ParsingOptions { ClipPaths = false });
-        using var targetDoc = PdfDocument.Open(targetPath, new ParsingOptions { ClipPaths = false });
+        Bitmap srcBmp;
+        Bitmap trgBmp;
+        double sPageHeight;
+        double tPageHeight;
+        List<PdfWordInfo> sWords;
+        List<PdfWordInfo> tWords;
+        int totalPages;
 
-        int totalPages = Math.Max(sourceDoc.NumberOfPages, targetDoc.NumberOfPages);
-        int pNum = Math.Clamp(pageNumber, 1, Math.Max(1, totalPages));
+        lock (PdfPigSync.Gate)
+        {
+            using var sourceDoc = PdfDocument.Open(sourcePath, new ParsingOptions { ClipPaths = false });
+            using var targetDoc = PdfDocument.Open(targetPath, new ParsingOptions { ClipPaths = false });
 
-        var sPage = pNum <= sourceDoc.NumberOfPages ? sourceDoc.GetPage(pNum) : sourceDoc.GetPage(1);
-        var tPage = pNum <= targetDoc.NumberOfPages ? targetDoc.GetPage(pNum) : targetDoc.GetPage(1);
+            totalPages = Math.Max(sourceDoc.NumberOfPages, targetDoc.NumberOfPages);
+            int pNum = Math.Clamp(pageNumber, 1, Math.Max(1, totalPages));
 
-        var sWords = sPage.GetWords().Select(w => new PdfWordInfo { Text = w.Text, Letters = w.Letters, PageNumber = pNum }).ToList();
-        var tWords = tPage.GetWords().Select(w => new PdfWordInfo { Text = w.Text, Letters = w.Letters, PageNumber = pNum }).ToList();
+            var sPage = pNum <= sourceDoc.NumberOfPages ? sourceDoc.GetPage(pNum) : sourceDoc.GetPage(1);
+            var tPage = pNum <= targetDoc.NumberOfPages ? targetDoc.GetPage(pNum) : targetDoc.GetPage(1);
+            sPageHeight = sPage.Height;
+            tPageHeight = tPage.Height;
 
-        using var srcBmp = RenderNormalizedPageBitmap(sPage, sWords, SafeGetImages(sPage), totalPages, scale, profile);
-        using var trgBmp = RenderNormalizedPageBitmap(tPage, tWords, SafeGetImages(tPage), totalPages, scale, profile);
+            sWords = sPage.GetWords().Select(w => new PdfWordInfo { Text = w.Text, Letters = w.Letters.ToList(), PageNumber = pNum }).ToList();
+            tWords = tPage.GetWords().Select(w => new PdfWordInfo { Text = w.Text, Letters = w.Letters.ToList(), PageNumber = pNum }).ToList();
 
-        // Calculer et surligner uniquement les vraies différences de texte sur les deux pages côte à côte au même niveau
-        var sanitizer = new PdfLayoutSanitizerService();
-        var matcher = new VisualHighlightMatcherService(_configService);
-        var sLines = sanitizer.GroupIntoLines(sWords);
-        var tLines = sanitizer.GroupIntoLines(tWords);
+            srcBmp = RenderNormalizedPageBitmap(sPage, sWords, SafeGetImages(sPage), totalPages, scale, profile);
+            trgBmp = RenderNormalizedPageBitmap(tPage, tWords, SafeGetImages(tPage), totalPages, scale, profile);
+        }
 
-        string sDiffTxt = string.Join("\n", sLines.Select(l => string.Join(" ", l.Select(w => w.CleanText))));
-        string tDiffTxt = string.Join("\n", tLines.Select(l => string.Join(" ", l.Select(w => w.CleanText))));
+        using (srcBmp)
+        using (trgBmp)
+        {
+            // Calculer et surligner uniquement les vraies différences de texte sur les deux pages côte à côte au même niveau
+            var sanitizer = new PdfLayoutSanitizerService();
+            var matcher = new VisualHighlightMatcherService(_configService);
+            var sLines = sanitizer.GroupIntoLines(sWords);
+            var tLines = sanitizer.GroupIntoLines(tWords);
 
-        var diffModel = new DiffPlex.DiffBuilder.SideBySideDiffBuilder(new DiffPlex.Differ()).BuildDiffModel(sDiffTxt, tDiffTxt);
-        var highlights = matcher.GenerateHighlights(diffModel, sLines, tLines);
+            string sDiffTxt = string.Join("\n", sLines.Select(l => string.Join(" ", l.Select(w => w.CleanText))));
+            string tDiffTxt = string.Join("\n", tLines.Select(l => string.Join(" ", l.Select(w => w.CleanText))));
 
-        DrawTextDiffHighlightsOnBitmap(srcBmp, highlights.SourceRed, sPage.Height, scale, isSource: true);
-        DrawTextDiffHighlightsOnBitmap(trgBmp, highlights.TargetRed, tPage.Height, scale, isSource: false);
+            var diffModel = new DiffPlex.DiffBuilder.SideBySideDiffBuilder(new DiffPlex.Differ()).BuildDiffModel(sDiffTxt, tDiffTxt);
+            var highlights = matcher.GenerateHighlights(diffModel, sLines, tLines);
 
-        int totalWords = Math.Max(1, sWords.Count + tWords.Count);
-        int changedLetters = highlights.SourceRed.Count + highlights.TargetRed.Count;
-        double textConcordance = changedLetters == 0 ? 1.0 : Math.Clamp(1.0 - ((double)changedLetters / Math.Max(20, totalWords * 5)), 0.0, 0.999);
+            DrawTextDiffHighlightsOnBitmap(srcBmp, highlights.SourceRed, sPageHeight, scale, isSource: true);
+            DrawTextDiffHighlightsOnBitmap(trgBmp, highlights.TargetRed, tPageHeight, scale, isSource: false);
 
-        using var heatmapBmp = BuildHeatmapBitmap(srcBmp, trgBmp, new List<Rectangle>());
+            int totalWords = Math.Max(1, sWords.Count + tWords.Count);
+            int changedLetters = highlights.SourceRed.Count + highlights.TargetRed.Count;
+            double textConcordance = changedLetters == 0 ? 1.0 : Math.Clamp(1.0 - ((double)changedLetters / Math.Max(20, totalWords * 5)), 0.0, 0.999);
 
-        return (BitmapToPngBytes(srcBmp), BitmapToPngBytes(trgBmp), BitmapToPngBytes(heatmapBmp), textConcordance, totalPages);
+            using var heatmapBmp = BuildHeatmapBitmap(srcBmp, trgBmp, new List<Rectangle>());
+
+            return (BitmapToPngBytes(srcBmp), BitmapToPngBytes(trgBmp), BitmapToPngBytes(heatmapBmp), textConcordance, totalPages);
+        }
     }
 
     private static void DrawTextDiffHighlightsOnBitmap(

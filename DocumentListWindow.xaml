@@ -1,0 +1,329 @@
+<Window x:Class="PDFComparison.Views.DocumentListWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Liste des Documents PDF Analysés"
+        Height="800" Width="1220"
+        WindowState="Maximized"
+        WindowStartupLocation="CenterScreen"
+        Background="#F8FAFC"
+        FontFamily="Segoe UI Variable, Segoe UI"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
+        <Style x:Key="PrimaryBtn" TargetType="Button">
+            <Setter Property="Background" Value="#2563EB"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="14,6"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#1D4ED8"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SecondaryBtn" TargetType="Button" BasedOn="{StaticResource PrimaryBtn}">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="#334155"/>
+            <Setter Property="BorderBrush" Value="#CBD5E1"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,5"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#F1F5F9"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="CategoryCardBtn" TargetType="Button">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#CBD5E1"/>
+            <Setter Property="BorderThickness" Value="1.5"/>
+            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="BorderBrush" Value="#94A3B8"/>
+                    <Setter Property="Background" Value="#F8FAFC"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="22,18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- 1. En-tête -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,14">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Border Width="34" Height="34" CornerRadius="8" Background="#DBEAFE" Margin="0,0,10,0">
+                    <TextBlock Text="&#xE8FD;" FontFamily="Segoe MDL2 Assets" FontSize="17" Foreground="#2563EB" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Liste des PDF" FontSize="20" FontWeight="Bold" Foreground="#0F172A"/>
+                    <TextBlock Text="Consultez en 1 clic tous les PDF avec erreurs/différences, les PDF compatibles et les PDF manquants" FontSize="12" Foreground="#64748B"/>
+                </StackPanel>
+            </StackPanel>
+
+            <Button Content="Fermer" IsCancel="True" Click="OnCloseClick" Style="{StaticResource PrimaryBtn}" HorizontalAlignment="Right" VerticalAlignment="Center" Padding="18,8"/>
+        </DockPanel>
+
+        <!-- 2. Filtres visuels en 1 clic : Tous | Avec erreurs / différences | Compatibles | Manquants -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,12">
+            <!-- Tous -->
+            <Button Command="{Binding SetFilterCommand}" CommandParameter="ALL" Margin="0,0,10,0">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource CategoryCardBtn}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsFilterAll}" Value="True">
+                                <Setter Property="Background" Value="#EFF6FF"/>
+                                <Setter Property="BorderBrush" Value="#2563EB"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Tous les PDF" FontSize="13" FontWeight="SemiBold" Foreground="#1E293B" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <Border Background="#DBEAFE" CornerRadius="5" Padding="7,1">
+                        <TextBlock Text="{Binding TotalCount}" FontSize="13" FontWeight="Bold" Foreground="#1D4ED8"/>
+                    </Border>
+                </StackPanel>
+            </Button>
+
+            <!-- Avec erreurs / différences -->
+            <Button Command="{Binding SetFilterCommand}" CommandParameter="ERRORS" Margin="0,0,10,0">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource CategoryCardBtn}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsFilterErrors}" Value="True">
+                                <Setter Property="Background" Value="#FEF2F2"/>
+                                <Setter Property="BorderBrush" Value="#DC2626"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Avec erreurs / différences" FontSize="13" FontWeight="SemiBold" Foreground="#B91C1C" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <Border Background="#FEE2E2" CornerRadius="5" Padding="7,1">
+                        <TextBlock Text="{Binding ErrorsOrDiffsCount}" FontSize="13" FontWeight="Bold" Foreground="#DC2626"/>
+                    </Border>
+                </StackPanel>
+            </Button>
+
+            <!-- Compatibles -->
+            <Button Command="{Binding SetFilterCommand}" CommandParameter="COMPATIBLE" Margin="0,0,10,0">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource CategoryCardBtn}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsFilterCompatible}" Value="True">
+                                <Setter Property="Background" Value="#ECFDF5"/>
+                                <Setter Property="BorderBrush" Value="#059669"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Compatibles" FontSize="13" FontWeight="SemiBold" Foreground="#047857" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <Border Background="#D1FAE5" CornerRadius="5" Padding="7,1">
+                        <TextBlock Text="{Binding CompatibleCount}" FontSize="13" FontWeight="Bold" Foreground="#059669"/>
+                    </Border>
+                </StackPanel>
+            </Button>
+
+            <!-- Manquants -->
+            <Button Command="{Binding SetFilterCommand}" CommandParameter="MISSING">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource CategoryCardBtn}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsFilterMissing}" Value="True">
+                                <Setter Property="Background" Value="#FFFBEB"/>
+                                <Setter Property="BorderBrush" Value="#D97706"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Manquants" FontSize="13" FontWeight="SemiBold" Foreground="#B45309" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <Border Background="#FEF3C7" CornerRadius="5" Padding="7,1">
+                        <TextBlock Text="{Binding MissingCount}" FontSize="13" FontWeight="Bold" Foreground="#D97706"/>
+                    </Border>
+                </StackPanel>
+            </Button>
+        </StackPanel>
+
+        <!-- 3. Tableau des documents PDF -->
+        <Border Grid.Row="2" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="2">
+            <Grid>
+                <DataGrid ItemsSource="{Binding FilteredDocumentsView}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          CanUserResizeColumns="True"
+                          HeadersVisibility="Column"
+                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto"
+                          Background="White"
+                          RowBackground="White"
+                          AlternatingRowBackground="#F8FAFC"
+                          GridLinesVisibility="None"
+                          BorderThickness="0"
+                          RowHeight="38">
+
+                    <DataGrid.Resources>
+                        <Style TargetType="DataGridColumnHeader">
+                            <Setter Property="Background" Value="#F8FAFC"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                            <Setter Property="Foreground" Value="#475569"/>
+                            <Setter Property="Padding" Value="12,8"/>
+                            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+                            <Setter Property="BorderBrush" Value="#E2E8F0"/>
+                            <Setter Property="FontSize" Value="12"/>
+                        </Style>
+
+                        <Style TargetType="DataGridCell">
+                            <Setter Property="Padding" Value="12,0"/>
+                            <Setter Property="BorderThickness" Value="0"/>
+                            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="DataGridCell">
+                                        <Border Padding="{TemplateBinding Padding}" Background="Transparent">
+                                            <ContentPresenter VerticalAlignment="Center"/>
+                                        </Border>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </DataGrid.Resources>
+
+                    <DataGrid.Columns>
+                        <!-- Canal • Produit -->
+                        <DataGridTemplateColumn Header="Canal • Produit" Width="165">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Border x:Name="ProdPill" Padding="7,2" CornerRadius="5" HorizontalAlignment="Left" Background="#F1F5F9">
+                                        <TextBlock x:Name="ProdLbl" Text="{Binding DisplayProductBadge}" FontWeight="SemiBold" FontSize="11.5" Foreground="#475569"/>
+                                    </Border>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding EffectiveChannel}" Value="Bank">
+                                            <Setter TargetName="ProdPill" Property="Background" Value="#DBEAFE"/>
+                                            <Setter TargetName="ProdLbl" Property="Foreground" Value="#1D4ED8"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding EffectiveChannel}" Value="Broker">
+                                            <Setter TargetName="ProdPill" Property="Background" Value="#EDE9FE"/>
+                                            <Setter TargetName="ProdLbl" Property="Foreground" Value="#6D28D9"/>
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <!-- Nom du PDF -->
+                        <DataGridTemplateColumn Header="Fichier PDF" Width="340">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding FileNameOnly}" FontWeight="SemiBold" Foreground="#0F172A" TextTrimming="CharacterEllipsis" ToolTip="{Binding SourcePath}"/>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <!-- Statut -->
+                        <DataGridTemplateColumn Header="Statut" Width="170">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Border x:Name="StPill" Padding="9,3" CornerRadius="10" HorizontalAlignment="Left" Background="#F1F5F9">
+                                        <TextBlock x:Name="StLbl" Text="{Binding ListStatusLabel}" FontWeight="SemiBold" FontSize="11.5" Foreground="#475569"/>
+                                    </Border>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding Status}" Value="Identical">
+                                            <Setter TargetName="StPill" Property="Background" Value="#D1FAE5"/>
+                                            <Setter TargetName="StLbl" Property="Foreground" Value="#059669"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Status}" Value="Different">
+                                            <Setter TargetName="StPill" Property="Background" Value="#FEE2E2"/>
+                                            <Setter TargetName="StLbl" Property="Foreground" Value="#DC2626"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Status}" Value="MissingInTarget">
+                                            <Setter TargetName="StPill" Property="Background" Value="#FEF3C7"/>
+                                            <Setter TargetName="StLbl" Property="Foreground" Value="#D97706"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Status}" Value="Error">
+                                            <Setter TargetName="StPill" Property="Background" Value="#FECACA"/>
+                                            <Setter TargetName="StLbl" Property="Foreground" Value="#991B1B"/>
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <!-- Détail -->
+                        <DataGridTemplateColumn Header="Détail" Width="*">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding DisplayDocumentNote}" Foreground="#475569" FontSize="12.5" TextTrimming="CharacterEllipsis" ToolTip="{Binding ErrorMessage}"/>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <!-- Actions -->
+                        <DataGridTemplateColumn Header="Actions" Width="265">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="Côte à Côte"
+                                                Command="{Binding DataContext.OpenSideBySideCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Visibility="{Binding HasReport, Converter={StaticResource BoolToVis}}"
+                                                Style="{StaticResource PrimaryBtn}" Padding="10,3" FontSize="11.5" Margin="0,0,5,0"/>
+                                        <Button Content="PDF Source"
+                                                Command="{Binding DataContext.OpenSourcePdfCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Visibility="{Binding HasSourceFile, Converter={StaticResource BoolToVis}}"
+                                                Style="{StaticResource SecondaryBtn}" Padding="8,3" FontSize="11" Margin="0,0,5,0"/>
+                                        <Button Content="PDF Cible"
+                                                Command="{Binding DataContext.OpenTargetPdfCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Visibility="{Binding HasTargetFile, Converter={StaticResource BoolToVis}}"
+                                                Style="{StaticResource SecondaryBtn}" Padding="8,3" FontSize="11"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- État vide si la catégorie sélectionnée a 0 élément -->
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                            Visibility="{Binding IsCurrentListEmpty, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="{Binding EmptyStateMessage}" FontSize="14.5" FontWeight="SemiBold" Foreground="#64748B" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

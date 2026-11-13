@@ -103,7 +103,8 @@ public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
         {
             if (word.Letters == null || word.Letters.Count == 0) continue;
 
-            bool isMaskedToken = (word.Text.StartsWith('[') && word.Text.Contains(']')) ||
+            bool isMaskedToken = word.IsMasked ||
+                                 (word.Text.StartsWith('[') && word.Text.Contains(']')) ||
                                  word.Text.Contains("_IGNORE]", StringComparison.Ordinal) ||
                                  word.Text.Contains("[IGNORED", StringComparison.Ordinal) ||
                                  word.Text.Contains("[MASKED]", StringComparison.Ordinal);
@@ -112,10 +113,17 @@ public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
                 var maskedLocs = word.Letters
                     .Select(l => new LetterLoc(l.GlyphRectangle, word.PageNumber, (decimal)l.Location.Y, (decimal)l.PointSize))
                     .ToList();
-                string maskedClean = CleanWord(word.Text);
-                if (maskedLocs.Count > 0 && !string.IsNullOrEmpty(maskedClean))
+                if (maskedLocs.Count > 0)
                 {
-                    list.Add((maskedClean, maskedLocs));
+                    var subTokens = word.Text.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (string st in subTokens)
+                    {
+                        string maskedClean = CleanWord(st);
+                        if (!string.IsNullOrEmpty(maskedClean))
+                        {
+                            list.Add((maskedClean, maskedLocs));
+                        }
+                    }
                 }
                 continue;
             }

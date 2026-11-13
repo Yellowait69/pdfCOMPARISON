@@ -103,18 +103,54 @@ public partial class DocumentPair : ObservableObject
     public string DisplayDiffCountBadge => DiffCount > 0 ? DiffCount.ToString() : "—";
 
     [JsonIgnore]
-    public string ProductGroupKey => HasProductTag ? DisplayProductBadge : "Standard";
+    public string EffectiveChannel => ProductCodeHelper.ResolveEffectiveChannel(Channel, SourcePath, TargetPath, ProductName);
+
+    [JsonIgnore]
+    public string EffectiveProductCode => ProductCodeHelper.ResolveEffectiveProductCode(ProductName, Channel, SourcePath, TargetPath);
+
+    [JsonIgnore]
+    public string ProductGroupKey
+    {
+        get
+        {
+            string ch = EffectiveChannel;
+            string prod = EffectiveProductCode;
+            return !string.IsNullOrWhiteSpace(prod) ? $"{ch} • {prod}" : ch;
+        }
+    }
 
     [JsonIgnore]
     public bool HasReport => !string.IsNullOrEmpty(ActiveRepresentativePair.ReportPath);
 
     [JsonIgnore]
-    public bool HasProductTag => !string.IsNullOrWhiteSpace(ProductName);
+    public bool HasSourceFile => !string.IsNullOrWhiteSpace(SourcePath) && File.Exists(SourcePath);
 
     [JsonIgnore]
-    public string DisplayProductBadge => HasProductTag
-        ? (string.IsNullOrWhiteSpace(Channel) ? ProductName : $"{Channel} • {ProductName}")
-        : "Standard";
+    public bool HasTargetFile => !string.IsNullOrWhiteSpace(TargetPath) && File.Exists(TargetPath);
+
+    [JsonIgnore]
+    public string ListStatusLabel => Status switch
+    {
+        CompareStatus.Identical => "Compatible",
+        CompareStatus.Different => DiffCount > 0 ? $"Avec différences ({DiffCount})" : "Avec différences",
+        CompareStatus.MissingInTarget => "Manquant",
+        CompareStatus.Error => "Erreur",
+        _ => "En attente"
+    };
+
+    [JsonIgnore]
+    public bool HasProductTag => !string.IsNullOrWhiteSpace(EffectiveProductCode);
+
+    [JsonIgnore]
+    public string DisplayProductBadge
+    {
+        get
+        {
+            string ch = EffectiveChannel;
+            string prod = EffectiveProductCode;
+            return !string.IsNullOrWhiteSpace(prod) ? $"{ch} • {prod}" : ch;
+        }
+    }
 
     [JsonIgnore]
     public string FileNameOnly => string.IsNullOrWhiteSpace(SourcePath) ? MatchKey : Path.GetFileName(SourcePath);
@@ -131,8 +167,9 @@ public partial class DocumentPair : ObservableObject
                 if (oldS.Length > 34) oldS = oldS.Substring(0, 34) + "…";
                 string newS = string.IsNullOrWhiteSpace(b.NewText) ? "(supprimé)" : b.NewText.Replace("\r\n", " ").Replace("\n", " ").Trim();
                 if (newS.Length > 34) newS = newS.Substring(0, 34) + "…";
+                string scramblePrefix = b.HasScrambledBadge ? $"[Zone variable • {b.VariantCount} var.] " : string.Empty;
                 string moreDiffs = DiffBlocks.Count > 1 ? $"  (+{DiffBlocks.Count - 1})" : string.Empty;
-                return $"P.{b.PageNumber} : {oldS} ➔ {newS}{moreDiffs}";
+                return $"P.{b.PageNumber} : {scramblePrefix}{oldS} ➔ {newS}{moreDiffs}";
             }
 
             if (Status == CompareStatus.Identical)

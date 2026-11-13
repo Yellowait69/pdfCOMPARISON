@@ -1,13 +1,16 @@
 using System.Windows;
 
-namespace PDFComparison.Views
+namespace PDFComparison.Views;
+
+public partial class DocumentationWindow : Window
 {
-    public partial class DocumentationWindow : Window
+    public DocumentationWindow()
     {
-        public DocumentationWindow()
-        {
-            // C'est la ligne magique qui dessine ton écran !
-            InitializeComponent();
-        }
+        InitializeComponent();
+    }
+
+    private void OnCloseClick(object sender, RoutedEventArgs e)
+    {
+        Close();
     }
 }

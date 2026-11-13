@@ -627,13 +627,16 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
         }
 
         int lcsLen = dp[0, 0];
-        bool samePage = (m > 0 && n > 0 && GetPageNumber(sLine[0].Letters) == GetPageNumber(tLine[0].Letters));
+        int sPage = m > 0 ? GetPageNumber(sLine[0].Letters) : 1;
+        int tPage = n > 0 ? GetPageNumber(tLine[0].Letters) : 1;
+        bool samePage = m > 0 && n > 0 && sPage == tPage;
+        bool adjacentPage = m > 0 && n > 0 && Math.Abs(sPage - tPage) == 1;
         decimal deltaY = (m > 0 && n > 0 && sLine[0].Letters.Count > 0 && tLine[0].Letters.Count > 0)
             ? Math.Abs(sLine[0].Letters[0].BaselineY - tLine[0].Letters[0].BaselineY)
             : 999m;
 
-        // Verrouiller les mots communs de la ligne si les deux lignes correspondent visuellement (même niveau Y ou >= 2 mots communs)
-        if (samePage && (deltaY <= 60m || lcsLen >= 2))
+        // Verrouiller les mots communs de la ligne si les deux lignes correspondent visuellement (même niveau Y ou >= 2 mots communs, y compris après saut de page +1/-1)
+        if ((samePage && (deltaY <= 60m || lcsLen >= 2)) || (adjacentPage && lcsLen >= 2))
         {
             int x = 0, y = 0;
             while (x < m && y < n)
@@ -919,9 +922,10 @@ public class VisualHighlightMatcherService : IVisualHighlightMatcherService
                 int insLine = globalInserts[j].LineIndex;
                 decimal insY = globalInserts[j].Letters.Count > 0 ? globalInserts[j].Letters[0].BaselineY : 0m;
 
-                // Même page et lignes adjacentes (écart <= 2 lignes ou <= 38pt verticalement)
-                bool isAdjacentReflow = (delPage == insPage) &&
-                                        (Math.Abs(delLine - insLine) <= 2 || Math.Abs(delY - insY) <= 38m);
+                // Même page (écart <= 2 lignes ou <= 38pt) OU page adjacente (+1/-1 page, écart <= 5 lignes) lors d'un décalage de saut de page
+                bool isAdjacentReflow = ((delPage == insPage) &&
+                                         (Math.Abs(delLine - insLine) <= 2 || Math.Abs(delY - insY) <= 38m)) ||
+                                        (Math.Abs(delPage - insPage) == 1 && Math.Abs(delLine - insLine) <= 5);
 
                 if (!isAdjacentReflow) continue;
 

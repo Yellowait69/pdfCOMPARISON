@@ -56,8 +56,8 @@ public partial class MainViewModel : ObservableObject
     private readonly ITidesCampaignService _tidesCampaignService;
 
     private readonly string _sessionFilePath;
+    private readonly bool _hadSavedAppSettingsAtStartup;
     private CancellationTokenSource? _cancellationTokenSource;
-    private bool _suppressPresetCallback;
     private string _lastTidesRootPath = TidesCampaignService.DefaultNetworkRootPath;
     private string _lastTidesRelease = string.Empty;
 
@@ -67,6 +67,10 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsNotProcessing))]
+    [NotifyPropertyChangedFor(nameof(IsInitialEmptyState))]
+    [NotifyPropertyChangedFor(nameof(IsAllConformState))]
+    [NotifyPropertyChangedFor(nameof(IsNoIssuesState))]
+    [NotifyPropertyChangedFor(nameof(IsProcessingEmptyState))]
     private bool _isProcessing;
 
     public bool IsNotProcessing => !IsProcessing;
@@ -79,17 +83,13 @@ public partial class MainViewModel : ObservableObject
 
     public int ProgressBarMax => ProgressMax > 0 ? ProgressMax : 100;
 
-    [ObservableProperty] private string _statusMessage = "Prêt. Sélectionnez deux dossiers ou deux fichiers PDF unitaires.";
+    [ObservableProperty] private string _statusMessage = "Prêt. Glissez un dossier ou un PDF, ou lancez un bouton de scan automatique.";
 
-    // --- Sélecteur de Profils Préconfigurés ---
-    public IReadOnlyList<string> AvailablePresets => _configurationService.AvailablePresets;
-
+    // --- Regroupement Canal / Produit / Différence (les documents Compatibles et Manquants ne s'affichent jamais dans le tableau principal) ---
     [ObservableProperty]
-    private string _selectedPreset = ConfigurationService.PresetStandard;
-
-    // --- Recherche, Regroupement Produit & Filtrage Rapide ---
-    [ObservableProperty] private string _searchQuery = string.Empty;
-    [ObservableProperty] private string _activeStatusFilter = "ALL";
+    [NotifyPropertyChangedFor(nameof(IsAllConformState))]
+    [NotifyPropertyChangedFor(nameof(IsNoIssuesState))]
+    private string _activeStatusFilter = "DIFFERENT";
 
     [ObservableProperty]
     private bool _isGroupedByProductDiff = true;
@@ -97,11 +97,37 @@ public partial class MainViewModel : ObservableObject
     // --- Compteurs KPI de Synthèse Rapide ---
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsEmptyState))]
+    [NotifyPropertyChangedFor(nameof(IsInitialEmptyState))]
+    [NotifyPropertyChangedFor(nameof(IsAllConformState))]
+    [NotifyPropertyChangedFor(nameof(IsNoIssuesState))]
+    [NotifyPropertyChangedFor(nameof(HasComparedDocuments))]
+    [NotifyPropertyChangedFor(nameof(DocumentListButtonText))]
+    [NotifyPropertyChangedFor(nameof(AllConformSubtitle))]
     private int _totalPairsCount;
 
     public bool IsEmptyState => TotalPairsCount == 0;
-    [ObservableProperty] private int _identicalPairsCount;
-    [ObservableProperty] private int _differentPairsCount;
+    public bool HasComparedDocuments => TotalPairsCount > 0;
+    public bool HasGroupedDifferences => GroupedChannels.Count > 0;
+    public bool IsInitialEmptyState => TotalPairsCount == 0 && !IsProcessing;
+    public bool IsProcessingEmptyState => IsProcessing && GroupedChannels.Count == 0;
+    public bool IsAllConformState => TotalPairsCount > 0 && !IsProcessing && GroupedChannels.Count == 0;
+    public bool IsNoIssuesState => TotalPairsCount > 0 && !IsProcessing && ActiveStatusFilter == "ISSUES" && IssuesPairsCount == 0;
+
+    public string DocumentListButtonText => TotalPairsCount > 0
+        ? $"Liste des PDF ({TotalPairsCount})"
+        : "Liste des PDF";
+
+    public string AllConformSubtitle => IssuesPairsCount > 0
+        ? $"{IdenticalPairsCount} PDF compatible(s) • {IssuesPairsCount} manquant(s). Cliquez sur « Liste des PDF » pour consulter le détail."
+        : $"Les {IdenticalPairsCount} PDF comparé(s) sont 100 % compatibles.";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AllConformSubtitle))]
+    private int _identicalPairsCount;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAllConformState))]
+    private int _differentPairsCount;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasUniqueDiffsBadge))]
@@ -114,7 +140,11 @@ public partial class MainViewModel : ObservableObject
         : string.Empty;
 
     [ObservableProperty] private int _criticalPairsCount;
-    [ObservableProperty] private int _issuesPairsCount;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsNoIssuesState))]
+    [NotifyPropertyChangedFor(nameof(AllConformSubtitle))]
+    private int _issuesPairsCount;
 
     // --- Inspecteur Rapide des Différences ---
     [ObservableProperty]
@@ -125,12 +155,20 @@ public partial class MainViewModel : ObservableObject
 
     public ComparisonProfile ActiveProfile => _configurationService.ActiveProfile;
 
+    public ObservableRangeCollection<AutomatedScanProfile> ToolbarScanProfiles { get; } = new();
     public ObservableRangeCollection<DocumentPair> Pairs { get; } = new();
     public ObservableRangeCollection<DocumentPair> DisplayPairs { get; } = new();
+    public ObservableRangeCollection<ChannelDiffGroupViewModel> GroupedChannels { get; } = new();
     public ICollectionView FilteredPairsView { get; }
 
     public MainViewModel()
     {
+        string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        string appFolder = Path.Combine(appData, "PDFComparisonPro");
+        Directory.CreateDirectory(appFolder);
+        _sessionFilePath = Path.Combine(appFolder, "last_session.json");
+        _hadSavedAppSettingsAtStartup = File.Exists(Path.Combine(appFolder, "app_settings.json"));
+
         _configurationService = new ConfigurationService();
         _fileService = new PdfFileService(_configurationService);
 
@@ -176,40 +214,72 @@ public partial class MainViewModel : ObservableObject
         _tidesCampaignService = new TidesCampaignService();
         _lastTidesRelease = _tidesCampaignService.GetCurrentMonthReleaseName();
 
-        _suppressPresetCallback = true;
-        if (AvailablePresets.Contains(_configurationService.ActiveProfile.ProfileName))
-        {
-            SelectedPreset = _configurationService.ActiveProfile.ProfileName;
-        }
-        _suppressPresetCallback = false;
-
         FilteredPairsView = CollectionViewSource.GetDefaultView(DisplayPairs);
         FilteredPairsView.Filter = FilterDocumentPair;
 
-        string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        string appFolder = Path.Combine(appData, "PDFComparisonPro");
-        Directory.CreateDirectory(appFolder);
-        _sessionFilePath = Path.Combine(appFolder, "last_session.json");
-
-        OutputDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "PDF_DiffReports");
+        OutputDirectory = GetCleanDefaultReportDirectory();
 
         LoadSession();
+        RefreshToolbarScanProfiles();
         RebuildDisplayPairs();
         RefreshKpiCounters();
     }
 
-    partial void OnSelectedPresetChanged(string value)
+    private string GetCleanDefaultReportDirectory()
     {
-        if (_suppressPresetCallback || string.IsNullOrWhiteSpace(value)) return;
-
-        _configurationService.ApplyPreset(value);
-        OnPropertyChanged(nameof(ActiveProfile));
-        StatusMessage = $"Profil appliqué : {value} ({_configurationService.ActiveProfile.ExclusionZones.Count(z => z.IsEnabled)} zones, {_configurationService.ActiveProfile.RegexRules.Count(r => r.IsEnabled)} règles Regex).";
+        string configured = (_configurationService.UserSettings.DefaultReportOutputDirectory ?? string.Empty).Trim().Trim('"');
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return configured;
+        }
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "PDF_DiffReports");
     }
 
-    partial void OnSearchQueryChanged(string value)
+    public void RefreshToolbarScanProfiles()
     {
-        FilteredPairsView.Refresh();
+        if (_configurationService.UserSettings.ScanProfiles.Count == 0)
+        {
+            _configurationService.UserSettings.ScanProfiles.Add(AutomatedScanProfile.CreateDefaultEquipeTesting());
+            _configurationService.SaveUserSettings();
+        }
+
+        ToolbarScanProfiles.ReplaceRange(
+            _configurationService.UserSettings.ScanProfiles.Where(p => p.ShowInMainToolbar));
+    }
+
+    private string ResolveEffectiveRunOutputDirectory(AutomatedScanProfile? scanProfile, string? contextLabel)
+    {
+        var settings = _configurationService.UserSettings;
+        string baseDir;
+
+        if (scanProfile != null && !string.IsNullOrWhiteSpace(scanProfile.CustomReportOutputDirectory))
+        {
+            baseDir = scanProfile.CustomReportOutputDirectory.Trim().Trim('"');
+        }
+        else if (scanProfile == null && !settings.CreateSubfolderPerRun && !string.IsNullOrWhiteSpace(OutputDirectory))
+        {
+            baseDir = OutputDirectory.Trim().Trim('"');
+            if (!string.Equals(settings.DefaultReportOutputDirectory, baseDir, StringComparison.OrdinalIgnoreCase))
+            {
+                settings.DefaultReportOutputDirectory = baseDir;
+                _configurationService.SaveUserSettings();
+            }
+        }
+        else
+        {
+            baseDir = GetCleanDefaultReportDirectory();
+        }
+
+        if (settings.CreateSubfolderPerRun)
+        {
+            string rawPrefix = string.IsNullOrWhiteSpace(contextLabel) ? "Comparaison" : contextLabel.Trim();
+            string safePrefix = string.Join("_", rawPrefix.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
+            if (string.IsNullOrWhiteSpace(safePrefix)) safePrefix = "Comparaison";
+            baseDir = Path.Combine(baseDir, $"{safePrefix}_{DateTime.Now:yyyyMMdd_HHmm}");
+        }
+
+        OutputDirectory = baseDir;
+        return baseDir;
     }
 
     partial void OnActiveStatusFilterChanged(string value)
@@ -233,7 +303,207 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void SetStatusFilter(string filterMode)
     {
-        ActiveStatusFilter = string.IsNullOrWhiteSpace(filterMode) ? "ALL" : filterMode.ToUpperInvariant();
+        ActiveStatusFilter = "DIFFERENT";
+    }
+
+    [RelayCommand]
+    private void ExpandAllGroups()
+    {
+        foreach (var ch in GroupedChannels)
+        {
+            ch.IsExpanded = true;
+            foreach (var prod in ch.Products)
+            {
+                prod.IsExpanded = true;
+                foreach (var diff in prod.Differences)
+                {
+                    diff.IsDetailsExpanded = true;
+                }
+            }
+        }
+    }
+
+    [RelayCommand]
+    private void CollapseAllGroups()
+    {
+        foreach (var ch in GroupedChannels)
+        {
+            ch.IsExpanded = true;
+            foreach (var prod in ch.Products)
+            {
+                prod.IsExpanded = false;
+                foreach (var diff in prod.Differences)
+                {
+                    diff.IsDetailsExpanded = false;
+                }
+            }
+        }
+    }
+
+    [RelayCommand]
+    private void OpenDocumentList(string? initialFilter)
+    {
+        try
+        {
+            var listWin = new Views.DocumentListWindow(Pairs, initialFilter ?? "ALL");
+            if (Application.Current?.MainWindow != null)
+            {
+                listWin.Owner = Application.Current.MainWindow;
+            }
+            listWin.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Impossible d'ouvrir la liste des PDF : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    [RelayCommand]
+    private void OpenDiffGroupReport(GroupedDiffRowViewModel? diffRow)
+    {
+        if (diffRow?.PrimaryPdf == null) return;
+        OpenSideBySideAtPage(diffRow.PrimaryPdf.Pair, diffRow.Block.PageNumber);
+    }
+
+    [RelayCommand]
+    private void OpenImpactedPdfReport(ImpactedPdfItemViewModel? item)
+    {
+        if (item?.Pair == null) return;
+        OpenSideBySideAtPage(item.Pair, item.FirstPageNumber);
+    }
+
+    private static void OpenSideBySideAtPage(DocumentPair pair, int pageNumber)
+    {
+        if (pair == null || string.IsNullOrEmpty(pair.ReportPath)) return;
+
+        string dir = Path.GetDirectoryName(pair.ReportPath) ?? string.Empty;
+        string stem = Path.GetFileNameWithoutExtension(pair.ReportPath);
+        string sideBySideHtmlPath = Path.Combine(dir, $"{stem}_SideBySide.html");
+
+        if (File.Exists(sideBySideHtmlPath))
+        {
+            try
+            {
+                string uriWithPage = new Uri(sideBySideHtmlPath).AbsoluteUri + $"#page={Math.Max(1, pageNumber)}";
+                Process.Start(new ProcessStartInfo(uriWithPage) { UseShellExecute = true });
+                return;
+            }
+            catch
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo(sideBySideHtmlPath) { UseShellExecute = true });
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Impossible d'ouvrir la vue Côte à Côte : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+            }
+        }
+
+        if (File.Exists(pair.ReportPath))
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(pair.ReportPath) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Impossible d'ouvrir le rapport : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+    }
+
+    [RelayCommand]
+    private void ApproveDiffGroup(GroupedDiffRowViewModel? diffRow)
+    {
+        if (diffRow == null) return;
+
+        string targetSig = ProductDifferenceGroupingService.GetBlockSignature(diffRow.Block);
+        bool isZoneGroup = diffRow.Block.IsScrambledZoneGroup && diffRow.Block.HasPdfBounds;
+        int affectedDocs = 0;
+
+        foreach (var imp in diffRow.ImpactedPdfs)
+        {
+            var p = imp.Pair;
+            var toRemove = p.DiffBlocks
+                .Where(b =>
+                    string.Equals(ProductDifferenceGroupingService.GetBlockSignature(b), targetSig, StringComparison.Ordinal) ||
+                    (isZoneGroup && ProductDifferenceGroupingService.AreSameProductGeometricSpot(diffRow.Block, b)))
+                .ToList();
+
+            if (toRemove.Count > 0)
+            {
+                foreach (var r in toRemove) p.DiffBlocks.Remove(r);
+                ApplyRemainingBlocksToPair(p, "Approuvé manuellement (Validé Compatible)");
+                affectedDocs++;
+            }
+        }
+
+        SelectedPair = null;
+        RebuildDisplayPairs();
+        RefreshKpiCounters();
+        RegenerateGlobalReportsSafe();
+        SaveSession();
+        StatusMessage = $"Différence validée manuellement sur {affectedDocs} PDF ({diffRow.ProductName}).";
+    }
+
+    [RelayCommand]
+    private void ApproveProductGroup(ProductDiffGroupViewModel? prodGroup)
+    {
+        if (prodGroup == null || prodGroup.ImpactedPairs.Count == 0) return;
+
+        foreach (var p in prodGroup.ImpactedPairs)
+        {
+            p.DiffBlocks.Clear();
+            ApplyRemainingBlocksToPair(p, "Approuvé manuellement (Validé Compatible)");
+        }
+
+        SelectedPair = null;
+        RebuildDisplayPairs();
+        RefreshKpiCounters();
+        RegenerateGlobalReportsSafe();
+        SaveSession();
+        StatusMessage = $"Produit « {prodGroup.ProductName} » validé manuellement ({prodGroup.ImpactedPairs.Count} PDF marqués compatibles).";
+    }
+
+    [RelayCommand]
+    private async Task RetestProductGroupAsync(ProductDiffGroupViewModel? prodGroup)
+    {
+        if (prodGroup == null || prodGroup.ImpactedPairs.Count == 0 || IsProcessing) return;
+
+        var pairsToRetest = prodGroup.ImpactedPairs.ToList();
+        if (pairsToRetest.Any(p => string.IsNullOrWhiteSpace(p.SourcePath) || string.IsNullOrWhiteSpace(p.TargetPath) ||
+                                   !File.Exists(p.SourcePath) || !File.Exists(p.TargetPath)))
+        {
+            MessageBox.Show("Les fichiers PDF Source ou Cible de ce produit sont introuvables.", "Erreur", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            IsProcessing = true;
+            StatusMessage = $"Re-test du produit « {prodGroup.ProductName} » ({pairsToRetest.Count} PDF) avec les règles actuelles...";
+
+            await _orchestrator.ProcessPairsAsync(pairsToRetest, OutputDirectory, new Progress<int>());
+
+            SelectedPair = null;
+            RebuildDisplayPairs();
+            RefreshKpiCounters();
+            RegenerateGlobalReportsSafe();
+            SaveSession();
+            StatusMessage = $"Re-test terminé pour « {prodGroup.ProductName} » ({pairsToRetest.Count} PDF vérifié(s)).";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erreur lors du re-test de « {prodGroup.ProductName} » : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsProcessing = false;
+        }
     }
 
     private void RebuildDisplayPairs(bool forceUngrouped = false)
@@ -241,6 +511,8 @@ public partial class MainViewModel : ObservableObject
         if (Pairs.Count == 0)
         {
             DisplayPairs.Clear();
+            GroupedChannels.Clear();
+            NotifyGroupedTreeChanged();
             return;
         }
 
@@ -250,8 +522,18 @@ public partial class MainViewModel : ObservableObject
         }
         else
         {
-            DisplayPairs.ReplaceRange(Pairs);
+            DisplayPairs.ReplaceRange(Pairs.Where(p => p.Status == CompareStatus.Different));
         }
+
+        GroupedChannels.ReplaceRange(ProductDifferenceGroupingService.BuildChannelProductDiffTree(Pairs));
+        NotifyGroupedTreeChanged();
+    }
+
+    private void NotifyGroupedTreeChanged()
+    {
+        OnPropertyChanged(nameof(HasGroupedDifferences));
+        OnPropertyChanged(nameof(IsAllConformState));
+        OnPropertyChanged(nameof(IsProcessingEmptyState));
     }
 
     private void RegenerateGlobalReportsSafe()
@@ -259,9 +541,11 @@ public partial class MainViewModel : ObservableObject
         try
         {
             var summaries = ProductDifferenceGroupingService.BuildSummariesFromPairs(Pairs);
-            if (summaries.Count > 0 && !string.IsNullOrWhiteSpace(OutputDirectory))
+            string targetOut = (OutputDirectory ?? string.Empty).Trim().Trim('"');
+            if (Pairs.Count > 0 && !string.IsNullOrWhiteSpace(targetOut))
             {
-                _globalReportGenerator.GenerateGlobalSynthesisReport(summaries, OutputDirectory);
+                Directory.CreateDirectory(targetOut);
+                _globalReportGenerator.GenerateGlobalSynthesisReport(summaries, targetOut);
             }
         }
         catch (Exception ex)
@@ -272,44 +556,7 @@ public partial class MainViewModel : ObservableObject
 
     private bool FilterDocumentPair(object obj)
     {
-        if (obj is not DocumentPair pair) return false;
-
-        bool matchesStatus = ActiveStatusFilter switch
-        {
-            "DIFFERENT" => pair.Status == CompareStatus.Different,
-            "CRITICAL" => pair.Status == CompareStatus.Different && (pair.MaxSeverity == DiffSeverity.Critical || pair.CriticalCount > 0),
-            "IDENTICAL" => pair.Status == CompareStatus.Identical,
-            "ISSUES" => pair.Status is CompareStatus.MissingInTarget or CompareStatus.Error,
-            _ => true
-        };
-
-        if (!matchesStatus) return false;
-
-        if (string.IsNullOrWhiteSpace(SearchQuery)) return true;
-
-        string q = SearchQuery.Trim();
-        if (pair.MatchKey.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-            pair.SourcePath.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-            pair.DisplayDocumentNote.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-            pair.ProductName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-            pair.Channel.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-            pair.DisplayProductBadge.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-            pair.ErrorMessage.Contains(q, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (pair.GroupedSourcePairs.Any(g =>
-            g.MatchKey.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-            g.SourcePath.Contains(q, StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        return pair.DiffBlocks.Any(b =>
-            (b.OldText != null && b.OldText.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
-            (b.NewText != null && b.NewText.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
-            (b.Category != null && b.Category.Contains(q, StringComparison.OrdinalIgnoreCase)));
+        return obj is DocumentPair pair && pair.Status == CompareStatus.Different;
     }
 
     private void RefreshKpiCounters()
@@ -321,6 +568,9 @@ public partial class MainViewModel : ObservableObject
         CriticalPairsCount = Pairs.Count(p => p.Status == CompareStatus.Different && (p.MaxSeverity == DiffSeverity.Critical || p.CriticalCount > 0));
         IssuesPairsCount = Pairs.Count(p => p.Status is CompareStatus.MissingInTarget or CompareStatus.Error);
         OnPropertyChanged(nameof(HasSelectedPairWithDiffs));
+        OnPropertyChanged(nameof(HasGroupedDifferences));
+        OnPropertyChanged(nameof(IsAllConformState));
+        OnPropertyChanged(nameof(IsProcessingEmptyState));
         FilteredPairsView.Refresh();
     }
 
@@ -364,14 +614,29 @@ public partial class MainViewModel : ObservableObject
                 SourceDirectory = data.SourceDirectory ?? string.Empty;
                 TargetDirectory = data.TargetDirectory ?? string.Empty;
 
-                if (!string.IsNullOrEmpty(data.OutputDirectory))
+                if (!string.IsNullOrWhiteSpace(data.OutputDirectory))
                 {
-                    OutputDirectory = data.OutputDirectory;
+                    if (!_hadSavedAppSettingsAtStartup)
+                    {
+                        _configurationService.UserSettings.DefaultReportOutputDirectory = data.OutputDirectory;
+                        _configurationService.SaveUserSettings();
+                        OutputDirectory = data.OutputDirectory;
+                    }
+                    else if (_configurationService.UserSettings.CreateSubfolderPerRun)
+                    {
+                        OutputDirectory = data.OutputDirectory;
+                    }
                 }
 
                 if (!string.IsNullOrWhiteSpace(data.LastTidesRootPath))
                 {
                     _lastTidesRootPath = data.LastTidesRootPath;
+                    var builtIn = _configurationService.UserSettings.ScanProfiles.FirstOrDefault(p => p.IsBuiltInTides);
+                    if (!_hadSavedAppSettingsAtStartup && builtIn != null)
+                    {
+                        builtIn.RootPath = data.LastTidesRootPath;
+                        _configurationService.SaveUserSettings();
+                    }
                 }
 
                 if (!string.IsNullOrWhiteSpace(data.LastTidesRelease))
@@ -381,10 +646,26 @@ public partial class MainViewModel : ObservableObject
 
                 if (data.Pairs != null)
                 {
+                    foreach (var p in data.Pairs)
+                    {
+                        string resolvedProd = p.EffectiveProductCode;
+                        string resolvedChan = p.EffectiveChannel;
+                        p.ProductName = resolvedProd;
+                        p.Channel = resolvedChan;
+                        foreach (var b in p.DiffBlocks)
+                        {
+                            if (!string.IsNullOrWhiteSpace(resolvedProd))
+                            {
+                                b.ProductCode = resolvedProd;
+                            }
+                        }
+                    }
+
                     Pairs.ReplaceRange(data.Pairs);
 
                     if (Pairs.Count > 0)
                     {
+                        RegenerateGlobalReportsSafe();
                         StatusMessage = $"Session restaurée ({Pairs.Count} documents). Cliquez sur une ligne pour ouvrir sa synthèse.";
                         SelectedPair = null;
                     }
@@ -411,11 +692,16 @@ public partial class MainViewModel : ObservableObject
             var approvedSigs = target.DiffBlocks
                 .Select(ProductDifferenceGroupingService.GetBlockSignature)
                 .ToHashSet(StringComparer.Ordinal);
+            var approvedZoneBlocks = target.DiffBlocks
+                .Where(b => b.IsScrambledZoneGroup && b.HasPdfBounds)
+                .ToList();
 
             foreach (var underlying in target.GroupedSourcePairs)
             {
                 var remaining = underlying.DiffBlocks
-                    .Where(b => !approvedSigs.Contains(ProductDifferenceGroupingService.GetBlockSignature(b)))
+                    .Where(b =>
+                        !approvedSigs.Contains(ProductDifferenceGroupingService.GetBlockSignature(b)) &&
+                        !approvedZoneBlocks.Any(zb => ProductDifferenceGroupingService.AreSameProductGeometricSpot(zb, b)))
                     .ToList();
 
                 underlying.DiffBlocks.Clear();
@@ -503,7 +789,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Ouvre la visionneuse visuelle interactive intégrée (Côte à Côte, Superposition Calque, Blink A/B, Heatmap SSIM).
+    /// Ouvre la visionneuse visuelle interactive intégrée.
     /// </summary>
     [RelayCommand]
     private void OpenVisualInspector(DocumentPair? pair)
@@ -588,20 +874,128 @@ public partial class MainViewModel : ObservableObject
         StatusMessage = $"Règle enregistrée de façon permanente ({affectedDocs} PDF mis à jour) : « {preview} ».";
     }
 
+    /// <summary>
+    /// Action rapide en 1 clic : Crée une zone d'exclusion géométrique ciblée sur le produit (ou globale si aucun produit n'est détecté)
+    /// à l'emplacement exact de l'écart (idéal pour les données scramblées : adresses, noms, IBAN toujours situés au même endroit).
+    /// </summary>
+    [RelayCommand]
+    private void IgnoreDiffBlockZone(DiffSummaryBlock? block)
+    {
+        if (block == null || !block.HasZoneRuleSupport)
+        {
+            MessageBox.Show("Cet écart ne contient pas de coordonnées géométriques exploitables.", "Information", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        string targetProduct = !string.IsNullOrWhiteSpace(block.ProductCode)
+            ? block.ProductCode.Trim()
+            : (SelectedPair?.EffectiveProductCode ?? string.Empty);
+
+        var createdZone = _configurationService.AddQuickIgnoreZoneRule(block, targetProduct);
+        if (createdZone == null) return;
+
+        int affectedDocs = 0;
+        foreach (var p in Pairs.Where(x => x.Status == CompareStatus.Different && x.DiffBlocks.Count > 0))
+        {
+            if (!createdZone.AppliesToProduct(p.EffectiveProductCode, p.EffectiveChannel, p.SourcePath, p.TargetPath))
+                continue;
+
+            var matching = p.DiffBlocks
+                .Where(b =>
+                    createdZone.AppliesToPage(b.PageNumber, Math.Max(b.PageNumber, 1)) &&
+                    ((b.HasPdfBounds && createdZone.IntersectsPdfBox(b.PdfLeft, b.PdfBottom, b.PdfRight, b.PdfTop, b.PdfPageWidth, b.PdfPageHeight)) ||
+                     ProductDifferenceGroupingService.AreSameProductGeometricSpot(block, b) ||
+                     ProductDifferenceGroupingService.AreSameDifference(block, b)))
+                .ToList();
+
+            if (matching.Count > 0)
+            {
+                foreach (var m in matching) p.DiffBlocks.Remove(m);
+                string scopeNote = createdZone.IsProductSpecificRule ? $"zone produit {createdZone.ProductFilter}" : "zone globale";
+                ApplyRemainingBlocksToPair(p, $"Conforme (Exclu par {scopeNote})");
+                affectedDocs++;
+            }
+        }
+
+        RebuildDisplayPairs();
+        if (SelectedPair != null)
+        {
+            string prevKey = SelectedPair.ProductGroupKey;
+            SelectedPair = DisplayPairs.FirstOrDefault(d => d.Status == CompareStatus.Different && d.ProductGroupKey == prevKey);
+        }
+
+        RefreshKpiCounters();
+        RegenerateGlobalReportsSafe();
+        SaveSession();
+
+        string scopeLabel = createdZone.IsProductSpecificRule
+            ? $"pour le produit « {createdZone.ProductFilter} »"
+            : "globalement";
+        StatusMessage = $"Zone géométrique enregistrée (Page {block.PageNumber}) {scopeLabel} — {affectedDocs} PDF mis à jour.";
+    }
+
+    [RelayCommand]
+    private void OpenAppSettings()
+    {
+        try
+        {
+            var settingsWin = new Views.AppSettingsWindow(_configurationService);
+            if (Application.Current?.MainWindow != null)
+            {
+                settingsWin.Owner = Application.Current.MainWindow;
+            }
+
+            if (settingsWin.ShowDialog() == true)
+            {
+                RefreshToolbarScanProfiles();
+
+                string updatedDefaultOut = GetCleanDefaultReportDirectory();
+                if (!_configurationService.UserSettings.CreateSubfolderPerRun || string.IsNullOrWhiteSpace(OutputDirectory))
+                {
+                    OutputDirectory = updatedDefaultOut;
+                    if (Pairs.Count > 0)
+                    {
+                        RegenerateGlobalReportsSafe();
+                    }
+                }
+
+                SaveSession();
+                StatusMessage = $"Paramètres enregistrés ({ToolbarScanProfiles.Count} bouton(s) de scan actif(s) • Rapports : {OutputDirectory}).";
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Impossible d'ouvrir les paramètres : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     [RelayCommand]
     private void OpenProfileSettings()
     {
         try
         {
-            var settingsWindow = new Views.ProfileSettingsWindow(_configurationService);
+            var knownProducts = Pairs
+                .Select(p => p.EffectiveProductCode)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var contextPair = SelectedPair?.ActiveRepresentativePair
+                              ?? Pairs.FirstOrDefault(p => p.Status == CompareStatus.Different)
+                              ?? Pairs.FirstOrDefault(p => p.HasTargetFile || p.HasSourceFile);
+
+            string? initialProduct = contextPair?.EffectiveProductCode;
+            string? initialSamplePdf = contextPair?.TargetPath ?? contextPair?.SourcePath;
+
+            var settingsWindow = new Views.ProfileSettingsWindow(_configurationService, knownProducts, initialProduct, initialSamplePdf);
             if (Application.Current?.MainWindow != null)
             {
                 settingsWindow.Owner = Application.Current.MainWindow;
             }
             settingsWindow.ShowDialog();
-            _configurationService.SaveActiveProfile();
+            _configurationService.SyncActiveToGeneralIfNeeded();
             OnPropertyChanged(nameof(ActiveProfile));
-            StatusMessage = $"Profil actif : {_configurationService.ActiveProfile.ProfileName} ({_configurationService.ActiveProfile.ExclusionZones.Count(z => z.IsEnabled)} zones, {_configurationService.ActiveProfile.RegexRules.Count(r => r.IsEnabled)} règles Regex).";
+            StatusMessage = $"Règles enregistrées ({_configurationService.ActiveProfile.RegexRules.Count(r => r.IsEnabled)} règle(s) métier/Regex active(s), {_configurationService.ActiveProfile.ExclusionZones.Count(z => z.IsEnabled)} zone(s) active(s)).";
         }
         catch (Exception ex)
         {
@@ -691,62 +1085,117 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
-    private void BrowseSource()
+    /// <summary>
+    /// Sélecteur unifié qui permet de choisir soit un dossier entier soit un fichier PDF en une seule fenêtre.
+    /// </summary>
+    private static string? PickFolderOrPdf(string title, string? initialPath)
     {
-        var dialog = new OpenFolderDialog { Title = "Sélectionner le dossier Source (Attendu)" };
-        if (dialog.ShowDialog() == true)
-        {
-            SourceDirectory = dialog.FolderName;
-            SaveSession();
-        }
-    }
-
-    [RelayCommand]
-    private void BrowseSourceFile()
-    {
+        const string folderSentinel = "[Sélectionner ce dossier]";
         var dialog = new OpenFileDialog
         {
-            Title = "Sélectionner un fichier PDF Source (Comparaison 1-vs-1)",
-            Filter = "Fichiers PDF (*.pdf)|*.pdf"
+            Title = title,
+            Filter = "Dossier ou Fichier PDF (*.pdf)|*.pdf|Tous les fichiers (*.*)|*.*",
+            ValidateNames = false,
+            CheckFileExists = false,
+            CheckPathExists = true,
+            FileName = folderSentinel
         };
-        if (dialog.ShowDialog() == true)
+
+        string cleaned = (initialPath ?? string.Empty).Trim().Trim('"');
+        if (Directory.Exists(cleaned))
         {
-            SourceDirectory = dialog.FileName;
+            dialog.InitialDirectory = cleaned;
+        }
+        else if (File.Exists(cleaned))
+        {
+            string? dir = Path.GetDirectoryName(cleaned);
+            if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir))
+            {
+                dialog.InitialDirectory = dir;
+            }
+        }
+
+        if (dialog.ShowDialog() != true)
+        {
+            return null;
+        }
+
+        string chosen = dialog.FileName;
+        if (File.Exists(chosen))
+        {
+            return chosen;
+        }
+
+        string? folder = Path.GetDirectoryName(chosen);
+        if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder))
+        {
+            return folder;
+        }
+
+        return Directory.Exists(chosen) ? chosen : null;
+    }
+
+    [RelayCommand]
+    private void BrowseSourcePath()
+    {
+        string? picked = PickFolderOrPdf("Source (Attendu) — Choisissez un dossier ou cliquez sur un PDF", SourceDirectory);
+        if (!string.IsNullOrWhiteSpace(picked))
+        {
+            SourceDirectory = picked;
             SaveSession();
         }
     }
 
     [RelayCommand]
-    private void BrowseTarget()
+    private void BrowseTargetPath()
     {
-        var dialog = new OpenFolderDialog { Title = "Sélectionner le dossier Cible (Obtenu)" };
-        if (dialog.ShowDialog() == true)
+        string? picked = PickFolderOrPdf("Cible (Obtenu) — Choisissez un dossier ou cliquez sur un PDF", TargetDirectory);
+        if (!string.IsNullOrWhiteSpace(picked))
         {
-            TargetDirectory = dialog.FolderName;
+            TargetDirectory = picked;
             SaveSession();
         }
     }
 
     [RelayCommand]
-    private void BrowseTargetFile()
+    private void BrowseOutputPath()
     {
-        var dialog = new OpenFileDialog
+        var dialog = new OpenFolderDialog { Title = "Sélectionner le dossier personnalisé des rapports" };
+        if (Directory.Exists(OutputDirectory))
         {
-            Title = "Sélectionner un fichier PDF Cible (Comparaison 1-vs-1)",
-            Filter = "Fichiers PDF (*.pdf)|*.pdf"
-        };
+            dialog.InitialDirectory = OutputDirectory;
+        }
         if (dialog.ShowDialog() == true)
         {
-            TargetDirectory = dialog.FileName;
+            OutputDirectory = dialog.FolderName;
+            _configurationService.UserSettings.DefaultReportOutputDirectory = dialog.FolderName;
+            _configurationService.SaveUserSettings();
+
+            if (Pairs.Count > 0)
+            {
+                RegenerateGlobalReportsSafe();
+            }
+
             SaveSession();
+            StatusMessage = $"Dossier des rapports personnalisé enregistré : {OutputDirectory}";
         }
     }
 
     [RelayCommand]
     private void OpenHtmlReport()
     {
+        OutputDirectory = (OutputDirectory ?? string.Empty).Trim().Trim('"');
+        if (string.IsNullOrWhiteSpace(OutputDirectory))
+        {
+            OutputDirectory = GetCleanDefaultReportDirectory();
+        }
+
         string htmlReportPath = Path.Combine(OutputDirectory, "Global_Synthesis_Report.html");
+
+        if (Pairs.Count > 0)
+        {
+            RegenerateGlobalReportsSafe();
+        }
 
         if (File.Exists(htmlReportPath))
         {
@@ -756,65 +1205,7 @@ public partial class MainViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Impossible d'ouvrir le rapport interactif HTML : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-        else
-        {
-            OpenOutputDirectory();
-        }
-    }
-
-    [RelayCommand]
-    private void OpenCsvReport()
-    {
-        string csvReportPath = Path.Combine(OutputDirectory, "Global_Audit_Report.csv");
-
-        if (!File.Exists(csvReportPath) && Pairs.Count > 0)
-        {
-            try
-            {
-                var summaries = ProductDifferenceGroupingService.BuildSummariesFromPairs(Pairs);
-                csvReportPath = _globalReportGenerator.ExportCsvAuditReport(summaries, OutputDirectory);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Erreur lors de la génération de l'export Excel/CSV : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-        }
-
-        if (File.Exists(csvReportPath))
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo(csvReportPath) { UseShellExecute = true });
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Impossible d'ouvrir l'export CSV/Excel : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-        else
-        {
-            MessageBox.Show("Aucun rapport CSV disponible. Lancez d'abord une comparaison.", "Information", MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-    }
-
-    [RelayCommand]
-    private void OpenOutputDirectory()
-    {
-        string globalReportPath = Path.Combine(OutputDirectory, "Global_Synthesis_Report.pdf");
-
-        if (File.Exists(globalReportPath))
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo(globalReportPath) { UseShellExecute = true });
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Cannot open the global report: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"Impossible d'ouvrir la Synthèse : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         else if (Directory.Exists(OutputDirectory))
@@ -823,7 +1214,7 @@ public partial class MainViewModel : ObservableObject
         }
         else
         {
-            MessageBox.Show("The reports directory does not exist yet. Please run a comparison first.", "Directory not found", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("Aucune synthèse disponible pour le moment. Lancez d'abord une comparaison.", "Synthèse", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 
@@ -832,16 +1223,65 @@ public partial class MainViewModel : ObservableObject
     {
         try
         {
-            string subject = "PDF Comparison Reports";
-            string body = $"Hello,\n\nThe PDF comparison reports have been generated.\nYou can access them in the following directory:\n{OutputDirectory}\n\nBest regards.";
+            var settings = _configurationService.UserSettings;
+            string currentOut = (OutputDirectory ?? string.Empty).Trim().Trim('"');
+            if (string.IsNullOrWhiteSpace(currentOut))
+            {
+                currentOut = GetCleanDefaultReportDirectory();
+                OutputDirectory = currentOut;
+            }
+            else if (!settings.CreateSubfolderPerRun &&
+                     !string.Equals(settings.DefaultReportOutputDirectory, currentOut, StringComparison.OrdinalIgnoreCase))
+            {
+                settings.DefaultReportOutputDirectory = currentOut;
+                _configurationService.SaveUserSettings();
+            }
 
-            string mailtoUri = $"mailto:?subject={Uri.EscapeDataString(subject)}&body={Uri.EscapeDataString(body)}";
+            string htmlPath = Path.Combine(currentOut, "Global_Synthesis_Report.html");
+            if (Pairs.Count > 0)
+            {
+                RegenerateGlobalReportsSafe();
+            }
+
+            string subject = string.IsNullOrWhiteSpace(settings.ShareMailSubject)
+                ? "Synthèse Comparaison PDF"
+                : settings.ShareMailSubject.Trim();
+
+            string intro = string.IsNullOrWhiteSpace(settings.ShareMailIntro)
+                ? "Bonjour,\n\nLa synthèse de comparaison PDF a été générée et mise à jour."
+                : settings.ShareMailIntro.Trim();
+
+            var bodyBuilder = new StringBuilder();
+            bodyBuilder.AppendLine(intro);
+            bodyBuilder.AppendLine();
+
+            if (Pairs.Count > 0)
+            {
+                bodyBuilder.AppendLine(
+                    $"Résumé : {IdenticalPairsCount} conforme(s) • {UniqueDiffsCount} différence(s) unique(s) (sur {DifferentPairsCount} PDF) • {IssuesPairsCount} manquant(s).");
+                bodyBuilder.AppendLine();
+            }
+
+            if (File.Exists(htmlPath))
+            {
+                bodyBuilder.AppendLine($"• Synthèse interactive : {htmlPath}");
+            }
+            bodyBuilder.AppendLine($"• Dossier des rapports : {currentOut}");
+            bodyBuilder.AppendLine();
+            bodyBuilder.Append("Cordialement.");
+
+            string cleanRecipients = string.Join(
+                ";",
+                (settings.ShareMailRecipients ?? string.Empty)
+                    .Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+            string mailtoUri = $"mailto:{cleanRecipients}?subject={Uri.EscapeDataString(subject)}&body={Uri.EscapeDataString(bodyBuilder.ToString())}";
 
             Process.Start(new ProcessStartInfo(mailtoUri) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Cannot open the default mail client: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"Impossible d'ouvrir la messagerie : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -855,83 +1295,153 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    [RelayCommand]
+    private Task OpenTidesCampaignAsync()
+    {
+        var defaultProfile = _configurationService.UserSettings.ScanProfiles.FirstOrDefault(p => p.IsBuiltInTides)
+                             ?? _configurationService.UserSettings.ScanProfiles.FirstOrDefault();
+        return OpenScanCampaignAsync(defaultProfile);
+    }
+
     /// <summary>
-    /// Ouvre la fenêtre de Campagne Rapide Testing TIDES Life (\\sppdfc01\TIDES\Life : Bank puis Broker)
-    /// et automatise la comparaison de tous les produits cochés.
+    /// Ouvre la fenêtre d'un bouton de scan automatique (Équipe Testing ou bouton personnalisé)
+    /// et lance la comparaison selon sa logique de dossiers, sa stratégie d'appairage PDF et ses règles.
     /// </summary>
     [RelayCommand]
-    private async Task OpenTidesCampaignAsync()
+    private async Task OpenScanCampaignAsync(AutomatedScanProfile? scanProfile)
     {
         if (IsProcessing) return;
 
+        var profile = scanProfile
+                      ?? _configurationService.UserSettings.ScanProfiles.FirstOrDefault()
+                      ?? AutomatedScanProfile.CreateDefaultEquipeTesting();
+
         try
         {
-            string defaultRelease = _tidesCampaignService.GetCurrentMonthReleaseName();
-            var campaignWin = new Views.TidesCampaignWindow(_tidesCampaignService, _lastTidesRootPath, defaultRelease);
+            string fallbackRelease = !string.IsNullOrWhiteSpace(_lastTidesRelease)
+                ? _lastTidesRelease
+                : _tidesCampaignService.GetCurrentMonthReleaseName();
+
+            var campaignWin = new Views.TidesCampaignWindow(
+                _tidesCampaignService,
+                profile,
+                _configurationService,
+                fallbackRelease);
+
             if (Application.Current?.MainWindow != null)
             {
                 campaignWin.Owner = Application.Current.MainWindow;
             }
 
-            if (campaignWin.ShowDialog() != true || campaignWin.SelectedProductsToCompare.Count == 0)
+            bool confirmed = campaignWin.ShowDialog() == true;
+
+            // Rafraîchir la barre d'outils au cas où l'utilisateur a modifié/créé des boutons via "Configurer"
+            RefreshToolbarScanProfiles();
+
+            if (!confirmed || campaignWin.SelectedProductsToCompare.Count == 0)
             {
                 return;
             }
 
-            _lastTidesRootPath = campaignWin.SelectedRootPath;
-            _lastTidesRelease = campaignWin.SelectedReleaseName;
-
-            if (campaignWin.UseVisibleTextOnlyMode)
+            // Mémoriser les derniers chemins et options sur ce bouton
+            profile.RootPath = campaignWin.SelectedRootPath;
+            if (profile.TopologyMode == ScanTopologyMode.MirrorTrees)
             {
-                _suppressPresetCallback = true;
-                _configurationService.ApplyTidesTestingProfile(
-                    campaignWin.IgnoreRepeatingDates,
-                    campaignWin.IgnoreHeaderFooter);
-                SelectedPreset = ConfigurationService.PresetTidesTesting;
-                _suppressPresetCallback = false;
-                OnPropertyChanged(nameof(ActiveProfile));
+                profile.SecondaryTargetRootPath = campaignWin.SelectedSecondaryTargetPath;
             }
 
-            await RunTidesCampaignInternalAsync(
+            bool hasRelease = profile.TopologyMode == ScanTopologyMode.ProductSubfolders && profile.UseReleaseFolder;
+            if (hasRelease && !string.IsNullOrWhiteSpace(campaignWin.SelectedReleaseName))
+            {
+                profile.DefaultReleaseName = campaignWin.SelectedReleaseName;
+                if (profile.IsBuiltInTides)
+                {
+                    _lastTidesRelease = campaignWin.SelectedReleaseName;
+                    _lastTidesRootPath = campaignWin.SelectedRootPath;
+                }
+            }
+
+            profile.DefaultIgnoreDates = campaignWin.IgnoreRepeatingDates;
+            profile.DefaultIgnoreHeaderFooter = campaignWin.IgnoreHeaderFooter;
+            profile.DefaultWriteProductOutputs = campaignWin.WriteToProductOutputs;
+            _configurationService.SaveUserSettings();
+
+            // Activer les règles du bouton (règles dédiées ou règles générales)
+            _configurationService.ActivateScanProfile(
+                profile,
+                campaignWin.IgnoreRepeatingDates,
+                campaignWin.IgnoreHeaderFooter);
+            OnPropertyChanged(nameof(ActiveProfile));
+
+            await RunScanCampaignInternalAsync(
+                profile,
                 campaignWin.SelectedProductsToCompare,
                 campaignWin.SelectedRootPath,
+                campaignWin.SelectedSecondaryTargetPath,
                 campaignWin.SelectedReleaseName,
                 campaignWin.WriteToProductOutputs);
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Erreur lors du lancement de la campagne TIDES : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"Erreur lors du lancement de « {profile.ButtonName} » : {ex.Message}", "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
-    private async Task RunTidesCampaignInternalAsync(
+    private async Task RunScanCampaignInternalAsync(
+        AutomatedScanProfile scanProfile,
         List<TidesProductItem> selectedProducts,
         string rootPath,
+        string secondaryTargetPath,
         string releaseName,
         bool writeToProductOutputs)
     {
         IsProcessing = true;
         Pairs.Clear();
         DisplayPairs.Clear();
+        GroupedChannels.Clear();
         SelectedPair = null;
         ProgressValue = 0;
-        ActiveStatusFilter = "ALL";
+        ActiveStatusFilter = "DIFFERENT";
         RefreshKpiCounters();
 
-        int bankProductsCount = selectedProducts.Count(p => string.Equals(p.Channel, "Bank", StringComparison.OrdinalIgnoreCase));
-        int brokerProductsCount = selectedProducts.Count(p => string.Equals(p.Channel, "Broker", StringComparison.OrdinalIgnoreCase));
+        bool hasRelease = scanProfile.TopologyMode == ScanTopologyMode.ProductSubfolders &&
+                          scanProfile.UseReleaseFolder &&
+                          !string.IsNullOrWhiteSpace(releaseName);
 
-        SourceDirectory = $"{rootPath} [Source • {bankProductsCount} Bank + {brokerProductsCount} Broker]";
-        TargetDirectory = $"{rootPath} [{releaseName}\\Target]";
+        string runTitle = hasRelease
+            ? $"{scanProfile.ButtonName} ({releaseName})"
+            : scanProfile.ButtonName;
+
+        string targetOutDir = ResolveEffectiveRunOutputDirectory(
+            scanProfile,
+            hasRelease ? $"{scanProfile.ButtonName}_{releaseName}" : scanProfile.ButtonName);
+
+        if (scanProfile.TopologyMode == ScanTopologyMode.MirrorTrees)
+        {
+            SourceDirectory = rootPath;
+            TargetDirectory = secondaryTargetPath;
+        }
+        else if (hasRelease)
+        {
+            SourceDirectory = $"{rootPath} [{scanProfile.SourceSubfolderTemplate} • {selectedProducts.Count} dossier(s)]";
+            TargetDirectory = $"{rootPath} [{releaseName}]";
+        }
+        else
+        {
+            SourceDirectory = $"{rootPath} [{scanProfile.ButtonName} • {selectedProducts.Count} dossier(s)]";
+            TargetDirectory = $"{rootPath} [Cible auto-détectée]";
+        }
 
         _cancellationTokenSource = new CancellationTokenSource();
 
         try
         {
-            StatusMessage = $"Préparation de la campagne TIDES ({releaseName}) : appairage de {selectedProducts.Count} produit(s) (Bank puis Broker)...";
+            StatusMessage = $"Préparation {runTitle} : appairage des PDF sur {selectedProducts.Count} dossier(s)/produit(s)...";
+
+            var pairingOptions = scanProfile.ToPairingOptions(_configurationService.ActiveProfile.FileMatchingRegex);
 
             var matchedPairs = await Task.Run(
-                () => _tidesCampaignService.BuildOrderedCampaignPairs(selectedProducts, _fileService),
+                () => _tidesCampaignService.BuildOrderedCampaignPairs(selectedProducts, _fileService, pairingOptions),
                 _cancellationTokenSource.Token);
 
             Pairs.ReplaceRange(matchedPairs);
@@ -943,25 +1453,22 @@ public partial class MainViewModel : ObservableObject
 
             if (ProgressMax == 0)
             {
-                StatusMessage = $"Aucune paire PDF valide trouvée dans les {selectedProducts.Count} produit(s) sélectionné(s).";
+                StatusMessage = $"Aucune paire PDF valide trouvée dans les {selectedProducts.Count} dossier(s) sélectionné(s).";
                 return;
             }
-
-            int bankDocsCount = pairsToProcess.Count(p => string.Equals(p.Channel, "Bank", StringComparison.OrdinalIgnoreCase));
 
             var progress = new Progress<int>(val =>
             {
                 ProgressValue = val;
-                string phaseLabel = val <= bankDocsCount ? "1/2 • BANK (Prioritaire)" : "2/2 • BROKER";
-                StatusMessage = $"[{phaseLabel}] Comparaison en cours : document {val} / {ProgressMax}";
+                StatusMessage = $"{runTitle} : document {val} / {ProgressMax}";
                 RefreshKpiCounters();
             });
 
-            StatusMessage = $"Comparaison TIDES ({releaseName}) en cours : {bankDocsCount} PDF Bank puis {ProgressMax - bankDocsCount} PDF Broker...";
+            StatusMessage = $"{runTitle} en cours : {ProgressMax} PDF à comparer...";
 
             await _orchestrator.ProcessPairsAsync(
                 pairsToProcess,
-                OutputDirectory,
+                targetOutDir,
                 progress,
                 _cancellationTokenSource.Token,
                 copyToProductOutput: writeToProductOutputs);
@@ -971,9 +1478,12 @@ public partial class MainViewModel : ObservableObject
                 await Task.Run(() => _tidesCampaignService.ExportPerProductSummaries(Pairs), _cancellationTokenSource.Token);
             }
 
-            // Conserver l'ordre Bank d'abord puis Broker, tout en plaçant les différences en tête de chaque canal
+            var priorityByChannel = selectedProducts
+                .GroupBy(p => p.Channel ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Min(x => x.SortPriority), StringComparer.OrdinalIgnoreCase);
+
             var sortedCampaignPairs = Pairs
-                .OrderBy(p => string.Equals(p.Channel, "Bank", StringComparison.OrdinalIgnoreCase) ? 1 : 2)
+                .OrderBy(p => priorityByChannel.TryGetValue(p.Channel ?? string.Empty, out int prio) ? prio : 99)
                 .ThenByDescending(p => p.DiffCount)
                 .ThenBy(p => p.ProductName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -983,17 +1493,17 @@ public partial class MainViewModel : ObservableObject
             RebuildDisplayPairs();
             RefreshKpiCounters();
 
-            StatusMessage = $"Campagne TIDES ({releaseName}) terminée : {UniqueDiffsCount} différence(s) unique(s) sur {DifferentPairsCount} PDF • {IdenticalPairsCount} conforme(s).";
+            StatusMessage = $"{runTitle} terminée : {UniqueDiffsCount} différence(s) unique(s) sur {DifferentPairsCount} PDF • {IdenticalPairsCount} conforme(s).";
             SaveSession();
 
             MessageBox.Show(
-                $"Campagne TIDES Life ({releaseName}) terminée !\n\n" +
-                $"• Produits traités : {bankProductsCount} Bank + {brokerProductsCount} Broker\n" +
+                $"{runTitle} terminée !\n\n" +
+                $"• Dossiers / Produits traités : {selectedProducts.Count}\n" +
                 $"• Conformes : {IdenticalPairsCount}\n" +
                 $"• Différences uniques : {UniqueDiffsCount} (sur {DifferentPairsCount} PDF)\n" +
-                $"• Manquants / erreurs : {IssuesPairsCount}\n" +
+                $"• Manquant : {IssuesPairsCount}\n" +
                 $"• Dossier rapports : {OutputDirectory}",
-                "Campagne TIDES Terminée",
+                $"{scanProfile.ButtonName} — Terminé",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
@@ -1001,14 +1511,14 @@ public partial class MainViewModel : ObservableObject
         {
             RebuildDisplayPairs();
             RefreshKpiCounters();
-            StatusMessage = "Campagne TIDES annulée par l'utilisateur.";
-            MessageBox.Show("La campagne TIDES a été arrêtée.", "Annulé", MessageBoxButton.OK, MessageBoxImage.Warning);
+            StatusMessage = $"{runTitle} annulée par l'utilisateur.";
+            MessageBox.Show($"La comparaison « {scanProfile.ButtonName} » a été arrêtée.", "Annulé", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         catch (Exception ex)
         {
             RebuildDisplayPairs();
             RefreshKpiCounters();
-            StatusMessage = $"Erreur campagne TIDES : {ex.Message}";
+            StatusMessage = $"Erreur {runTitle} : {ex.Message}";
             MessageBox.Show(ex.Message, "Erreur Critique", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
@@ -1022,9 +1532,13 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task StartComparisonAsync()
     {
+        SourceDirectory = (SourceDirectory ?? string.Empty).Trim().Trim('"');
+        TargetDirectory = (TargetDirectory ?? string.Empty).Trim().Trim('"');
+        OutputDirectory = (OutputDirectory ?? string.Empty).Trim().Trim('"');
+
         if (string.IsNullOrWhiteSpace(SourceDirectory) || string.IsNullOrWhiteSpace(TargetDirectory))
         {
-            MessageBox.Show("Veuillez sélectionner un dossier ou un fichier PDF pour Attendu et Obtenu.", "Chemins manquants", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Veuillez glisser, coller ou sélectionner un dossier ou un PDF pour Source et Cible.", "Chemins manquants", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -1037,21 +1551,36 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
+        // Utiliser les règles générales pour une comparaison directe
+        _configurationService.UseGeneralProfile();
+        OnPropertyChanged(nameof(ActiveProfile));
+
+        string targetOutDir = ResolveEffectiveRunOutputDirectory(scanProfile: null, contextLabel: null);
+
         IsProcessing = true;
         Pairs.Clear();
         DisplayPairs.Clear();
+        GroupedChannels.Clear();
         SelectedPair = null;
         ProgressValue = 0;
-        ActiveStatusFilter = "ALL";
+        ActiveStatusFilter = "DIFFERENT";
         RefreshKpiCounters();
 
         _cancellationTokenSource = new CancellationTokenSource();
 
         try
         {
-            StatusMessage = "Analyse et appairage des fichiers PDF...";
+            StatusMessage = "Analyse et appairage automatique des PDF (même si les noms diffèrent)...";
 
-            var matchedPairs = await Task.Run(() => _fileService.MatchFiles(SourceDirectory, TargetDirectory), _cancellationTokenSource.Token);
+            var pairingOptions = new PdfPairingOptions
+            {
+                Strategy = _configurationService.UserSettings.ManualComparePairingStrategy,
+                CustomRegexPattern = _configurationService.ActiveProfile.FileMatchingRegex
+            };
+
+            var matchedPairs = await Task.Run(
+                () => _fileService.MatchFiles(SourceDirectory, TargetDirectory, pairingOptions: pairingOptions),
+                _cancellationTokenSource.Token);
 
             Pairs.ReplaceRange(matchedPairs);
             RebuildDisplayPairs(forceUngrouped: true);
@@ -1075,7 +1604,7 @@ public partial class MainViewModel : ObservableObject
                 RefreshKpiCounters();
             });
 
-            await _orchestrator.ProcessPairsAsync(pairsToProcess, OutputDirectory, progress, _cancellationTokenSource.Token);
+            await _orchestrator.ProcessPairsAsync(pairsToProcess, targetOutDir, progress, _cancellationTokenSource.Token);
 
             StatusMessage = "Regroupement des résultats...";
 
@@ -1095,7 +1624,8 @@ public partial class MainViewModel : ObservableObject
                 $"Comparaison terminée !\n\n" +
                 $"• Conformes : {IdenticalPairsCount}\n" +
                 $"• Différences uniques : {UniqueDiffsCount} (sur {DifferentPairsCount} PDF)\n" +
-                $"• Manquants / erreurs : {IssuesPairsCount}",
+                $"• Manquant : {IssuesPairsCount}\n" +
+                $"• Dossier rapports : {OutputDirectory}",
                 "Comparaison Terminée",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -1124,12 +1654,11 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Exécution en mode ligne de commande (CLI Headless) pour pipelines CI/CD :
-    /// PDFComparison.exe --source "C:\Ref" --target "C:\Cand" [--output "C:\Out"] [--preset "Audit Financier Strict (Montants & Tableaux)"] [--fail-on-critical]
-    /// Code de sortie : 0 = Identique, 1 = Différences mineures/majeures, 2 = Différences critiques ou erreurs.
+    /// PDFComparison.exe --source "C:\Ref" --target "C:\Cand" [--output "C:\Out"] [--fail-on-critical]
     /// </summary>
     public async Task<int> RunHeadlessCliAsync(string[] args)
     {
-        string? src = null, tgt = null, outDir = null, preset = null;
+        string? src = null, tgt = null, outDir = null;
         bool failOnlyOnCritical = false;
 
         for (int i = 0; i < args.Length; i++)
@@ -1138,22 +1667,17 @@ public partial class MainViewModel : ObservableObject
             if (string.Equals(a, "--source", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) src = args[++i];
             else if (string.Equals(a, "--target", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) tgt = args[++i];
             else if (string.Equals(a, "--output", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) outDir = args[++i];
-            else if (string.Equals(a, "--preset", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) preset = args[++i];
             else if (string.Equals(a, "--fail-on-critical", StringComparison.OrdinalIgnoreCase)) failOnlyOnCritical = true;
         }
 
         if (string.IsNullOrWhiteSpace(src) || string.IsNullOrWhiteSpace(tgt))
             return 2;
 
-        if (!string.IsNullOrWhiteSpace(preset))
-            _configurationService.ApplyPreset(preset);
-
         SourceDirectory = src;
         TargetDirectory = tgt;
-        if (!string.IsNullOrWhiteSpace(outDir))
-            OutputDirectory = outDir;
+        OutputDirectory = !string.IsNullOrWhiteSpace(outDir) ? outDir : GetCleanDefaultReportDirectory();
 
-        var matchedPairs = _fileService.MatchFiles(SourceDirectory, TargetDirectory);
+        var matchedPairs = _fileService.MatchFiles(SourceDirectory, TargetDirectory, pairingOptions: PdfPairingOptions.DefaultSmart);
         var validPairs = matchedPairs.Where(p => p.Status != CompareStatus.MissingInTarget).ToList();
 
         await _orchestrator.ProcessPairsAsync(validPairs, OutputDirectory, new Progress<int>());

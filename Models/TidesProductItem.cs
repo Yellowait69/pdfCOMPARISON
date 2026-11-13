@@ -59,5 +59,9 @@ public partial class TidesProductItem : ObservableObject
     [ObservableProperty]
     private string _availableReleasesCsv = string.Empty;
 
-    public int ChannelPriority => string.Equals(Channel, "Bank", System.StringComparison.OrdinalIgnoreCase) ? 1 : 2;
+    public int SortPriority { get; set; }
+
+    public int ChannelPriority => SortPriority > 0
+        ? SortPriority
+        : (string.Equals(Channel, "Bank", System.StringComparison.OrdinalIgnoreCase) ? 1 : 2);
 }

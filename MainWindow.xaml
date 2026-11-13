@@ -47,6 +47,34 @@
             </Setter>
         </Style>
 
+        <Style TargetType="Button" x:Key="ScanToolbarButton">
+            <Setter Property="Background" Value="#059669"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="13,6"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Border" Property="Background" Value="#94A3B8"/>
+                                <Setter Property="Foreground" Value="#E2E8F0"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style TargetType="Button" x:Key="ModernSecondaryButton">
             <Setter Property="Background" Value="#FFFFFF"/>
             <Setter Property="Foreground" Value="#334155"/>
@@ -141,6 +169,57 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <Style TargetType="ToggleButton" x:Key="HeaderBarToggle">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#122563EB"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ToggleButton" x:Key="PdfDropdownPillToggle">
+            <Setter Property="Background" Value="#EFF6FF"/>
+            <Setter Property="BorderBrush" Value="#BFDBFE"/>
+            <Setter Property="Foreground" Value="#1E40AF"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="9,3"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="PillBd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="PillBd" Property="Background" Value="#DBEAFE"/>
+                                <Setter TargetName="PillBd" Property="BorderBrush" Value="#60A5FA"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="PillBd" Property="Background" Value="#2563EB"/>
+                                <Setter TargetName="PillBd" Property="BorderBrush" Value="#2563EB"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid Margin="14,10,14,10">
@@ -148,8 +227,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*" MinHeight="220"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*" MinHeight="260"/>
         </Grid.RowDefinitions>
 
         <!-- 1. BARRE SUPÉRIEURE ÉPURÉE -->
@@ -167,47 +245,62 @@
             </StackPanel>
 
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <Border Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="6" Padding="8,2" Margin="0,0,6,0" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="Profil :" FontWeight="SemiBold" Foreground="#64748B" VerticalAlignment="Center" Margin="0,0,5,0" FontSize="12"/>
-                        <ComboBox ItemsSource="{Binding AvailablePresets}"
-                                  SelectedItem="{Binding SelectedPreset}"
-                                  IsEnabled="{Binding IsNotProcessing}"
-                                  Width="180" FontSize="12" FontWeight="Medium" Foreground="#0F172A"
-                                  BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center"/>
+                <Button Command="{Binding OpenAppSettingsCommand}"
+                        Style="{StaticResource ModernSecondaryButton}"
+                        Margin="0,0,6,0"
+                        IsEnabled="{Binding IsNotProcessing}"
+                        ToolTip="Personnaliser le dossier des rapports, le mail Partager et créer/partager vos propres boutons de scan automatique">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" Foreground="#0F172A" FontSize="12" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="Paramètres" VerticalAlignment="Center"/>
                     </StackPanel>
-                </Border>
+                </Button>
 
                 <Button Command="{Binding OpenProfileSettingsCommand}"
                         Style="{StaticResource ModernSecondaryButton}"
                         Margin="0,0,6,0"
                         IsEnabled="{Binding IsNotProcessing}"
-                        ToolTip="Zones d'exclusion et règles Regex">
+                        ToolTip="Exclusions dynamiques et règles métier générales">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" Foreground="#2563EB" FontSize="12" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="&#xE9E9;" FontFamily="Segoe MDL2 Assets" Foreground="#2563EB" FontSize="12" Margin="0,0,5,0" VerticalAlignment="Center"/>
                         <TextBlock Text="Règles &amp; Exclusions" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
 
                 <Button Command="{Binding OpenDocumentationCommand}"
                         Style="{StaticResource ModernSecondaryButton}"
-                        Padding="8,5"
+                        Padding="10,5"
                         Margin="0,0,6,0"
-                        ToolTip="Documentation">
-                    <TextBlock Text="?" FontWeight="Bold" Foreground="#64748B"/>
-                </Button>
-
-                <Button Command="{Binding OpenTidesCampaignCommand}"
-                        Style="{StaticResource ModernPrimaryButton}"
-                        Background="#059669"
-                        Margin="0,0,6,0"
-                        IsEnabled="{Binding IsNotProcessing}"
-                        ToolTip="Campagne Testing TIDES Life (Bank &amp; Broker)">
+                        ToolTip="Guide d'utilisation">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE945;" FontFamily="Segoe MDL2 Assets" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                        <TextBlock Text="Campagne Testing" VerticalAlignment="Center"/>
+                        <TextBlock Text="&#xE897;" FontFamily="Segoe MDL2 Assets" Foreground="#64748B" FontSize="12" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="Guide" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
+
+                <ItemsControl ItemsSource="{Binding ToolbarScanProfiles}" VerticalAlignment="Center">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Command="{Binding DataContext.OpenScanCampaignCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    CommandParameter="{Binding}"
+                                    Style="{StaticResource ScanToolbarButton}"
+                                    Background="{Binding ButtonColorHex}"
+                                    Margin="0,0,6,0"
+                                    IsEnabled="{Binding DataContext.IsNotProcessing, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    ToolTip="{Binding LiveTopologyPreview}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE945;" FontFamily="Segoe MDL2 Assets" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding ButtonName}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
 
                 <Button Command="{Binding CancelComparisonCommand}"
                         Visibility="{Binding IsProcessing, Converter={StaticResource BooleanToVisibilityConverter}}"
@@ -228,48 +321,54 @@
             </StackPanel>
         </Grid>
 
-        <!-- 2. CHEMINS COMPACTS (SOURCE & CIBLE SUR UNE SEULE LIGNE + RAPPORTS) -->
+        <!-- 2. CHEMINS AUTO-DÉTECTÉS (DOSSIER OU PDF SANS BOUTONS SUPERFLUS) + SYNTHÈSE UNIQUE -->
         <Border Grid.Row="1" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,0,8">
             <StackPanel>
-                <Grid Height="29">
+                <Grid Height="30">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="16"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <!-- Source -->
+                    <!-- Source (détection automatique dossier ou PDF) -->
                     <TextBlock Grid.Column="0" Text="Source :" FontWeight="SemiBold" FontSize="12.5" Foreground="#1E293B" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <TextBox Grid.Column="1"
-                             Style="{StaticResource ModernInputTextBox}"
-                             Text="{Binding SourceDirectory, UpdateSourceTrigger=PropertyChanged}"
-                             Tag="Dossier ou PDF attendu..."
-                             conv:FileDropBehavior.IsEnabled="True"
-                             Margin="0,0,6,0"/>
-                    <StackPanel Grid.Column="2" Orientation="Horizontal">
-                        <Button Command="{Binding BrowseSourceCommand}" Content="Dossier" Style="{StaticResource ModernSecondaryButton}" Padding="8,4" Margin="0,0,4,0"/>
-                        <Button Command="{Binding BrowseSourceFileCommand}" Content="PDF" Style="{StaticResource ModernSecondaryButton}" Padding="8,4"/>
-                    </StackPanel>
+                    <Grid Grid.Column="1">
+                        <TextBox Style="{StaticResource ModernInputTextBox}"
+                                 Padding="10,4,30,4"
+                                 Text="{Binding SourceDirectory, UpdateSourceTrigger=PropertyChanged}"
+                                 Tag="Glissez ou collez un dossier ou un PDF attendu..."
+                                 conv:FileDropBehavior.IsEnabled="True"/>
+                        <Button Command="{Binding BrowseSourcePathCommand}"
+                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                Margin="0,0,4,0" Padding="5,3"
+                                Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                ToolTip="Choisir un dossier ou un fichier PDF (détection automatique)">
+                            <TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="#64748B"/>
+                        </Button>
+                    </Grid>
 
-                    <!-- Cible -->
-                    <TextBlock Grid.Column="4" Text="Cible :" FontWeight="SemiBold" FontSize="12.5" Foreground="#1E293B" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <TextBox Grid.Column="5"
-                             Style="{StaticResource ModernInputTextBox}"
-                             Text="{Binding TargetDirectory, UpdateSourceTrigger=PropertyChanged}"
-                             Tag="Dossier ou PDF obtenu..."
-                             conv:FileDropBehavior.IsEnabled="True"
-                             Margin="0,0,6,0"/>
-                    <StackPanel Grid.Column="6" Orientation="Horizontal">
-                        <Button Command="{Binding BrowseTargetCommand}" Content="Dossier" Style="{StaticResource ModernSecondaryButton}" Padding="8,4" Margin="0,0,4,0"/>
-                        <Button Command="{Binding BrowseTargetFileCommand}" Content="PDF" Style="{StaticResource ModernSecondaryButton}" Padding="8,4"/>
-                    </StackPanel>
+                    <!-- Cible (détection automatique dossier ou PDF) -->
+                    <TextBlock Grid.Column="3" Text="Cible :" FontWeight="SemiBold" FontSize="12.5" Foreground="#1E293B" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <Grid Grid.Column="4">
+                        <TextBox Style="{StaticResource ModernInputTextBox}"
+                                 Padding="10,4,30,4"
+                                 Text="{Binding TargetDirectory, UpdateSourceTrigger=PropertyChanged}"
+                                 Tag="Glissez ou collez un dossier ou un PDF obtenu..."
+                                 conv:FileDropBehavior.IsEnabled="True"/>
+                        <Button Command="{Binding BrowseTargetPathCommand}"
+                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                Margin="0,0,4,0" Padding="5,3"
+                                Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                ToolTip="Choisir un dossier ou un fichier PDF (détection automatique)">
+                            <TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="#64748B"/>
+                        </Button>
+                    </Grid>
                 </Grid>
 
-                <Grid Height="29" Margin="0,6,0,0">
+                <Grid Height="30" Margin="0,6,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
@@ -277,79 +376,93 @@
                     </Grid.ColumnDefinitions>
 
                     <TextBlock Grid.Column="0" Text="Rapports :" FontWeight="SemiBold" FontSize="12.5" Foreground="#1E293B" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <TextBox Grid.Column="1"
-                             Style="{StaticResource ModernInputTextBox}"
-                             Text="{Binding OutputDirectory, UpdateSourceTrigger=PropertyChanged}"
-                             Tag="Dossier des rapports..."
-                             conv:FileDropBehavior.IsEnabled="True"
-                             Margin="0,0,8,0"/>
+                    <Grid Grid.Column="1" Margin="0,0,8,0">
+                        <TextBox Style="{StaticResource ModernInputTextBox}"
+                                 Padding="10,4,30,4"
+                                 Text="{Binding OutputDirectory, UpdateSourceTrigger=PropertyChanged}"
+                                 Tag="Dossier des rapports..."
+                                 conv:FileDropBehavior.IsEnabled="True"/>
+                        <Button Command="{Binding BrowseOutputPathCommand}"
+                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                Margin="0,0,4,0" Padding="5,3"
+                                Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                ToolTip="Choisir le dossier des rapports">
+                            <TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="#64748B"/>
+                        </Button>
+                    </Grid>
                     <StackPanel Grid.Column="2" Orientation="Horizontal">
-                        <Button Command="{Binding OpenHtmlReportCommand}" Content="Synthèse Web" Style="{StaticResource ModernPrimaryButton}" Padding="10,4" Margin="0,0,5,0"/>
-                        <Button Command="{Binding OpenOutputDirectoryCommand}" Content="Synthèse PDF" Style="{StaticResource ModernSecondaryButton}" Padding="10,4" Margin="0,0,5,0"/>
-                        <Button Command="{Binding OpenCsvReportCommand}" Content="Excel" Style="{StaticResource ModernSecondaryButton}" Padding="10,4" Margin="0,0,5,0"/>
-                        <Button Command="{Binding ShareViaOutlookCommand}" Content="Partager" Style="{StaticResource ModernSecondaryButton}" Padding="10,4"/>
+                        <Button Command="{Binding OpenHtmlReportCommand}" Style="{StaticResource ModernPrimaryButton}" Padding="12,4" Margin="0,0,6,0" ToolTip="Ouvrir la Synthèse interactive des différences">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE9D2;" FontFamily="Segoe MDL2 Assets" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="Synthèse" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Command="{Binding ShareViaOutlookCommand}"
+                                Content="Partager"
+                                Style="{StaticResource ModernSecondaryButton}"
+                                Padding="10,4"
+                                ToolTip="Préparer le mail Outlook avec l'emplacement personnalisé du rapport (configurable dans Paramètres)"/>
                     </StackPanel>
                 </Grid>
             </StackPanel>
         </Border>
 
-        <!-- 3. BARRE DE FILTRES SYNTHÉTIQUES + RECHERCHE + STATUT -->
+        <!-- 3. BARRE DE SYNTHÈSE + BOUTON LISTE DES PDF (SANS AFFICHER LES PDF MANQUANTS NI CONFORMES DANS LE TABLEAU) -->
         <StackPanel Grid.Row="2" Margin="0,0,0,6">
             <Grid Margin="0,0,0,5">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="240"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Filtres rapides sans Alertes Critiques -->
-                <StackPanel Grid.Column="0" Orientation="Horizontal">
-                    <Button Command="{Binding SetStatusFilterCommand}" CommandParameter="ALL" Style="{StaticResource FilterPillButton}" Margin="0,0,6,0">
+                <!-- Résumé des différences + Déplier / Replier -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="7" Padding="11,4" Margin="0,0,8,0">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Tous" FontSize="12" FontWeight="SemiBold" Foreground="#475569" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding TotalPairsCount}" FontSize="13" FontWeight="Bold" Foreground="#0F172A" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
-
-                    <Button Command="{Binding SetStatusFilterCommand}" CommandParameter="IDENTICAL" Style="{StaticResource FilterPillButton}" Margin="0,0,6,0">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Conformes" FontSize="12" FontWeight="SemiBold" Foreground="#059669" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding IdenticalPairsCount}" FontSize="13" FontWeight="Bold" Foreground="#059669" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
-
-                    <Button Command="{Binding SetStatusFilterCommand}" CommandParameter="DIFFERENT" Style="{StaticResource FilterPillButton}" Margin="0,0,6,0">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Différences" FontSize="12" FontWeight="SemiBold" Foreground="#2563EB" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding DifferentPairsCount}" FontSize="13" FontWeight="Bold" Foreground="#2563EB" VerticalAlignment="Center"/>
-                            <Border Background="#DBEAFE" CornerRadius="4" Padding="5,1" Margin="6,0,0,0" VerticalAlignment="Center"
-                                    Visibility="{Binding HasUniqueDiffsBadge, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <TextBlock Text="{Binding UniqueDiffsBadgeText}" FontSize="10.5" FontWeight="Bold" Foreground="#1E40AF"/>
+                            <TextBlock Text="Différences uniques :" FontSize="12" FontWeight="SemiBold" Foreground="#1E40AF" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding UniqueDiffsCount}" FontSize="13.5" FontWeight="Bold" Foreground="#1D4ED8" VerticalAlignment="Center"/>
+                            <Border Background="#DBEAFE" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
+                                <TextBlock FontSize="10.5" FontWeight="Bold" Foreground="#1E40AF">
+                                    <TextBlock.Text>
+                                        <MultiBinding StringFormat="{}{0} PDF en écart">
+                                            <Binding Path="DifferentPairsCount"/>
+                                        </MultiBinding>
+                                    </TextBlock.Text>
+                                </TextBlock>
                             </Border>
                         </StackPanel>
-                    </Button>
+                    </Border>
 
-                    <Button Command="{Binding SetStatusFilterCommand}" CommandParameter="ISSUES" Style="{StaticResource FilterPillButton}">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Manquants / Erreurs" FontSize="12" FontWeight="SemiBold" Foreground="#D97706" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding IssuesPairsCount}" FontSize="13" FontWeight="Bold" Foreground="#D97706" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                Visibility="{Binding HasGroupedDifferences, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Button Content="Tout déplier" Command="{Binding ExpandAllGroupsCommand}"
+                                Style="{StaticResource ModernSecondaryButton}" Padding="9,4" FontSize="11.5" Margin="0,0,5,0"
+                                ToolTip="Ouvrir tous les canaux, produits et menus déroulants de PDF"/>
+                        <Button Content="Tout replier" Command="{Binding CollapseAllGroupsCommand}"
+                                Style="{StaticResource ModernSecondaryButton}" Padding="9,4" FontSize="11.5"
+                                ToolTip="Replier tous les produits pour une vue globale par canal"/>
+                    </StackPanel>
                 </StackPanel>
 
-                <!-- Message d'état centré/discret -->
+                <!-- Message d'état -->
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,10,0" ClipToBounds="True">
                     <TextBlock Text="{Binding StatusMessage}" FontSize="12" Foreground="#475569" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
 
-                <!-- Option regroupement produit + compteur progression -->
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
-                    <CheckBox IsChecked="{Binding IsGroupedByProductDiff}"
-                              Content="Regrouper par produit"
-                              FontWeight="SemiBold" FontSize="11.5" Foreground="#334155"
-                              VerticalContentAlignment="Center" Margin="0,0,10,0" Cursor="Hand"
-                              ToolTip="Regroupe en une seule ligne les mêmes différences trouvées sur plusieurs PDF d'un même code produit"/>
+                <!-- Bouton Liste complète des PDF (Avec erreurs / Compatibles / Manquants) + Progression -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Command="{Binding OpenDocumentListCommand}"
+                            Style="{StaticResource ModernSecondaryButton}"
+                            BorderBrush="#93C5FD" Background="#FFFFFF"
+                            Padding="12,5" Margin="0,0,10,0"
+                            ToolTip="Voir tous les PDF analysés : PDF avec erreurs/différences, PDF compatibles et PDF manquants">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE8FD;" FontFamily="Segoe MDL2 Assets" FontSize="12.5" Foreground="#2563EB" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding DocumentListButtonText}" FontWeight="Bold" Foreground="#1E293B" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+
                     <TextBlock FontWeight="SemiBold" FontSize="11.5" Foreground="#64748B" VerticalAlignment="Center">
                         <TextBlock.Text>
                             <MultiBinding StringFormat="{}{0}/{1}">
@@ -359,319 +472,337 @@
                         </TextBlock.Text>
                     </TextBlock>
                 </StackPanel>
-
-                <!-- Recherche -->
-                <TextBox Grid.Column="3"
-                         Style="{StaticResource ModernInputTextBox}"
-                         Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}"
-                         Tag="Filtrer produit, fichier, texte..."/>
             </Grid>
 
             <ProgressBar Minimum="0" Maximum="{Binding ProgressBarMax}" Value="{Binding ProgressValue}" Height="3" Foreground="#2563EB" Background="#E2E8F0" BorderThickness="0"/>
         </StackPanel>
 
-        <!-- 4. GRAND TABLEAU SYNTHÉTIQUE (AVEC DÉFILEMENT HORIZONTAL & VERTICAL AUTO) -->
-        <Border Grid.Row="3" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="2">
+        <!-- 4. TABLEAU VISUEL REGROUPÉ PAR CANAL (BANK / BROKER) ➔ PRODUIT ➔ DIFFÉRENCE REGROUPÉE (AVEC DROPDOWN DES PDF) -->
+        <Border Grid.Row="3" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8">
             <Grid>
-                <DataGrid ItemsSource="{Binding FilteredPairsView}"
-                          SelectedItem="{Binding SelectedPair}"
-                          AutoGenerateColumns="False"
-                          CanUserResizeColumns="True"
-                          IsReadOnly="True"
-                          HeadersVisibility="Column"
-                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                          ScrollViewer.VerticalScrollBarVisibility="Auto"
-                          Background="White"
-                          RowBackground="White"
-                          AlternatingRowBackground="#F8FAFC"
-                          GridLinesVisibility="None"
-                          BorderThickness="0"
-                          RowHeight="38">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              CanContentScroll="False"
+                              Padding="12,10"
+                              Visibility="{Binding HasGroupedDifferences, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <ItemsControl ItemsSource="{Binding GroupedChannels}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <!-- NIVEAU 1 : DROPDOWN CANAL (BANK / BROKER) -->
+                                <Border x:Name="ChannelCard" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="8" Background="White" Margin="0,0,0,12">
+                                    <StackPanel>
+                                        <Border x:Name="ChannelHeaderBg" Background="#F1F5F9" CornerRadius="7,7,0,0" Padding="6,4">
+                                            <ToggleButton IsChecked="{Binding IsExpanded}" Style="{StaticResource HeaderBarToggle}" Padding="6,4">
+                                                <DockPanel LastChildFill="True">
+                                                    <TextBlock DockPanel.Dock="Right" Text="{Binding HeaderSummaryText}"
+                                                               FontSize="12" FontWeight="SemiBold" Foreground="#475569" VerticalAlignment="Center" Margin="10,0,4,0"/>
 
-                    <DataGrid.Resources>
-                        <Style TargetType="DataGridColumnHeader">
-                            <Setter Property="Background" Value="#F8FAFC"/>
-                            <Setter Property="FontWeight" Value="SemiBold"/>
-                            <Setter Property="Foreground" Value="#475569"/>
-                            <Setter Property="Padding" Value="12,8"/>
-                            <Setter Property="BorderThickness" Value="0,0,0,1"/>
-                            <Setter Property="BorderBrush" Value="#E2E8F0"/>
-                            <Setter Property="FontSize" Value="12"/>
-                        </Style>
-
-                        <Style TargetType="DataGridRow">
-                            <Setter Property="Background" Value="Transparent"/>
-                            <Style.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter Property="Background" Value="#EFF6FF"/>
-                                </Trigger>
-                                <Trigger Property="IsSelected" Value="True">
-                                    <Setter Property="Background" Value="#DBEAFE"/>
-                                    <Setter Property="Foreground" Value="#0F172A"/>
-                                </Trigger>
-                            </Style.Triggers>
-                        </Style>
-
-                        <Style TargetType="DataGridCell">
-                            <Setter Property="Padding" Value="12,0"/>
-                            <Setter Property="VerticalAlignment" Value="Center"/>
-                            <Setter Property="BorderThickness" Value="0"/>
-                            <Setter Property="Foreground" Value="#1E293B"/>
-                            <Setter Property="FontSize" Value="12.5"/>
-                            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-                            <Setter Property="Template">
-                                <Setter.Value>
-                                    <ControlTemplate TargetType="DataGridCell">
-                                        <Border Padding="{TemplateBinding Padding}" Background="Transparent">
-                                            <ContentPresenter VerticalAlignment="Center"/>
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock x:Name="ChChevron" Text="▾" FontSize="13" FontWeight="Bold" Foreground="#334155" Width="18" VerticalAlignment="Center"/>
+                                                        <Border x:Name="ChBadge" Background="#E2E8F0" CornerRadius="5" Padding="10,2" Margin="0,0,8,0">
+                                                            <TextBlock x:Name="ChBadgeTxt" Text="{Binding ChannelDisplayName}" FontSize="12.5" FontWeight="Bold" Foreground="#1E293B"/>
+                                                        </Border>
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </ToggleButton>
                                         </Border>
-                                    </ControlTemplate>
-                                </Setter.Value>
-                            </Setter>
-                        </Style>
-                    </DataGrid.Resources>
 
-                    <DataGrid.Columns>
-                        <!-- 1. Canal / Produit -->
-                        <DataGridTemplateColumn Header="Canal • Produit" Width="135" MinWidth="105">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <Border x:Name="ProdBadge" Padding="7,2" CornerRadius="5" HorizontalAlignment="Left" Background="#F1F5F9">
-                                        <TextBlock x:Name="ProdText" Text="{Binding DisplayProductBadge}" FontWeight="SemiBold" FontSize="11" Foreground="#475569"/>
-                                    </Border>
-                                    <DataTemplate.Triggers>
-                                        <DataTrigger Binding="{Binding Channel}" Value="Bank">
-                                            <Setter TargetName="ProdBadge" Property="Background" Value="#DBEAFE"/>
-                                            <Setter TargetName="ProdText" Property="Foreground" Value="#1D4ED8"/>
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding Channel}" Value="Broker">
-                                            <Setter TargetName="ProdBadge" Property="Background" Value="#EDE9FE"/>
-                                            <Setter TargetName="ProdText" Property="Foreground" Value="#6D28D9"/>
-                                        </DataTrigger>
-                                    </DataTemplate.Triggers>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
+                                        <!-- Contenu du Canal : Liste des Produits -->
+                                        <Border Padding="10,8,10,4"
+                                                Visibility="{Binding IsExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <ItemsControl ItemsSource="{Binding Products}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <!-- NIVEAU 2 : DROPDOWN PRODUIT -->
+                                                        <Border BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="7" Background="#F8FAFC" Margin="0,0,0,8">
+                                                            <StackPanel>
+                                                                <Grid Margin="6,4">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="*"/>
+                                                                        <ColumnDefinition Width="Auto"/>
+                                                                    </Grid.ColumnDefinitions>
 
-                        <!-- 2. Document / Regroupement -->
-                        <DataGridTemplateColumn Header="Document" Width="270" MinWidth="170">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding MatchKey}"
-                                               FontWeight="SemiBold"
-                                               Foreground="#0F172A"
-                                               TextTrimming="CharacterEllipsis"
-                                               ToolTip="{Binding ErrorMessage}"/>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
+                                                                    <ToggleButton Grid.Column="0" IsChecked="{Binding IsExpanded}" Style="{StaticResource HeaderBarToggle}" Padding="6,3">
+                                                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                                            <TextBlock x:Name="ProdChevron" Text="▾" FontSize="12.5" FontWeight="Bold" Foreground="#475569" Width="18" VerticalAlignment="Center"/>
+                                                                            <TextBlock Text="{Binding ProductName}" FontSize="14" FontWeight="Bold" Foreground="#0F172A" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                                            <Border Background="#DBEAFE" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="5" Padding="7,1" Margin="0,0,6,0" VerticalAlignment="Center">
+                                                                                <TextBlock Text="{Binding DiffsCountBadgeText}" FontSize="11" FontWeight="Bold" Foreground="#1E40AF"/>
+                                                                            </Border>
+                                                                            <Border Background="#E2E8F0" CornerRadius="5" Padding="7,1" VerticalAlignment="Center">
+                                                                                <TextBlock Text="{Binding PdfsCountBadgeText}" FontSize="11" FontWeight="SemiBold" Foreground="#334155"/>
+                                                                            </Border>
+                                                                        </StackPanel>
+                                                                    </ToggleButton>
 
-                        <!-- 3. Résumé synthétique -->
-                        <DataGridTemplateColumn Header="Résumé" Width="*" MinWidth="240">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock x:Name="NoteTxt"
-                                               Text="{Binding DisplayDocumentNote}"
-                                               Foreground="#334155"
-                                               TextTrimming="CharacterEllipsis"
-                                               ToolTip="{Binding ErrorMessage}"/>
-                                    <DataTemplate.Triggers>
-                                        <DataTrigger Binding="{Binding Status}" Value="Identical">
-                                            <Setter TargetName="NoteTxt" Property="Foreground" Value="#94A3B8"/>
-                                        </DataTrigger>
-                                    </DataTemplate.Triggers>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
+                                                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,4,0">
+                                                                        <Button Content="✓ Valider produit"
+                                                                                Command="{Binding DataContext.ApproveProductGroupCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                CommandParameter="{Binding}"
+                                                                                Style="{StaticResource ModernSecondaryButton}"
+                                                                                Foreground="#059669" Padding="9,3" FontSize="11" Margin="0,0,5,0"
+                                                                                ToolTip="Marquer tous les PDF de ce produit comme compatibles"/>
+                                                                        <Button Content="↻"
+                                                                                Command="{Binding DataContext.RetestProductGroupCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                CommandParameter="{Binding}"
+                                                                                Style="{StaticResource ModernSecondaryButton}"
+                                                                                FontWeight="Bold" Padding="7,3" FontSize="11.5"
+                                                                                ToolTip="Re-tester tous les PDF de ce produit avec les règles actuelles"/>
+                                                                    </StackPanel>
+                                                                </Grid>
 
-                        <!-- 4. Statut -->
-                        <DataGridTemplateColumn Header="Statut" Width="140" MinWidth="115">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <Border x:Name="BadgeBorder" Padding="9,3" CornerRadius="10" HorizontalAlignment="Left" Background="#F1F5F9">
-                                        <TextBlock x:Name="BadgeText" Text="{Binding DisplayStatusBadge}" FontWeight="SemiBold" FontSize="11" Foreground="#475569"/>
-                                    </Border>
-                                    <DataTemplate.Triggers>
-                                        <DataTrigger Binding="{Binding Status}" Value="Different">
-                                            <Setter TargetName="BadgeBorder" Property="Background" Value="#FEE2E2"/>
-                                            <Setter TargetName="BadgeText" Property="Foreground" Value="#DC2626"/>
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding Status}" Value="Identical">
-                                            <Setter TargetName="BadgeBorder" Property="Background" Value="#D1FAE5"/>
-                                            <Setter TargetName="BadgeText" Property="Foreground" Value="#059669"/>
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding Status}" Value="MissingInTarget">
-                                            <Setter TargetName="BadgeBorder" Property="Background" Value="#FEF3C7"/>
-                                            <Setter TargetName="BadgeText" Property="Foreground" Value="#D97706"/>
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding Status}" Value="Error">
-                                            <Setter TargetName="BadgeBorder" Property="Background" Value="#FECACA"/>
-                                            <Setter TargetName="BadgeText" Property="Foreground" Value="#B91C1C"/>
-                                        </DataTrigger>
-                                    </DataTemplate.Triggers>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
+                                                                <!-- Contenu du Produit : En-tête de colonnes + Différences regroupées -->
+                                                                <Border Background="White" BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" CornerRadius="0,0,6,6" Padding="8,6"
+                                                                        Visibility="{Binding IsExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                                    <StackPanel>
+                                                                        <!-- En-tête léger des colonnes -->
+                                                                        <Grid Margin="4,0,4,5">
+                                                                            <Grid.ColumnDefinitions>
+                                                                                <ColumnDefinition Width="106"/>
+                                                                                <ColumnDefinition Width="*"/>
+                                                                                <ColumnDefinition Width="156"/>
+                                                                                <ColumnDefinition Width="Auto"/>
+                                                                            </Grid.ColumnDefinitions>
+                                                                            <TextBlock Grid.Column="0" Text="PAGE" FontSize="10.5" FontWeight="Bold" Foreground="#64748B" Margin="6,0,0,0"/>
+                                                                            <TextBlock Grid.Column="1" Text="ATTENDU (SOURCE)   ➔   OBTENU (CIBLE)" FontSize="10.5" FontWeight="Bold" Foreground="#64748B"/>
+                                                                            <TextBlock Grid.Column="2" Text="PDF CONCERNÉS" FontSize="10.5" FontWeight="Bold" Foreground="#64748B" HorizontalAlignment="Center"/>
+                                                                        </Grid>
 
-                        <!-- 5. Nombre de différences -->
-                        <DataGridTemplateColumn Header="Diffs" Width="68" MinWidth="58">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock x:Name="DiffNum"
-                                               Text="{Binding DisplayDiffCountBadge}"
-                                               FontWeight="Bold"
-                                               Foreground="#94A3B8"
-                                               HorizontalAlignment="Center"/>
-                                    <DataTemplate.Triggers>
-                                        <DataTrigger Binding="{Binding Status}" Value="Different">
-                                            <Setter TargetName="DiffNum" Property="Foreground" Value="#DC2626"/>
-                                        </DataTrigger>
-                                    </DataTemplate.Triggers>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
+                                                                        <ItemsControl ItemsSource="{Binding Differences}">
+                                                                            <ItemsControl.ItemTemplate>
+                                                                                <DataTemplate>
+                                                                                    <!-- NIVEAU 3 : MÊME DIFFÉRENCE REGROUPÉE + DROPDOWN DES PDF -->
+                                                                                    <Border BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="6" Background="White" Margin="0,2">
+                                                                                        <StackPanel>
+                                                                                            <Grid Margin="8,5">
+                                                                                                <Grid.ColumnDefinitions>
+                                                                                                    <ColumnDefinition Width="98"/>
+                                                                                                    <ColumnDefinition Width="*"/>
+                                                                                                    <ColumnDefinition Width="156"/>
+                                                                                                    <ColumnDefinition Width="Auto"/>
+                                                                                                </Grid.ColumnDefinitions>
 
-                        <!-- 6. Actions épurées (Sans Vue A|B) -->
-                        <DataGridTemplateColumn Header="Actions" Width="195" MinWidth="185">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <StackPanel Orientation="Horizontal">
-                                        <Button Command="{Binding DataContext.OpenReportCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                                CommandParameter="{Binding}"
-                                                Visibility="{Binding HasReport, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                Content="Côte à Côte"
-                                                Style="{StaticResource ModernPrimaryButton}"
-                                                Padding="10,3" FontSize="11.5" Margin="0,0,5,0"
-                                                ToolTip="Ouvrir les 2 PDF fusionnés côte à côte"/>
+                                                                                                <!-- Flèche dropdown + Page -->
+                                                                                                <ToggleButton Grid.Column="0" IsChecked="{Binding IsDetailsExpanded}" Style="{StaticResource HeaderBarToggle}" Padding="2,1" Margin="0,0,6,0"
+                                                                                                              ToolTip="Cliquer pour déplier / replier la liste des PDF concernés">
+                                                                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                                                                        <TextBlock Text="{Binding ExpandChevron}" FontWeight="Bold" FontSize="12" Foreground="#475569" Width="14" VerticalAlignment="Center"/>
+                                                                                                        <Border Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="5" Padding="7,2">
+                                                                                                            <TextBlock Text="{Binding PagesCompactLabel}" FontSize="11.5" FontWeight="Bold" Foreground="#1D4ED8"/>
+                                                                                                        </Border>
+                                                                                                    </StackPanel>
+                                                                                                </ToggleButton>
 
-                                        <Button x:Name="BtnApproveRow"
-                                                Command="{Binding DataContext.ApproveSelectedPairCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                                CommandParameter="{Binding}"
-                                                Content="✓"
-                                                Visibility="Collapsed"
-                                                Style="{StaticResource ModernSecondaryButton}"
-                                                Foreground="#059669" FontWeight="Bold"
-                                                Padding="7,3" FontSize="11.5" Margin="0,0,5,0"
-                                                ToolTip="Valider comme conforme"/>
+                                                                                                <!-- Attendu ➔ Obtenu (+ indication si variantes scramblées au même emplacement) -->
+                                                                                                <StackPanel Grid.Column="1" Margin="0,0,10,0" VerticalAlignment="Center">
+                                                                                                    <Border Background="#FEF3C7" BorderBrush="#FCD34D" BorderThickness="1" CornerRadius="4" Padding="7,1" Margin="0,0,0,4"
+                                                                                                            HorizontalAlignment="Left"
+                                                                                                            Visibility="{Binding Block.HasScrambledBadge, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                                                                        <TextBlock Text="{Binding Block.ScrambledBadgeText}" FontSize="10.5" FontWeight="Bold" Foreground="#92400E"/>
+                                                                                                    </Border>
 
-                                        <Button Command="{Binding DataContext.RetestPairCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                                CommandParameter="{Binding}"
-                                                Content="↻"
-                                                FontWeight="Bold" FontSize="12" Padding="7,3"
-                                                Style="{StaticResource ModernSecondaryButton}"
-                                                ToolTip="Re-tester avec les règles actuelles"/>
+                                                                                                    <Grid>
+                                                                                                        <Grid.ColumnDefinitions>
+                                                                                                            <ColumnDefinition Width="*"/>
+                                                                                                            <ColumnDefinition Width="24"/>
+                                                                                                            <ColumnDefinition Width="*"/>
+                                                                                                        </Grid.ColumnDefinitions>
+
+                                                                                                        <Border Grid.Column="0" Background="#FFFAFA" BorderBrush="#FECACA" BorderThickness="1" CornerRadius="5" Padding="8,4">
+                                                                                                            <TextBlock x:Name="OldTxt" Text="{Binding DisplayOldText}" Foreground="#991B1B" FontWeight="Medium" FontSize="12"
+                                                                                                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding DisplayOldText}" VerticalAlignment="Center"/>
+                                                                                                        </Border>
+
+                                                                                                        <TextBlock Grid.Column="1" Text="➔" FontWeight="Bold" Foreground="#94A3B8" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                                                                                                        <Border Grid.Column="2" Background="#F0FDF4" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="5" Padding="8,4">
+                                                                                                            <TextBlock x:Name="NewTxt" Text="{Binding DisplayNewText}" Foreground="#065F46" FontWeight="SemiBold" FontSize="12"
+                                                                                                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding DisplayNewText}" VerticalAlignment="Center"/>
+                                                                                                        </Border>
+                                                                                                    </Grid>
+                                                                                                </StackPanel>
+
+                                                                                                <!-- Bouton Dropdown des PDF regroupés -->
+                                                                                                <ToggleButton Grid.Column="2"
+                                                                                                              IsChecked="{Binding IsDetailsExpanded}"
+                                                                                                              Style="{StaticResource PdfDropdownPillToggle}"
+                                                                                                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                                                              ToolTip="Déplier la liste des PDF partageant cette différence">
+                                                                                                    <TextBlock Text="{Binding PdfDropdownBadgeText}" FontSize="11" FontWeight="Bold"/>
+                                                                                                </ToggleButton>
+
+                                                                                                <!-- Actions rapides en 1 clic -->
+                                                                                                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                                                                                                    <Button Content="Côte à Côte"
+                                                                                                            Command="{Binding DataContext.OpenDiffGroupReportCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                                            CommandParameter="{Binding}"
+                                                                                                            Visibility="{Binding HasPrimaryReport, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                                                                            Style="{StaticResource ModernPrimaryButton}"
+                                                                                                            Padding="9,3" FontSize="11" Margin="0,0,5,0"
+                                                                                                            ToolTip="Ouvrir le PDF Côte à Côte directement à la page de l'écart"/>
+                                                                                                    <Button Content="{Binding Block.ZoneRuleButtonText}"
+                                                                                                            Command="{Binding DataContext.IgnoreDiffBlockZoneCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                                            CommandParameter="{Binding Block}"
+                                                                                                            Visibility="{Binding Block.HasZoneRuleSupport, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                                                                            Style="{StaticResource ModernSecondaryButton}"
+                                                                                                            Background="#EFF6FF" Foreground="#1D4ED8"
+                                                                                                            Padding="8,3" FontSize="11" Margin="0,0,5,0"
+                                                                                                            ToolTip="{Binding Block.ZoneRuleButtonTooltip}"/>
+                                                                                                    <Button Content="Ignorer (Règle)"
+                                                                                                            Command="{Binding DataContext.IgnoreDiffBlockTextCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                                            CommandParameter="{Binding Block}"
+                                                                                                            Style="{StaticResource ModernSecondaryButton}"
+                                                                                                            Padding="8,3" FontSize="11" Margin="0,0,5,0"
+                                                                                                            ToolTip="Créer une règle Regex permanente pour ignorer ce texte"/>
+                                                                                                    <Button Content="✓"
+                                                                                                            Command="{Binding DataContext.ApproveDiffGroupCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                                            CommandParameter="{Binding}"
+                                                                                                            Style="{StaticResource ModernSecondaryButton}"
+                                                                                                            Foreground="#059669" FontWeight="Bold"
+                                                                                                            Padding="7,3" FontSize="11.5"
+                                                                                                            ToolTip="Valider manuellement cette différence sur tous les PDF concernés"/>
+                                                                                                </StackPanel>
+                                                                                            </Grid>
+
+                                                                                            <!-- MENU DÉROULANT (DROPDOWN) : VARIANTES SCRAMBLÉES + LISTE DES PDF CONCERNÉS -->
+                                                                                            <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" CornerRadius="0,0,5,5" Padding="24,8,12,8"
+                                                                                                    Visibility="{Binding IsDetailsExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                                                                <StackPanel>
+                                                                                                    <!-- Variantes scramblées si applicable -->
+                                                                                                    <Border Background="#FFFBEB" BorderBrush="#FDE68A" BorderThickness="1" CornerRadius="5" Padding="9,6" Margin="0,0,0,8"
+                                                                                                            Visibility="{Binding Block.HasScrambledBadge, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                                                                        <StackPanel>
+                                                                                                            <TextBlock Text="Variantes détectées au même emplacement géométrique (données scramblées) :"
+                                                                                                                       FontSize="11" FontWeight="Bold" Foreground="#92400E" Margin="0,0,0,4"/>
+                                                                                                            <ItemsControl ItemsSource="{Binding Block.ScrambledVariants}">
+                                                                                                                <ItemsControl.ItemTemplate>
+                                                                                                                    <DataTemplate>
+                                                                                                                        <TextBlock Text="{Binding StringFormat='• {0}'}" FontSize="11.5" Foreground="#78350F" Margin="4,1,0,1"/>
+                                                                                                                    </DataTemplate>
+                                                                                                                </ItemsControl.ItemTemplate>
+                                                                                                            </ItemsControl>
+                                                                                                        </StackPanel>
+                                                                                                    </Border>
+
+                                                                                                    <!-- Liste individuelle des PDF ayant cette différence -->
+                                                                                                    <ItemsControl ItemsSource="{Binding ImpactedPdfs}">
+                                                                                                        <ItemsControl.ItemTemplate>
+                                                                                                            <DataTemplate>
+                                                                                                                <Border Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="5" Padding="10,4" Margin="0,2">
+                                                                                                                    <DockPanel LastChildFill="True">
+                                                                                                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                                                                                                                            <Button Content="Côte à Côte"
+                                                                                                                                    Command="{Binding DataContext.OpenImpactedPdfReportCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                                                                    CommandParameter="{Binding}"
+                                                                                                                                    Visibility="{Binding HasReport, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                                                                                                    Style="{StaticResource ModernPrimaryButton}" Padding="9,2" FontSize="11" Margin="0,0,5,0"/>
+                                                                                                                            <Button Content="PDF Source"
+                                                                                                                                    Command="{Binding DataContext.OpenSourcePdfCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                                                                    CommandParameter="{Binding Pair}"
+                                                                                                                                    Visibility="{Binding HasSourceFile, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                                                                                                    Style="{StaticResource ModernSecondaryButton}" Padding="7,2" FontSize="10.5" Margin="0,0,4,0"/>
+                                                                                                                            <Button Content="PDF Cible"
+                                                                                                                                    Command="{Binding DataContext.OpenTargetPdfCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                                                                    CommandParameter="{Binding Pair}"
+                                                                                                                                    Visibility="{Binding HasTargetFile, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                                                                                                    Style="{StaticResource ModernSecondaryButton}" Padding="7,2" FontSize="10.5" Margin="0,0,4,0"/>
+                                                                                                                            <Button Content="↻"
+                                                                                                                                    Command="{Binding DataContext.RetestPairCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                                                                    CommandParameter="{Binding Pair}"
+                                                                                                                                    Style="{StaticResource ModernSecondaryButton}" FontWeight="Bold" Padding="6,2" FontSize="11"
+                                                                                                                                    ToolTip="Re-tester ce PDF"/>
+                                                                                                                        </StackPanel>
+
+                                                                                                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                                                                                            <Border Background="#EFF6FF" CornerRadius="4" Padding="6,1" Margin="0,0,8,0">
+                                                                                                                                <TextBlock Text="{Binding PageLabel}" FontSize="10.5" FontWeight="Bold" Foreground="#1D4ED8"/>
+                                                                                                                            </Border>
+                                                                                                                            <TextBlock Text="{Binding DisplayFileName}" FontSize="12" FontWeight="SemiBold" Foreground="#1E293B"
+                                                                                                                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip="{Binding DisplayFileName}"/>
+                                                                                                                        </StackPanel>
+                                                                                                                    </DockPanel>
+                                                                                                                </Border>
+                                                                                                            </DataTemplate>
+                                                                                                        </ItemsControl.ItemTemplate>
+                                                                                                    </ItemsControl>
+                                                                                                </StackPanel>
+                                                                                            </Border>
+                                                                                        </StackPanel>
+                                                                                    </Border>
+
+                                                                                    <DataTemplate.Triggers>
+                                                                                        <DataTrigger Binding="{Binding IsOldEmpty}" Value="True">
+                                                                                            <Setter TargetName="OldTxt" Property="FontStyle" Value="Italic"/>
+                                                                                            <Setter TargetName="OldTxt" Property="Foreground" Value="#94A3B8"/>
+                                                                                        </DataTrigger>
+                                                                                        <DataTrigger Binding="{Binding IsNewEmpty}" Value="True">
+                                                                                            <Setter TargetName="NewTxt" Property="FontStyle" Value="Italic"/>
+                                                                                            <Setter TargetName="NewTxt" Property="Foreground" Value="#94A3B8"/>
+                                                                                        </DataTrigger>
+                                                                                    </DataTemplate.Triggers>
+                                                                                </DataTemplate>
+                                                                            </ItemsControl.ItemTemplate>
+                                                                        </ItemsControl>
+                                                                    </StackPanel>
+                                                                </Border>
+                                                            </StackPanel>
+                                                        </Border>
+
+                                                        <DataTemplate.Triggers>
+                                                            <DataTrigger Binding="{Binding IsExpanded}" Value="False">
+                                                                <Setter TargetName="ProdChevron" Property="Text" Value="▸"/>
+                                                            </DataTrigger>
+                                                        </DataTemplate.Triggers>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </Border>
                                     </StackPanel>
-                                    <DataTemplate.Triggers>
-                                        <DataTrigger Binding="{Binding Status}" Value="Different">
-                                            <Setter TargetName="BtnApproveRow" Property="Visibility" Value="Visible"/>
-                                        </DataTrigger>
-                                    </DataTemplate.Triggers>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                    </DataGrid.Columns>
-                </DataGrid>
+                                </Border>
 
-                <!-- État vide sobre -->
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding IsExpanded}" Value="False">
+                                        <Setter TargetName="ChChevron" Property="Text" Value="▸"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding ChannelKind}" Value="Bank">
+                                        <Setter TargetName="ChannelHeaderBg" Property="Background" Value="#EFF6FF"/>
+                                        <Setter TargetName="ChannelCard" Property="BorderBrush" Value="#93C5FD"/>
+                                        <Setter TargetName="ChBadge" Property="Background" Value="#DBEAFE"/>
+                                        <Setter TargetName="ChBadgeTxt" Property="Foreground" Value="#1D4ED8"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding ChannelKind}" Value="Broker">
+                                        <Setter TargetName="ChannelHeaderBg" Property="Background" Value="#F5F3FF"/>
+                                        <Setter TargetName="ChannelCard" Property="BorderBrush" Value="#C4B5FD"/>
+                                        <Setter TargetName="ChBadge" Property="Background" Value="#EDE9FE"/>
+                                        <Setter TargetName="ChBadgeTxt" Property="Foreground" Value="#6D28D9"/>
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <!-- États vides sobres -->
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                             IsHitTestVisible="False"
-                            Visibility="{Binding IsEmptyState, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            Visibility="{Binding IsInitialEmptyState, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <TextBlock Text="Aucun document comparé" FontSize="15" FontWeight="SemiBold" Foreground="#475569" HorizontalAlignment="Center" Margin="0,0,0,4"/>
-                    <TextBlock Text="Sélectionnez Source et Cible ci-dessus ou lancez une Campagne Testing." FontSize="12.5" Foreground="#94A3B8" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Glissez un dossier ou un PDF dans Source et Cible, ou lancez Équipe Testing." FontSize="12.5" Foreground="#94A3B8" HorizontalAlignment="Center"/>
                 </StackPanel>
-            </Grid>
-        </Border>
 
-        <!-- 5. PANNEAU DE DÉTAIL SIMPLIFIÉ EN BAS (UNIQUEMENT AU CLIC SUR UNE LIGNE EN ÉCART) -->
-        <Border Grid.Row="4" Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="8" Padding="12,7" Margin="0,6,0,0"
-                MaxHeight="152"
-                Visibility="{Binding HasSelectedPairWithDiffs, Converter={StaticResource BooleanToVisibilityConverter}}">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                            IsHitTestVisible="False"
+                            Visibility="{Binding IsProcessingEmptyState, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock Text="Comparaison des PDF en cours..." FontSize="15" FontWeight="SemiBold" Foreground="#2563EB" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                    <TextBlock Text="{Binding StatusMessage}" FontSize="12.5" Foreground="#64748B" HorizontalAlignment="Center"/>
+                </StackPanel>
 
-                <DockPanel Grid.Row="0" Margin="0,0,0,5" LastChildFill="True">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0"
-                                    Visibility="{Binding SelectedPair.IsGroupedRow, Converter={StaticResource BooleanToVisibilityConverter}}">
-                            <TextBlock Text="PDF :" FontWeight="SemiBold" FontSize="11.5" Foreground="#64748B" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                            <ComboBox ItemsSource="{Binding SelectedPair.GroupedSourcePairs}"
-                                      SelectedItem="{Binding SelectedPair.SelectedGroupedMember}"
-                                      DisplayMemberPath="FileNameOnly"
-                                      Width="180" FontSize="11.5" VerticalContentAlignment="Center"/>
-                        </StackPanel>
-
-                        <Button Content="✓ Valider"
-                                Command="{Binding ApproveSelectedPairCommand}"
-                                Style="{StaticResource ModernPrimaryButton}"
-                                Background="#059669" Padding="9,3" FontSize="11.5" Margin="0,0,5,0"/>
-                        <Button Content="↻ Re-tester"
-                                Command="{Binding RetestPairCommand}"
-                                Style="{StaticResource ModernSecondaryButton}"
-                                Padding="8,3" FontSize="11.5" Margin="0,0,5,0"/>
-                        <Button Content="Côte à Côte"
-                                Command="{Binding OpenReportCommand}"
-                                Style="{StaticResource ModernPrimaryButton}"
-                                Padding="10,3" FontSize="11.5" Margin="0,0,5,0"/>
-                        <Button Content="✕"
-                                Command="{Binding CloseQuickInspectorCommand}"
-                                Style="{StaticResource ModernSecondaryButton}"
-                                Padding="7,3" FontSize="11" FontWeight="Bold"/>
-                    </StackPanel>
-
-                    <TextBlock Text="{Binding SelectedPair.MatchKey}"
-                               FontWeight="Bold" FontSize="12.5" Foreground="#0F172A"
-                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                </DockPanel>
-
-                <ListBox Grid.Row="1" ItemsSource="{Binding SelectedPair.DiffBlocks}"
-                         BorderThickness="0" Background="Transparent"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                    <ListBox.ItemContainerStyle>
-                        <Style TargetType="ListBoxItem">
-                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                            <Setter Property="Padding" Value="0"/>
-                        </Style>
-                    </ListBox.ItemContainerStyle>
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="5" Padding="8,3" Margin="0,2">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="68"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="26"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-
-                                    <TextBlock Grid.Column="0" Text="{Binding DisplayPageLabel}" FontWeight="SemiBold" FontSize="12" Foreground="#334155" VerticalAlignment="Center"/>
-
-                                    <Border Grid.Column="1" Background="#DBEAFE" CornerRadius="4" Padding="5,1" Margin="0,0,8,0"
-                                            Visibility="{Binding IsMultiPdfGrouped, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                            ToolTip="{Binding ImpactedDocumentsTooltip}" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding OccurrenceBadgeText}" Foreground="#1E40AF" FontWeight="Bold" FontSize="10.5"/>
-                                    </Border>
-
-                                    <TextBlock Grid.Column="2" Text="{Binding OldText}" Foreground="#991B1B" FontWeight="Medium" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip="{Binding OldText}" VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="3" Text="➔" FontWeight="Bold" Foreground="#94A3B8" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="4" Text="{Binding NewText}" Foreground="#065F46" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip="{Binding NewText}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-
-                                    <Button Grid.Column="5"
-                                            Content="Ignorer (Règle)"
-                                            Command="{Binding DataContext.IgnoreDiffBlockTextCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                            CommandParameter="{Binding}"
-                                            Style="{StaticResource ModernSecondaryButton}"
-                                            Padding="8,2" FontSize="11"
-                                            ToolTip="Enregistrer de façon permanente une règle Regex pour toujours ignorer cet écart"/>
-                                </Grid>
-                            </Border>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                            IsHitTestVisible="False"
+                            Visibility="{Binding IsAllConformState, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock Text="✓ Aucune différence détectée" FontSize="15.5" FontWeight="Bold" Foreground="#059669" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                    <TextBlock Text="{Binding AllConformSubtitle}" FontSize="12.5" Foreground="#64748B" HorizontalAlignment="Center"/>
+                </StackPanel>
             </Grid>
         </Border>
     </Grid>

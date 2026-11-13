@@ -10,8 +10,8 @@ namespace PDFComparison.Services;
 
 public interface IPdfIntelligentMaskingService
 {
-    string MaskRepeatingTextElements(string text, IReadOnlySet<string>? headerDates = null);
-    void MaskRepeatingWordElements(List<PdfWordInfo> words, HashSet<string> headerDates);
+    string MaskRepeatingTextElements(string text, IReadOnlySet<string>? headerDates = null, string? productName = null, string? channel = null, string? pdfPath = null);
+    void MaskRepeatingWordElements(List<PdfWordInfo> words, HashSet<string> headerDates, string? productName = null, string? channel = null, string? pdfPath = null);
     bool IsDate(string text);
 }
 
@@ -127,11 +127,11 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
         return token.Trim().ToUpperInvariant();
     }
 
-    public string MaskRepeatingTextElements(string text, IReadOnlySet<string>? headerDates = null)
+    public string MaskRepeatingTextElements(string text, IReadOnlySet<string>? headerDates = null, string? productName = null, string? channel = null, string? pdfPath = null)
     {
         if (string.IsNullOrWhiteSpace(text)) return text;
 
-        var rules = GetActiveRegexRules();
+        var rules = GetActiveRegexRules(productName, channel, pdfPath);
         bool hasDateRule = rules.Any(r => string.Equals(r.ReplacementMask, DefaultDateIgnoreMask, StringComparison.Ordinal));
 
         var normalizedAutoDates = new HashSet<string>(StringComparer.Ordinal);
@@ -212,11 +212,11 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
         return currentText;
     }
 
-    public void MaskRepeatingWordElements(List<PdfWordInfo> words, HashSet<string> headerDates)
+    public void MaskRepeatingWordElements(List<PdfWordInfo> words, HashSet<string> headerDates, string? productName = null, string? channel = null, string? pdfPath = null)
     {
         if (words == null || words.Count == 0) return;
 
-        var rules = GetActiveRegexRules();
+        var rules = GetActiveRegexRules(productName, channel, pdfPath);
         bool hasDateRule = rules.Any(r => string.Equals(r.ReplacementMask, DefaultDateIgnoreMask, StringComparison.Ordinal));
 
         var normalizedAutoDates = new HashSet<string>(headerDates.Select(NormalizeTokenForComparison), StringComparer.Ordinal);
@@ -276,7 +276,12 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
                 }
 
                 if (startWordIdx == -1 || endWordIdx == -1) continue;
-                if (!string.IsNullOrEmpty(mask) && words[startWordIdx].Text.Contains(mask, StringComparison.Ordinal)) continue;
+                if (!string.IsNullOrEmpty(mask) &&
+                    words[startWordIdx].IsMasked &&
+                    string.Equals(words[startWordIdx].Text, mask, StringComparison.Ordinal))
+                {
+                    continue;
+                }
 
                 string rawPrefix = match.Index > wordStartChar[startWordIdx]
                     ? fullText.Substring(wordStartChar[startWordIdx], match.Index - wordStartChar[startWordIdx])
@@ -314,7 +319,8 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
                 {
                     Text = replacedText,
                     Letters = string.IsNullOrEmpty(replacedText) ? Array.Empty<Letter>() : combinedLetters,
-                    PageNumber = words[startWordIdx].PageNumber
+                    PageNumber = words[startWordIdx].PageNumber,
+                    IsMasked = true
                 };
             }
 
@@ -547,7 +553,8 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
                 {
                     Text = nameMask + trailingPunct,
                     Letters = combinedLetters,
-                    PageNumber = words[i].PageNumber
+                    PageNumber = words[i].PageNumber,
+                    IsMasked = true
                 };
 
                 i += len - 1;
@@ -576,7 +583,8 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
                     {
                         Text = nameMask + trailingPunct,
                         Letters = words[i].Letters,
-                        PageNumber = words[i].PageNumber
+                        PageNumber = words[i].PageNumber,
+                        IsMasked = true
                     };
                 }
             }
@@ -766,21 +774,25 @@ public partial class PdfIntelligentMaskingService : IPdfIntelligentMaskingServic
         return i < raw.Length ? raw.Substring(i) : string.Empty;
     }
 
-    private IReadOnlyList<RegexMaskingRule> GetActiveRegexRules()
+    private IReadOnlyList<RegexMaskingRule> GetActiveRegexRules(string? productName = null, string? channel = null, string? pdfPath = null)
     {
         var list = new List<RegexMaskingRule>();
 
         if (Profile != null)
         {
-            list.AddRange(Profile.RegexRules.Where(r => r.IsEnabled && !string.IsNullOrWhiteSpace(r.Pattern)));
+            list.AddRange(Profile.RegexRules.Where(r =>
+                r.IsEnabled &&
+                !string.IsNullOrWhiteSpace(r.Pattern) &&
+                r.AppliesToProduct(productName, channel, pdfPath, pdfPath)));
 
-            // Garantir que les mentions d'exemplaire technique (ex: exemplaireAG/1JQ3B/FIB16) ne sont jamais marquées comme différence
-            if (!string.Equals(Profile.ProfileName, ConfigurationService.PresetVisualPixelPerfect, StringComparison.Ordinal) &&
-                !list.Any(r => r.Pattern.Contains("exemplaire", StringComparison.OrdinalIgnoreCase)))
+            // Garantir que les mentions d'exemplaire technique sont filtrées si le profil ne contient pas encore la règle par défaut
+            bool hasConfiguredExemplaireRule = Profile.RegexRules.Any(r =>
+                !r.IsUserRule && r.Pattern != null && r.Pattern.Contains("exemplaire", StringComparison.OrdinalIgnoreCase));
+            if (!hasConfiguredExemplaireRule && !list.Any(r => r.Pattern.Contains("exemplaire", StringComparison.OrdinalIgnoreCase)))
             {
                 list.Add(new RegexMaskingRule
                 {
-                    Name = "Mentions d'exemplaire technique (exemplaire.../CODE/CODE)",
+                    Name = "Mentions d'exemplaire multilingues (exemplaire(s) / exemplaar...)",
                     IsEnabled = true,
                     Pattern = ComparisonProfile.ExemplaireRoutingPattern,
                     ReplacementMask = string.Empty,

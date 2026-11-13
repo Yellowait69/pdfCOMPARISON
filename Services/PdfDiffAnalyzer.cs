@@ -37,12 +37,14 @@ public class PdfDiffAnalyzer
     {
         if (pair == null) throw new ArgumentNullException(nameof(pair));
 
+        string effectiveProduct = pair.EffectiveProductCode;
+        string effectiveChannel = pair.EffectiveChannel;
         string lang = "ND";
-        if (pair.HasProductTag)
+        if (!string.IsNullOrWhiteSpace(effectiveProduct))
         {
-            lang = string.IsNullOrWhiteSpace(pair.Channel)
-                ? pair.ProductName
-                : $"{pair.Channel}/{pair.ProductName}";
+            lang = string.IsNullOrWhiteSpace(effectiveChannel)
+                ? effectiveProduct
+                : $"{effectiveChannel}/{effectiveProduct}";
         }
         else if (!string.IsNullOrEmpty(pair.MatchKey) && pair.MatchKey.Contains('_'))
         {
@@ -50,7 +52,7 @@ public class PdfDiffAnalyzer
         }
 
         string rawDocName = Path.GetFileName(pair.TargetPath ?? pair.SourcePath ?? "UnknownTarget.pdf");
-        string fullDocTitle = pair.HasProductTag
+        string fullDocTitle = !string.IsNullOrWhiteSpace(effectiveProduct)
             ? $"[{pair.DisplayProductBadge}] {rawDocName}"
             : rawDocName;
 
@@ -61,9 +63,11 @@ public class PdfDiffAnalyzer
             {
                 DocumentName = fullDocTitle,
                 Language = lang,
-                Channel = pair.Channel ?? string.Empty,
-                ProductName = pair.ProductName ?? string.Empty,
+                Channel = effectiveChannel,
+                ProductName = effectiveProduct,
                 RawFileName = rawDocName,
+                SourcePath = pair.SourcePath ?? string.Empty,
+                TargetPath = pair.TargetPath ?? string.Empty,
                 OverallSsimScore = 1.0
             }
         };
@@ -103,7 +107,11 @@ public class PdfDiffAnalyzer
             targetLinesList,
             result.Highlights,
             sourceWords,
-            targetWords);
+            targetWords,
+            effectiveProduct,
+            effectiveChannel,
+            pair.SourcePath,
+            pair.TargetPath);
 
         result.Summary.Blocks.AddRange(verifiedBlocks);
 

@@ -27,9 +27,8 @@ public class PdfDrawingService : IPdfDrawingService
 {
     private const decimal DefaultFontSize = 10m;
     private const decimal LineHeight = 13m;
-    private bool _usingFallbackStandardFont;
 
-    public (PdfDocumentBuilder.AddedFont Font, PdfDocumentBuilder.AddedFont FontBold) LoadFonts(PdfDocumentBuilder builder)
+    private static readonly Lazy<(byte[]? Regular, byte[]? Bold)> SystemArialBytes = new(() =>
     {
         try
         {
@@ -39,9 +38,7 @@ public class PdfDrawingService : IPdfDrawingService
 
             if (File.Exists(arialPath) && File.Exists(arialBoldPath))
             {
-                _usingFallbackStandardFont = false;
-                return (builder.AddTrueTypeFont(File.ReadAllBytes(arialPath)),
-                        builder.AddTrueTypeFont(File.ReadAllBytes(arialBoldPath)));
+                return (File.ReadAllBytes(arialPath), File.ReadAllBytes(arialBoldPath));
             }
         }
         catch
@@ -49,7 +46,27 @@ public class PdfDrawingService : IPdfDrawingService
             // Fallback silencieux vers les polices standard
         }
 
-        _usingFallbackStandardFont = true;
+        return (null, null);
+    });
+
+    private static bool UsingFallbackStandardFont => SystemArialBytes.Value.Regular == null || SystemArialBytes.Value.Bold == null;
+
+    public (PdfDocumentBuilder.AddedFont Font, PdfDocumentBuilder.AddedFont FontBold) LoadFonts(PdfDocumentBuilder builder)
+    {
+        try
+        {
+            var (regularBytes, boldBytes) = SystemArialBytes.Value;
+            if (regularBytes != null && boldBytes != null)
+            {
+                return (builder.AddTrueTypeFont(regularBytes),
+                        builder.AddTrueTypeFont(boldBytes));
+            }
+        }
+        catch
+        {
+            // Fallback silencieux vers les polices standard
+        }
+
         var fallbackFont = builder.AddStandard14Font(Standard14Font.Helvetica);
         var fallbackFontBold = builder.AddStandard14Font(Standard14Font.HelveticaBold);
 
@@ -89,19 +106,19 @@ public class PdfDrawingService : IPdfDrawingService
                 case '○':
                 case '▸':
                 case '►':
-                    sb.Append(_usingFallbackStandardFont ? "-" : "•");
+                    sb.Append(UsingFallbackStandardFont ? "-" : "•");
                     break;
                 case '•':
-                    sb.Append(_usingFallbackStandardFont ? "-" : "•");
+                    sb.Append(UsingFallbackStandardFont ? "-" : "•");
                     break;
                 case '€':
-                    sb.Append(_usingFallbackStandardFont ? "EUR" : "€");
+                    sb.Append(UsingFallbackStandardFont ? "EUR" : "€");
                     break;
                 case 'œ':
-                    sb.Append(_usingFallbackStandardFont ? "oe" : "œ");
+                    sb.Append(UsingFallbackStandardFont ? "oe" : "œ");
                     break;
                 case 'Œ':
-                    sb.Append(_usingFallbackStandardFont ? "OE" : "Œ");
+                    sb.Append(UsingFallbackStandardFont ? "OE" : "Œ");
                     break;
                 case '’':
                 case '‘':
@@ -116,7 +133,7 @@ public class PdfDrawingService : IPdfDrawingService
                     sb.Append('-');
                     break;
                 default:
-                    if (_usingFallbackStandardFont && c > 255)
+                    if (UsingFallbackStandardFont && c > 255)
                         sb.Append('?');
                     else
                         sb.Append(c);

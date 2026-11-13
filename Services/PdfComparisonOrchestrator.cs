@@ -66,8 +66,10 @@ public class PdfComparisonOrchestrator
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    var (sourceText, sourceWords, _, _) = _extractionService.ExtractDocumentFullData(pair.SourcePath);
-                    var (targetText, targetWords, _, _) = _extractionService.ExtractDocumentFullData(pair.TargetPath!);
+                    string effectiveProduct = pair.EffectiveProductCode;
+                    string effectiveChannel = pair.EffectiveChannel;
+                    var (sourceText, sourceWords, _, _) = _extractionService.ExtractDocumentFullData(pair.SourcePath, effectiveProduct, effectiveChannel);
+                    var (targetText, targetWords, _, _) = _extractionService.ExtractDocumentFullData(pair.TargetPath!, effectiveProduct, effectiveChannel);
 
                     if (string.IsNullOrWhiteSpace(sourceText) && string.IsNullOrWhiteSpace(targetText) &&
                         sourceWords.Count == 0 && targetWords.Count == 0)
@@ -107,7 +109,7 @@ public class PdfComparisonOrchestrator
             });
         }
 
-        if (!allSummaries.IsEmpty)
+        if (pairsList.Count > 0)
         {
             await Task.Run(() =>
             {
@@ -176,8 +178,8 @@ public class PdfComparisonOrchestrator
                     diffResult.Highlights,
                     diffResult.VisualRegions,
                     diffResult.Summary.Blocks,
-                    pair.Channel,
-                    pair.ProductName);
+                    pair.EffectiveChannel,
+                    pair.EffectiveProductCode);
                 diffResult.Summary.ReportFileName = Path.GetFileName(reportPath);
                 SetReportPath(pair, reportPath);
                 TryCopyReportToProductOutput(pair, reportPath, copyToProductOutput);
@@ -204,8 +206,8 @@ public class PdfComparisonOrchestrator
                     diffResult.Highlights,
                     diffResult.VisualRegions,
                     diffResult.Summary.Blocks,
-                    pair.Channel,
-                    pair.ProductName);
+                    pair.EffectiveChannel,
+                    pair.EffectiveProductCode);
                 diffResult.Summary.ReportFileName = Path.GetFileName(fallbackPath);
                 SetReportPath(pair, fallbackPath);
                 TryCopyReportToProductOutput(pair, fallbackPath, copyToProductOutput);

@@ -39,6 +39,26 @@ public class DiffSummaryBlock
     public string PagesLabel { get; set; } = string.Empty;
     public List<string> ImpactedDocuments { get; set; } = new();
 
+    // --- Contexte Produit & Coordonnées Géométriques PDF (Points 72 DPI, Origine Bottom-Left) ---
+    public string ProductCode { get; set; } = string.Empty;
+    public string Channel { get; set; } = string.Empty;
+    public bool HasPdfBounds { get; set; }
+    public double PdfLeft { get; set; }
+    public double PdfBottom { get; set; }
+    public double PdfRight { get; set; }
+    public double PdfTop { get; set; }
+    public double FieldZoneLeft { get; set; }
+    public double FieldZoneBottom { get; set; }
+    public double FieldZoneRight { get; set; }
+    public double FieldZoneTop { get; set; }
+    public double PdfPageWidth { get; set; } = 595.0;
+    public double PdfPageHeight { get; set; } = 842.0;
+
+    // --- Regroupement Géométrique des Données Scramblées (même endroit pour un même produit) ---
+    public bool IsScrambledZoneGroup { get; set; }
+    public int VariantCount { get; set; } = 1;
+    public List<string> ScrambledVariants { get; set; } = new();
+
     [JsonIgnore]
     public byte[]? SourceImage { get; set; }
 
@@ -52,15 +72,60 @@ public class DiffSummaryBlock
     public bool IsMultiPdfGrouped => OccurrenceCount > 1;
 
     [JsonIgnore]
+    public bool HasZoneRuleSupport => HasPdfBounds && (FieldZoneRight > FieldZoneLeft || PdfRight > PdfLeft);
+
+    [JsonIgnore]
+    public bool HasScrambledBadge => IsScrambledZoneGroup && VariantCount > 1;
+
+    [JsonIgnore]
+    public string ScrambledBadgeText => HasScrambledBadge
+        ? $"Même zone ({VariantCount} variantes)"
+        : string.Empty;
+
+    [JsonIgnore]
+    public string ZoneRuleButtonText => !string.IsNullOrWhiteSpace(ProductCode)
+        ? $"Ignorer Zone ({(ProductCode.Length > 14 ? ProductCode[..14] + "…" : ProductCode)})"
+        : "Ignorer Zone";
+
+    [JsonIgnore]
+    public string ZoneRuleButtonTooltip => !string.IsNullOrWhiteSpace(ProductCode)
+        ? $"Créer une zone d'exclusion géométrique sur la Page {PageNumber} uniquement pour le produit « {ProductCode} » (idéal pour adresses / noms scramblés au même endroit)"
+        : $"Créer une zone d'exclusion géométrique à cet emplacement sur la Page {PageNumber}";
+
+    [JsonIgnore]
     public string DisplayPageLabel => !string.IsNullOrWhiteSpace(PagesLabel) ? PagesLabel : $"Page {PageNumber}";
 
     [JsonIgnore]
     public string OccurrenceBadgeText => OccurrenceCount > 1 ? $"{OccurrenceCount} PDF regroupés" : string.Empty;
 
     [JsonIgnore]
-    public string ImpactedDocumentsTooltip => ImpactedDocuments.Count > 0
-        ? $"Présent dans {ImpactedDocuments.Count} PDF :\n• " + string.Join("\n• ", ImpactedDocuments)
-        : string.Empty;
+    public string ImpactedDocumentsTooltip
+    {
+        get
+        {
+            var lines = new List<string>();
+            if (HasScrambledBadge && ScrambledVariants.Count > 0)
+            {
+                lines.Add($"Données variables / scramblées détectées au même endroit ({VariantCount} variantes) :");
+                foreach (var v in ScrambledVariants)
+                {
+                    lines.Add($"• {v}");
+                }
+            }
+
+            if (ImpactedDocuments.Count > 0)
+            {
+                if (lines.Count > 0) lines.Add(string.Empty);
+                lines.Add($"Présent dans {ImpactedDocuments.Count} PDF :");
+                foreach (var d in ImpactedDocuments)
+                {
+                    lines.Add($"• {d}");
+                }
+            }
+
+            return string.Join("\n", lines);
+        }
+    }
 
     [JsonIgnore]
     public string ChangeTypeLabel => Type switch
@@ -93,12 +158,24 @@ public class DocumentDiffSummary
 
     public string RawFileName { get; init; } = string.Empty;
 
+    public string SourcePath { get; init; } = string.Empty;
+
+    public string TargetPath { get; init; } = string.Empty;
+
     public string ReportFileName { get; set; } = string.Empty;
 
     [JsonIgnore]
-    public string ProductGroupKey => !string.IsNullOrWhiteSpace(ProductName)
-        ? (string.IsNullOrWhiteSpace(Channel) ? ProductName : $"{Channel} • {ProductName}")
-        : "Lot Principal";
+    public string ProductGroupKey
+    {
+        get
+        {
+            string src = !string.IsNullOrWhiteSpace(SourcePath) ? SourcePath : RawFileName;
+            string trg = !string.IsNullOrWhiteSpace(TargetPath) ? TargetPath : DocumentName;
+            string ch = ProductCodeHelper.ResolveEffectiveChannel(Channel, src, trg, ProductName);
+            string eff = ProductCodeHelper.ResolveEffectiveProductCode(ProductName, ch, src, trg);
+            return !string.IsNullOrWhiteSpace(eff) ? $"{ch} • {eff}" : ch;
+        }
+    }
 
     public double OverallSsimScore { get; set; } = 1.0;
 
@@ -119,6 +196,7 @@ public class PdfWordInfo
 
     public IReadOnlyList<Letter> Letters { get; init; } = Array.Empty<Letter>();
     public int PageNumber { get; init; }
+    public bool IsMasked { get; init; }
 }
 
 public readonly record struct LetterLoc(

@@ -27,15 +27,12 @@ public interface IIndividualReportGenerator
         string? productName = null);
 }
 
-public partial class IndividualReportGenerator : IIndividualReportGenerator
+public class IndividualReportGenerator : IIndividualReportGenerator
 {
     private readonly IPdfDrawingService _drawingService;
 
     private static readonly (byte R, byte G, byte B) ColorRedSource = (239, 68, 68);
     private static readonly (byte R, byte G, byte B) ColorGreenTarget = (16, 185, 129);
-
-    [GeneratedRegex(@"[\\/](?<channel>Bank|Broker)[\\/](?<product>[^\\/]+)[\\/]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex TidesPathChannelProductRegex();
 
     public IndividualReportGenerator(IPdfDrawingService drawingService)
     {
@@ -68,104 +65,110 @@ public partial class IndividualReportGenerator : IIndividualReportGenerator
         var sourceRedDict = GroupHighlightsByPage(highlights.SourceRed);
         var targetRedDict = GroupHighlightsByPage(highlights.TargetRed);
 
-        using var sourceDoc = PdfDocument.Open(sourcePath, new ParsingOptions { ClipPaths = false });
-        using var targetDoc = PdfDocument.Open(targetPath, new ParsingOptions { ClipPaths = false });
-
-        int maxPages = Math.Max(sourceDoc.NumberOfPages, targetDoc.NumberOfPages);
-        const double dividerGap = 14.0;
-
-        // Génération d'un PDF unique fusionné Côte-à-Côte (Source à gauche | Target à droite sur la même page large)
-        // afin que les deux documents défilent exactement à la même vitesse
-        var fusedBuilder = new PdfDocumentBuilder();
-        var (font, fontBold) = _drawingService.LoadFonts(fusedBuilder);
-
-        for (int pageIndex = 1; pageIndex <= maxPages; pageIndex++)
+        byte[] fusedPdfBytes;
+        lock (PdfPigSync.Gate)
         {
-            var sPage = pageIndex <= sourceDoc.NumberOfPages ? sourceDoc.GetPage(pageIndex) : null;
-            var tPage = pageIndex <= targetDoc.NumberOfPages ? targetDoc.GetPage(pageIndex) : null;
+            using var sourceDoc = PdfDocument.Open(sourcePath, new ParsingOptions { ClipPaths = false });
+            using var targetDoc = PdfDocument.Open(targetPath, new ParsingOptions { ClipPaths = false });
 
-            double sW = sPage?.Width > 0 ? sPage.Width : (tPage?.Width > 0 ? tPage.Width : 595.0);
-            double tW = tPage?.Width > 0 ? tPage.Width : sW;
-            double sH = sPage?.Height > 0 ? sPage.Height : 0.0;
-            double tH = tPage?.Height > 0 ? tPage.Height : 0.0;
-            double rawMaxH = Math.Max(sH, tH);
-            double totalH = rawMaxH > 0 ? rawMaxH : 842.0;
+            int maxPages = Math.Max(sourceDoc.NumberOfPages, targetDoc.NumberOfPages);
+            const double dividerGap = 14.0;
 
-            double offsetX = sW + dividerGap;
-            double totalW = sW + dividerGap + tW;
+            // Génération d'un PDF unique fusionné Côte-à-Côte (Source à gauche | Target à droite sur la même page large)
+            // afin que les deux documents défilent exactement à la même vitesse
+            var fusedBuilder = new PdfDocumentBuilder();
+            var (font, fontBold) = _drawingService.LoadFonts(fusedBuilder);
 
-            var widePage = fusedBuilder.AddPage(totalW, totalH);
-
-            // 1. Moitié gauche : Document Attendu (Source)
-            if (sPage != null)
+            for (int pageIndex = 1; pageIndex <= maxPages; pageIndex++)
             {
-                widePage.CurrentStream.Operations.Add(Push.Value);
-                widePage.CopyFrom(sPage);
-                widePage.CurrentStream.Operations.Add(Pop.Value);
+                var sPage = pageIndex <= sourceDoc.NumberOfPages ? sourceDoc.GetPage(pageIndex) : null;
+                var tPage = pageIndex <= targetDoc.NumberOfPages ? targetDoc.GetPage(pageIndex) : null;
+
+                double sW = sPage?.Width > 0 ? sPage.Width : (tPage?.Width > 0 ? tPage.Width : 595.0);
+                double tW = tPage?.Width > 0 ? tPage.Width : sW;
+                double sH = sPage?.Height > 0 ? sPage.Height : 0.0;
+                double tH = tPage?.Height > 0 ? tPage.Height : 0.0;
+                double rawMaxH = Math.Max(sH, tH);
+                double totalH = rawMaxH > 0 ? rawMaxH : 842.0;
+
+                double offsetX = sW + dividerGap;
+                double totalW = sW + dividerGap + tW;
+
+                var widePage = fusedBuilder.AddPage(totalW, totalH);
+
+                // 1. Moitié gauche : Document Attendu (Source)
+                if (sPage != null)
+                {
+                    widePage.CurrentStream.Operations.Add(Push.Value);
+                    widePage.CopyFrom(sPage);
+                    widePage.CurrentStream.Operations.Add(Pop.Value);
+                }
+                else
+                {
+                    widePage.SetTextAndFillColor(248, 250, 252);
+                    widePage.DrawRectangle(new PdfPoint(0, 0), (decimal)sW, (decimal)totalH, 0m, true);
+                    _drawingService.DrawTextLines(widePage, $"Page {pageIndex} absente dans Source", (decimal)(totalH * 0.5), 40m, 50, 148, 163, 184, fontBold);
+                }
+
+                // 2. Moitié droite : Document Obtenu (Cible), translatée de offsetX
+                widePage.NewContentStreamAfter();
+                if (tPage != null)
+                {
+                    widePage.CurrentStream.Operations.Add(Push.Value);
+                    widePage.CurrentStream.Operations.Add(new ModifyCurrentTransformationMatrix(new decimal[] { 1m, 0m, 0m, 1m, (decimal)offsetX, 0m }));
+                    widePage.CopyFrom(tPage);
+                    widePage.CurrentStream.Operations.Add(Pop.Value);
+                }
+                else
+                {
+                    widePage.SetTextAndFillColor(248, 250, 252);
+                    widePage.DrawRectangle(new PdfPoint(offsetX, 0), (decimal)tW, (decimal)totalH, 0m, true);
+                    _drawingService.DrawTextLines(widePage, $"Page {pageIndex} absente dans Cible", (decimal)(totalH * 0.5), (decimal)offsetX + 40m, 50, 148, 163, 184, fontBold);
+                }
+
+                // 3. Séparateur central + encadrés des différences (Rouge à gauche, Vert à droite)
+                widePage.NewContentStreamAfter();
+
+                // Séparateur vertical net entre Source et Cible
+                widePage.SetTextAndFillColor(15, 23, 42);
+                widePage.DrawRectangle(new PdfPoint(sW, 0), (decimal)dividerGap, (decimal)totalH, 0m, true);
+
+                // Fine barre couleur en haut de chaque page (Rouge = Attendu, Vert = Obtenu)
+                widePage.SetTextAndFillColor(ColorRedSource.R, ColorRedSource.G, ColorRedSource.B);
+                widePage.DrawRectangle(new PdfPoint(0, totalH - 3.0), (decimal)sW, 3.0m, 0m, true);
+
+                widePage.SetTextAndFillColor(ColorGreenTarget.R, ColorGreenTarget.G, ColorGreenTarget.B);
+                widePage.DrawRectangle(new PdfPoint(offsetX, totalH - 3.0), (decimal)tW, 3.0m, 0m, true);
+
+                int sTextCount = 0;
+                if (sourceRedDict.TryGetValue(pageIndex, out var sRed) && sRed.Count > 0)
+                {
+                    sTextCount = VisualSegmentHelper.CountBlocks(VisualSegmentHelper.GetSegments(sRed));
+                    _drawingService.DrawDiffMarkup(widePage, sRed, ColorRedSource.R, ColorRedSource.G, ColorRedSource.B, MarkupStyle.Highlight, offsetX: 0m);
+                }
+
+                int tTextCount = 0;
+                if (targetRedDict.TryGetValue(pageIndex, out var tRed) && tRed.Count > 0)
+                {
+                    tTextCount = VisualSegmentHelper.CountBlocks(VisualSegmentHelper.GetSegments(tRed));
+                    _drawingService.DrawDiffMarkup(widePage, tRed, ColorGreenTarget.R, ColorGreenTarget.G, ColorGreenTarget.B, MarkupStyle.Highlight, offsetX: (decimal)offsetX);
+                }
+
+                if (sPage != null)
+                {
+                    _drawingService.DrawPageStatusHeader(widePage, "ATTENDU (SOURCE)", pageIndex, sourceDoc.NumberOfPages, sTextCount, 0, font, fontBold, offsetX: 0m);
+                }
+
+                if (tPage != null)
+                {
+                    _drawingService.DrawPageStatusHeader(widePage, "OBTENU (CIBLE)", pageIndex, targetDoc.NumberOfPages, tTextCount, 0, font, fontBold, offsetX: (decimal)offsetX);
+                }
             }
-            else
-            {
-                widePage.SetTextAndFillColor(248, 250, 252);
-                widePage.DrawRectangle(new PdfPoint(0, 0), (decimal)sW, (decimal)totalH, 0m, true);
-                _drawingService.DrawTextLines(widePage, $"Page {pageIndex} absente dans Source", (decimal)(totalH * 0.5), 40m, 50, 148, 163, 184, fontBold);
-            }
 
-            // 2. Moitié droite : Document Obtenu (Cible), translatée de offsetX
-            widePage.NewContentStreamAfter();
-            if (tPage != null)
-            {
-                widePage.CurrentStream.Operations.Add(Push.Value);
-                widePage.CurrentStream.Operations.Add(new ModifyCurrentTransformationMatrix(new decimal[] { 1m, 0m, 0m, 1m, (decimal)offsetX, 0m }));
-                widePage.CopyFrom(tPage);
-                widePage.CurrentStream.Operations.Add(Pop.Value);
-            }
-            else
-            {
-                widePage.SetTextAndFillColor(248, 250, 252);
-                widePage.DrawRectangle(new PdfPoint(offsetX, 0), (decimal)tW, (decimal)totalH, 0m, true);
-                _drawingService.DrawTextLines(widePage, $"Page {pageIndex} absente dans Cible", (decimal)(totalH * 0.5), (decimal)offsetX + 40m, 50, 148, 163, 184, fontBold);
-            }
-
-            // 3. Séparateur central + encadrés des différences (Rouge à gauche, Vert à droite)
-            widePage.NewContentStreamAfter();
-
-            // Séparateur vertical net entre Source et Cible
-            widePage.SetTextAndFillColor(15, 23, 42);
-            widePage.DrawRectangle(new PdfPoint(sW, 0), (decimal)dividerGap, (decimal)totalH, 0m, true);
-
-            // Fine barre couleur en haut de chaque page (Rouge = Attendu, Vert = Obtenu)
-            widePage.SetTextAndFillColor(ColorRedSource.R, ColorRedSource.G, ColorRedSource.B);
-            widePage.DrawRectangle(new PdfPoint(0, totalH - 3.0), (decimal)sW, 3.0m, 0m, true);
-
-            widePage.SetTextAndFillColor(ColorGreenTarget.R, ColorGreenTarget.G, ColorGreenTarget.B);
-            widePage.DrawRectangle(new PdfPoint(offsetX, totalH - 3.0), (decimal)tW, 3.0m, 0m, true);
-
-            int sTextCount = 0;
-            if (sourceRedDict.TryGetValue(pageIndex, out var sRed) && sRed.Count > 0)
-            {
-                sTextCount = VisualSegmentHelper.CountBlocks(VisualSegmentHelper.GetSegments(sRed));
-                _drawingService.DrawDiffMarkup(widePage, sRed, ColorRedSource.R, ColorRedSource.G, ColorRedSource.B, MarkupStyle.Highlight, offsetX: 0m);
-            }
-
-            int tTextCount = 0;
-            if (targetRedDict.TryGetValue(pageIndex, out var tRed) && tRed.Count > 0)
-            {
-                tTextCount = VisualSegmentHelper.CountBlocks(VisualSegmentHelper.GetSegments(tRed));
-                _drawingService.DrawDiffMarkup(widePage, tRed, ColorGreenTarget.R, ColorGreenTarget.G, ColorGreenTarget.B, MarkupStyle.Highlight, offsetX: (decimal)offsetX);
-            }
-
-            if (sPage != null)
-            {
-                _drawingService.DrawPageStatusHeader(widePage, "ATTENDU (SOURCE)", pageIndex, sourceDoc.NumberOfPages, sTextCount, 0, font, fontBold, offsetX: 0m);
-            }
-
-            if (tPage != null)
-            {
-                _drawingService.DrawPageStatusHeader(widePage, "OBTENU (CIBLE)", pageIndex, targetDoc.NumberOfPages, tTextCount, 0, font, fontBold, offsetX: (decimal)offsetX);
-            }
+            fusedPdfBytes = fusedBuilder.Build();
         }
 
-        File.WriteAllBytes(reportPath, fusedBuilder.Build());
+        File.WriteAllBytes(reportPath, fusedPdfBytes);
 
         string dir = directory ?? string.Empty;
         string stem = Path.GetFileNameWithoutExtension(reportPath);
@@ -198,25 +201,9 @@ public partial class IndividualReportGenerator : IIndividualReportGenerator
         string? explicitChannel,
         string? explicitProduct)
     {
-        string ch = explicitChannel?.Trim() ?? string.Empty;
-        string prod = explicitProduct?.Trim() ?? string.Empty;
-
-        if (!string.IsNullOrWhiteSpace(ch) || !string.IsNullOrWhiteSpace(prod))
-        {
-            return (ch, prod);
-        }
-
-        foreach (string candidatePath in new[] { sourcePath, targetPath })
-        {
-            if (string.IsNullOrWhiteSpace(candidatePath)) continue;
-            var m = TidesPathChannelProductRegex().Match(candidatePath);
-            if (m.Success)
-            {
-                return (m.Groups["channel"].Value, m.Groups["product"].Value);
-            }
-        }
-
-        return (string.Empty, string.Empty);
+        string prod = ProductCodeHelper.ResolveEffectiveProductCode(explicitProduct, explicitChannel, sourcePath, targetPath);
+        string ch = ProductCodeHelper.ResolveEffectiveChannel(explicitChannel, sourcePath, targetPath, prod);
+        return (ch, prod);
     }
 
     private static void TryDeleteFileQuietly(string path)
@@ -299,11 +286,16 @@ public partial class IndividualReportGenerator : IIndividualReportGenerator
 
         if (diffBlocks != null && diffBlocks.Count > 0)
         {
+            var groupedDocBlocks = ProductDifferenceGroupingService.DeduplicateBlocksWithinDocument(diffBlocks)
+                .OrderBy(b => b.PageNumber)
+                .ToList();
+
             sb.AppendLine("<div class=\"diff-strip\">");
-            foreach (var b in diffBlocks)
+            foreach (var b in groupedDocBlocks)
             {
-                sb.AppendLine($"<div class=\"diff-row\" onclick=\"goToPage({b.PageNumber})\" title=\"Aller à la page {b.PageNumber}\">");
-                sb.AppendLine($"<span style=\"font-weight:700; color:#93c5fd;\">Page {b.PageNumber}</span>");
+                string pageLbl = !string.IsNullOrWhiteSpace(b.PagesLabel) ? b.PagesLabel : $"Page {b.PageNumber}";
+                sb.AppendLine($"<div class=\"diff-row\" style=\"grid-template-columns: 92px 1fr 22px 1fr;\" onclick=\"goToPage({b.PageNumber})\" title=\"Aller à la page {b.PageNumber}\">");
+                sb.AppendLine($"<span style=\"font-weight:700; color:#93c5fd; white-space:nowrap;\">{WebUtility.HtmlEncode(pageLbl)}</span>");
                 sb.AppendLine($"<div class=\"old-txt\">{WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(b.OldText) ? "(Absent)" : b.OldText)}</div>");
                 sb.AppendLine("<span style=\"text-align:center; color:#94a3b8; font-weight:700;\">➔</span>");
                 sb.AppendLine($"<div class=\"new-txt\">{WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(b.NewText) ? "(Supprimé)" : b.NewText)}</div>");
