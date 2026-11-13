@@ -454,7 +454,7 @@ public partial class MainViewModel : ObservableObject
         }
         else
         {
-            p.ErrorMessage = $"{p.DiffCount} diff(s) • {p.CriticalCount} critique(s)";
+            p.ErrorMessage = $"{p.DiffCount} différence(s)";
         }
     }
 
@@ -535,24 +535,22 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Action rapide en 1 clic : Crée une règle Regex d'exclusion à partir d'un bloc de différence et retire l'écart sur tous les PDF concernés.
+    /// Action rapide en 1 clic : Crée une règle Regex d'exclusion persistante à partir d'un bloc de différence et retire l'écart sur tous les PDF concernés.
     /// </summary>
     [RelayCommand]
     private void IgnoreDiffBlockText(DiffSummaryBlock? block)
     {
         if (block == null) return;
 
-        string textToIgnore = !string.IsNullOrWhiteSpace(block.NewText)
-            ? block.NewText
-            : (block.OldText ?? string.Empty);
-
-        if (string.IsNullOrWhiteSpace(textToIgnore))
+        string oldRaw = (block.OldText ?? string.Empty).Trim();
+        string newRaw = (block.NewText ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(oldRaw) && string.IsNullOrWhiteSpace(newRaw))
         {
-            MessageBox.Show("Cet écart est purement visuel (image/mise en page) et ne contient pas de texte à exclure par Regex.", "Information", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("Cet écart ne contient pas de texte à exclure par règle Regex.", "Information", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
-        _configurationService.AddQuickIgnoreRegexRule(textToIgnore);
+        _configurationService.AddQuickIgnoreDiffBlockRule(block);
 
         string targetSig = ProductDifferenceGroupingService.GetBlockSignature(block);
         int affectedDocs = 0;
@@ -560,13 +558,13 @@ public partial class MainViewModel : ObservableObject
         foreach (var p in Pairs.Where(x => x.Status == CompareStatus.Different && x.DiffBlocks.Count > 0))
         {
             var matching = p.DiffBlocks
-                .Where(b => ProductDifferenceGroupingService.GetBlockSignature(b) == targetSig)
+                .Where(b => string.Equals(ProductDifferenceGroupingService.GetBlockSignature(b), targetSig, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
             if (matching.Count > 0)
             {
                 foreach (var m in matching) p.DiffBlocks.Remove(m);
-                ApplyRemainingBlocksToPair(p, "Conforme (Écart exclu par règle rapide)");
+                ApplyRemainingBlocksToPair(p, "Conforme (Écart exclu par règle Regex)");
                 affectedDocs++;
             }
         }
@@ -581,7 +579,13 @@ public partial class MainViewModel : ObservableObject
         RefreshKpiCounters();
         RegenerateGlobalReportsSafe();
         SaveSession();
-        StatusMessage = $"Règle d'exclusion créée ({affectedDocs} PDF mis à jour) pour ignorer : \"{(textToIgnore.Length > 40 ? textToIgnore.Substring(0, 40) + "..." : textToIgnore)}\".";
+
+        string preview = !string.IsNullOrWhiteSpace(oldRaw) && !string.IsNullOrWhiteSpace(newRaw)
+            ? $"{oldRaw} ➔ {newRaw}"
+            : (!string.IsNullOrWhiteSpace(newRaw) ? newRaw : oldRaw);
+        if (preview.Length > 45) preview = preview.Substring(0, 45) + "…";
+
+        StatusMessage = $"Règle enregistrée de façon permanente ({affectedDocs} PDF mis à jour) : « {preview} ».";
     }
 
     [RelayCommand]
@@ -595,6 +599,7 @@ public partial class MainViewModel : ObservableObject
                 settingsWindow.Owner = Application.Current.MainWindow;
             }
             settingsWindow.ShowDialog();
+            _configurationService.SaveActiveProfile();
             OnPropertyChanged(nameof(ActiveProfile));
             StatusMessage = $"Profil actif : {_configurationService.ActiveProfile.ProfileName} ({_configurationService.ActiveProfile.ExclusionZones.Count(z => z.IsEnabled)} zones, {_configurationService.ActiveProfile.RegexRules.Count(r => r.IsEnabled)} règles Regex).";
         }
@@ -969,7 +974,6 @@ public partial class MainViewModel : ObservableObject
             // Conserver l'ordre Bank d'abord puis Broker, tout en plaçant les différences en tête de chaque canal
             var sortedCampaignPairs = Pairs
                 .OrderBy(p => string.Equals(p.Channel, "Bank", StringComparison.OrdinalIgnoreCase) ? 1 : 2)
-                .ThenByDescending(p => p.CriticalCount)
                 .ThenByDescending(p => p.DiffCount)
                 .ThenBy(p => p.ProductName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -979,18 +983,17 @@ public partial class MainViewModel : ObservableObject
             RebuildDisplayPairs();
             RefreshKpiCounters();
 
-            StatusMessage = $"Campagne TIDES ({releaseName}) terminée ! {UniqueDiffsCount} différence(s) unique(s) sur {DifferentPairsCount} PDF ({CriticalPairsCount} critique(s)) • Cliquez sur une ligne pour voir le détail.";
+            StatusMessage = $"Campagne TIDES ({releaseName}) terminée : {UniqueDiffsCount} différence(s) unique(s) sur {DifferentPairsCount} PDF • {IdenticalPairsCount} conforme(s).";
             SaveSession();
 
             MessageBox.Show(
-                $"Campagne TIDES Life ({releaseName}) terminée avec succès !\n\n" +
-                $"• Produits traités : {bankProductsCount} Bank (en 1er) + {brokerProductsCount} Broker\n" +
-                $"• Documents conformes (100%) : {IdenticalPairsCount}\n" +
-                $"• Différences uniques regroupées par produit : {UniqueDiffsCount} (sur {DifferentPairsCount} PDF, dont {CriticalPairsCount} critique(s))\n" +
-                $"• Fichiers manquants / erreurs : {IssuesPairsCount}\n" +
-                $"• Rapports générés dans : {OutputDirectory}" +
-                (writeToProductOutputs ? $"\n• Copiés également dans chaque dossier <Produit>\\{releaseName}\\Output" : ""),
-                "Campagne Testing TIDES Terminée",
+                $"Campagne TIDES Life ({releaseName}) terminée !\n\n" +
+                $"• Produits traités : {bankProductsCount} Bank + {brokerProductsCount} Broker\n" +
+                $"• Conformes : {IdenticalPairsCount}\n" +
+                $"• Différences uniques : {UniqueDiffsCount} (sur {DifferentPairsCount} PDF)\n" +
+                $"• Manquants / erreurs : {IssuesPairsCount}\n" +
+                $"• Dossier rapports : {OutputDirectory}",
+                "Campagne TIDES Terminée",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
@@ -1074,11 +1077,10 @@ public partial class MainViewModel : ObservableObject
 
             await _orchestrator.ProcessPairsAsync(pairsToProcess, OutputDirectory, progress, _cancellationTokenSource.Token);
 
-            StatusMessage = "Regroupement et tri des résultats par criticité...";
+            StatusMessage = "Regroupement des résultats...";
 
             var sortedPairs = Pairs
-                .OrderByDescending(p => p.CriticalCount)
-                .ThenByDescending(p => p.DiffCount)
+                .OrderByDescending(p => p.DiffCount)
                 .ToList();
 
             Pairs.ReplaceRange(sortedPairs);
@@ -1086,14 +1088,14 @@ public partial class MainViewModel : ObservableObject
             RebuildDisplayPairs();
             RefreshKpiCounters();
 
-            StatusMessage = $"Terminé ! {UniqueDiffsCount} différence(s) unique(s) sur {DifferentPairsCount} document(s) ({CriticalPairsCount} avec alerte critique) • Cliquez sur une ligne pour voir le détail.";
+            StatusMessage = $"Terminé : {UniqueDiffsCount} différence(s) unique(s) sur {DifferentPairsCount} PDF • {IdenticalPairsCount} conforme(s).";
             SaveSession();
 
             MessageBox.Show(
-                $"Comparaison terminée avec succès !\n\n" +
-                $"• Documents identiques : {IdenticalPairsCount}\n" +
-                $"• Différences uniques regroupées par produit : {UniqueDiffsCount} (sur {DifferentPairsCount} PDF, dont {CriticalPairsCount} critique(s))\n" +
-                $"• Rapports générés : PDF + Synthèse Web (.HTML) + Export Excel (.CSV)",
+                $"Comparaison terminée !\n\n" +
+                $"• Conformes : {IdenticalPairsCount}\n" +
+                $"• Différences uniques : {UniqueDiffsCount} (sur {DifferentPairsCount} PDF)\n" +
+                $"• Manquants / erreurs : {IssuesPairsCount}",
                 "Comparaison Terminée",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);

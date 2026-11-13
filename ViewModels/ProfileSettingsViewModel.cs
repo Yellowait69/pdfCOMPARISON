@@ -134,6 +134,7 @@ public partial class ProfileSettingsViewModel : ObservableObject
         {
             Name = $"Zone #{Profile.ExclusionZones.Count + 1}",
             IsEnabled = true,
+            IsUserZone = true,
             Scope = PageScope.AllPages,
             Unit = CoordinateUnit.PdfPoints,
             Origin = ZoneOrigin.TopLeft,
@@ -156,6 +157,7 @@ public partial class ProfileSettingsViewModel : ObservableObject
         SelectedZone.PropertyChanged -= OnZonePropertyChanged;
         Profile.ExclusionZones.Remove(SelectedZone);
         SelectedZone = Profile.ExclusionZones.FirstOrDefault();
+        _configService.SaveActiveProfile();
         RefreshVisualPreview();
     }
 
@@ -171,6 +173,7 @@ public partial class ProfileSettingsViewModel : ObservableObject
         {
             Name = $"Zone dessinée #{Profile.ExclusionZones.Count + 1}",
             IsEnabled = true,
+            IsUserZone = true,
             Scope = PageScope.AllPages,
             Unit = CoordinateUnit.PdfPoints,
             Origin = ZoneOrigin.TopLeft,
@@ -194,6 +197,7 @@ public partial class ProfileSettingsViewModel : ObservableObject
         {
             Name = $"Règle #{Profile.RegexRules.Count + 1}",
             IsEnabled = true,
+            IsUserRule = true,
             Pattern = @"\b\d{6,10}\b",
             ReplacementMask = "[ID_IGNORE]",
             IgnoreCase = true,
@@ -211,6 +215,7 @@ public partial class ProfileSettingsViewModel : ObservableObject
         if (SelectedRegexRule == null) return;
         Profile.RegexRules.Remove(SelectedRegexRule);
         SelectedRegexRule = Profile.RegexRules.FirstOrDefault();
+        _configService.SaveActiveProfile();
         RunRegexPreview();
     }
 

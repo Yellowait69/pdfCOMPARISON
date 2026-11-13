@@ -57,6 +57,11 @@ public partial class ExclusionZoneRule : ObservableObject
     /// </summary>
     [ObservableProperty] private bool _collectDatesInZone;
 
+    /// <summary>
+    /// Indique une zone personnalisée ajoutée par l'utilisateur (conservée lors des changements de profil).
+    /// </summary>
+    [ObservableProperty] private bool _isUserZone;
+
     public bool AppliesToPage(int pageNumber, int totalPages)
     {
         if (!IsEnabled) return false;
@@ -131,10 +136,28 @@ public partial class RegexMaskingRule : ObservableObject
     /// Nombre minimal d'occurrences dans le document pour déclencher le masquage (1 = toujours masquer, 2 = masquer si répété).
     /// </summary>
     [ObservableProperty] private int _minOccurrences = 1;
+
+    /// <summary>
+    /// Indique une règle créée par l'utilisateur (conservée lors des relances et changements de profil).
+    /// </summary>
+    [ObservableProperty] private bool _isUserRule;
+
+    /// <summary>
+    /// Signature normalisée de l'écart d'origine (quand créée depuis un résultat de comparaison).
+    /// </summary>
+    [ObservableProperty] private string _ignoredDiffSignature = string.Empty;
 }
 
 public partial class ComparisonProfile : ObservableObject
 {
+    public const string DefaultDateRegexPattern = @"\b\d{1,2}[./\-\s]+\d{1,2}[./\-\s]+\d{2,4}\b";
+
+    public const string ExemplaireRoutingPattern =
+        @"\b(?:exemplaire|exemplaar|exemplar|ausfertigung)\s*(?:(?:d['’]assurance|du\s+preneur|van\s+de\s+[a-zà-ÿ]+|[a-zà-ÿ]+)\s*){0,3}/\s*[A-Z0-9]{2,12}\s*/\s*[A-Z0-9]{2,12}(?:\s*/\s*[A-Z0-9]{1,12})?\b";
+
+    public const string DefaultClientKeywordsPattern =
+        @"^(?:[Aa]uftraggeber(?:in)?|[Oo]pdrachtgever|[Ss]ouscripteur|[Pp]reneur|[Vv]erzekering(?:s)?nemer|[Vv]ersicherungsnehmer(?:in)?|[Aa]ssur[ée]e?|[Vv]erzekerde|[Vv]ersicherter?|[Tt]itulaire|[Cc]lient|[Kk]lant|[Kk]unde|Customer):?$";
+
     [ObservableProperty] private string _profileName = "Profil Standard";
 
     // --- 1. Zones d'exclusion géométriques (X/Y) ---
@@ -144,8 +167,8 @@ public partial class ComparisonProfile : ObservableObject
     public ObservableCollection<RegexMaskingRule> RegexRules { get; set; } = new();
 
     // --- 3. Masquage intelligent des noms de clients ---
-    [ObservableProperty] private bool _enableDynamicClientNameMasking = false;
-    [ObservableProperty] private string _clientKeywordsPattern = @"^([Aa]uftraggeber|[Oo]pdrachtgever|[Ss]ouscripteur|Client|Customer):?$";
+    [ObservableProperty] private bool _enableDynamicClientNameMasking = true;
+    [ObservableProperty] private string _clientKeywordsPattern = DefaultClientKeywordsPattern;
     [ObservableProperty] private string _clientNameReplacementMask = "[NOM_IGNORE]";
 
     // --- 4. Filtres de filigranes et typographie ---
@@ -231,10 +254,19 @@ public partial class ComparisonProfile : ObservableObject
                 {
                     Name = "Dates variables répétées",
                     IsEnabled = true,
-                    Pattern = @"\b\d{1,2}[./\-\s]+\d{1,2}[./\-\s]+\d{2,4}\b",
+                    Pattern = DefaultDateRegexPattern,
                     ReplacementMask = "[DATE_IGNORE]",
                     IgnoreCase = true,
                     MinOccurrences = 2
+                },
+                new RegexMaskingRule
+                {
+                    Name = "Mentions d'exemplaire technique (exemplaire.../CODE/CODE)",
+                    IsEnabled = true,
+                    Pattern = ExemplaireRoutingPattern,
+                    ReplacementMask = "",
+                    IgnoreCase = true,
+                    MinOccurrences = 1
                 },
                 new RegexMaskingRule
                 {
@@ -254,7 +286,9 @@ public partial class ComparisonProfile : ObservableObject
                     IgnoreCase = true,
                     MinOccurrences = 1
                 }
-            }
+            },
+            EnableDynamicClientNameMasking = true,
+            ClientKeywordsPattern = DefaultClientKeywordsPattern
         };
     }
 }

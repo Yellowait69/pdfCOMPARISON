@@ -44,6 +44,7 @@ public partial class DocumentPair : ObservableObject
     private string _errorMessage = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayDiffCountBadge))]
     private int _diffCount;
 
     [ObservableProperty]
@@ -89,12 +90,20 @@ public partial class DocumentPair : ObservableObject
     public DocumentPair ActiveRepresentativePair => SelectedGroupedMember ?? (GroupedSourcePairs.Count > 0 ? GroupedSourcePairs[0] : this);
 
     [JsonIgnore]
-    public string DisplayStatusBadge => Status == CompareStatus.Different && GroupedPdfCount > 1
-        ? $"Different ({GroupedPdfCount} PDF)"
-        : Status.ToString();
+    public string DisplayStatusBadge => Status switch
+    {
+        CompareStatus.Identical => "Conforme",
+        CompareStatus.Different => GroupedPdfCount > 1 ? $"Différent ({GroupedPdfCount} PDF)" : "Différent",
+        CompareStatus.MissingInTarget => "Manquant",
+        CompareStatus.Error => "Erreur",
+        _ => "En attente"
+    };
 
     [JsonIgnore]
-    public string ProductGroupKey => HasProductTag ? DisplayProductBadge : "Lot Principal";
+    public string DisplayDiffCountBadge => DiffCount > 0 ? DiffCount.ToString() : "—";
+
+    [JsonIgnore]
+    public string ProductGroupKey => HasProductTag ? DisplayProductBadge : "Standard";
 
     [JsonIgnore]
     public bool HasReport => !string.IsNullOrEmpty(ActiveRepresentativePair.ReportPath);
@@ -105,7 +114,7 @@ public partial class DocumentPair : ObservableObject
     [JsonIgnore]
     public string DisplayProductBadge => HasProductTag
         ? (string.IsNullOrWhiteSpace(Channel) ? ProductName : $"{Channel} • {ProductName}")
-        : "Lot Principal";
+        : "Standard";
 
     [JsonIgnore]
     public string FileNameOnly => string.IsNullOrWhiteSpace(SourcePath) ? MatchKey : Path.GetFileName(SourcePath);
@@ -118,23 +127,25 @@ public partial class DocumentPair : ObservableObject
             if (Status == CompareStatus.Different && DiffBlocks.Count > 0)
             {
                 var b = DiffBlocks[0];
-                string oldS = string.IsNullOrWhiteSpace(b.OldText) ? "(vide)" : b.OldText.Replace("\r\n", " ").Replace("\n", " ").Trim();
-                if (oldS.Length > 26) oldS = oldS.Substring(0, 26) + "…";
-                string newS = string.IsNullOrWhiteSpace(b.NewText) ? "(vide)" : b.NewText.Replace("\r\n", " ").Replace("\n", " ").Trim();
-                if (newS.Length > 26) newS = newS.Substring(0, 26) + "…";
-                string moreDiffs = DiffBlocks.Count > 1 ? $" (+{DiffBlocks.Count - 1} diff)" : string.Empty;
-
-                if (IsGroupedRow)
-                {
-                    string filesPreview = string.Join(", ", System.Linq.Enumerable.Select(System.Linq.Enumerable.Take(GroupedSourcePairs, 2), p => p.FileNameOnly));
-                    string extra = GroupedSourcePairs.Count > 2 ? $" +{GroupedSourcePairs.Count - 2} autres" : string.Empty;
-                    return $"P.{b.PageNumber} : {oldS} ➔ {newS}{moreDiffs}  •  ({filesPreview}{extra})";
-                }
-
-                return $"P.{b.PageNumber} : {oldS} ➔ {newS}{moreDiffs}  •  {FileNameOnly}";
+                string oldS = string.IsNullOrWhiteSpace(b.OldText) ? "(absent)" : b.OldText.Replace("\r\n", " ").Replace("\n", " ").Trim();
+                if (oldS.Length > 34) oldS = oldS.Substring(0, 34) + "…";
+                string newS = string.IsNullOrWhiteSpace(b.NewText) ? "(supprimé)" : b.NewText.Replace("\r\n", " ").Replace("\n", " ").Trim();
+                if (newS.Length > 34) newS = newS.Substring(0, 34) + "…";
+                string moreDiffs = DiffBlocks.Count > 1 ? $"  (+{DiffBlocks.Count - 1})" : string.Empty;
+                return $"P.{b.PageNumber} : {oldS} ➔ {newS}{moreDiffs}";
             }
 
-            return SourcePath;
+            if (Status == CompareStatus.Identical)
+            {
+                return "Aucun écart détecté";
+            }
+
+            if (Status == CompareStatus.MissingInTarget)
+            {
+                return "Fichier cible introuvable";
+            }
+
+            return !string.IsNullOrWhiteSpace(ErrorMessage) ? ErrorMessage : FileNameOnly;
         }
     }
 

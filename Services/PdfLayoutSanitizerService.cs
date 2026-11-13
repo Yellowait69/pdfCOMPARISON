@@ -103,7 +103,10 @@ public class PdfLayoutSanitizerService : IPdfLayoutSanitizerService
         {
             if (word.Letters == null || word.Letters.Count == 0) continue;
 
-            bool isMaskedToken = word.Text.StartsWith('[') && word.Text.EndsWith(']');
+            bool isMaskedToken = (word.Text.StartsWith('[') && word.Text.Contains(']')) ||
+                                 word.Text.Contains("_IGNORE]", StringComparison.Ordinal) ||
+                                 word.Text.Contains("[IGNORED", StringComparison.Ordinal) ||
+                                 word.Text.Contains("[MASKED]", StringComparison.Ordinal);
             if (isMaskedToken)
             {
                 var maskedLocs = word.Letters

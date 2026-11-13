@@ -14,10 +14,10 @@ namespace PDFComparison.Services;
 public interface IPdfDrawingService
 {
     (PdfDocumentBuilder.AddedFont Font, PdfDocumentBuilder.AddedFont FontBold) LoadFonts(PdfDocumentBuilder builder);
-    void DrawDiffMarkup(PdfPageBuilder pageBuilder, IEnumerable<LetterLoc> letters, byte r, byte g, byte b, MarkupStyle style);
+    void DrawDiffMarkup(PdfPageBuilder pageBuilder, IEnumerable<LetterLoc> letters, byte r, byte g, byte b, MarkupStyle style, decimal offsetX = 0m);
     void DrawVisualDiffRegions(PdfPageBuilder pageBuilder, IEnumerable<VisualDiffRegion> regions, byte r, byte g, byte b, PdfDocumentBuilder.AddedFont fontBold);
     void DrawPageStamp(PdfPageBuilder pageBuilder, string text, PdfDocumentBuilder.AddedFont fontBold);
-    void DrawPageStatusHeader(PdfPageBuilder pageBuilder, string roleLabel, int pageNumber, int totalPages, int diffSegmentsCount, int visualRegionsCount, PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold);
+    void DrawPageStatusHeader(PdfPageBuilder pageBuilder, string roleLabel, int pageNumber, int totalPages, int diffSegmentsCount, int visualRegionsCount, PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold, decimal offsetX = 0m);
     decimal DrawTextLines(PdfPageBuilder page, string text, decimal startY, decimal startX, int maxChars, byte r, byte g, byte b, PdfDocumentBuilder.AddedFont fontToUse);
     decimal DrawMixedTextLines(PdfPageBuilder page, List<(string Text, byte r, byte g, byte b, bool isBold)> chunks, decimal startY, decimal startX, decimal maxWidth, PdfDocumentBuilder.AddedFont fontNormal, PdfDocumentBuilder.AddedFont fontBold);
     void DrawStatBox(PdfPageBuilder page, decimal x, decimal y, string label, string value, PdfDocumentBuilder.AddedFont font, PdfDocumentBuilder.AddedFont fontBold, byte rValue, byte gValue, byte bValue);
@@ -154,7 +154,7 @@ public class PdfDrawingService : IPdfDrawingService
         }
     }
 
-    public void DrawDiffMarkup(PdfPageBuilder pageBuilder, IEnumerable<LetterLoc> letters, byte r, byte g, byte b, MarkupStyle style)
+    public void DrawDiffMarkup(PdfPageBuilder pageBuilder, IEnumerable<LetterLoc> letters, byte r, byte g, byte b, MarkupStyle style, decimal offsetX = 0m)
     {
         var unifiedBlocks = VisualSegmentHelper.GetUnifiedBlocks(letters);
         if (unifiedBlocks.Count == 0) return;
@@ -164,7 +164,7 @@ public class PdfDrawingService : IPdfDrawingService
         foreach (var blk in unifiedBlocks)
         {
             decimal padding = Math.Clamp(blk.fontSize * 0.18m, 1.5m, 3.0m);
-            decimal boxX = blk.minX - padding;
+            decimal boxX = offsetX + blk.minX - padding;
             decimal boxY = blk.minY - (padding * 0.5m);
             decimal boxWidth = (blk.maxX - blk.minX) + (padding * 2m);
             decimal boxHeight = (blk.maxY - blk.minY) + padding;
@@ -172,9 +172,9 @@ public class PdfDrawingService : IPdfDrawingService
 
             // Repère vertical dans la marge gauche à la hauteur exacte du bloc
             pageBuilder.DrawLine(
-                new PdfPoint(6.0, (double)boxY),
-                new PdfPoint(6.0, (double)(boxY + boxHeight)),
-                8.0m);
+                new PdfPoint((double)(offsetX + 6.0m), (double)boxY),
+                new PdfPoint((double)(offsetX + 6.0m), (double)(boxY + boxHeight)),
+                6.0m);
 
             // Un seul cadre unifié autour du bloc de différences consécutives
             pageBuilder.DrawRectangle(
@@ -229,7 +229,8 @@ public class PdfDrawingService : IPdfDrawingService
         int diffSegmentsCount,
         int visualRegionsCount,
         PdfDocumentBuilder.AddedFont font,
-        PdfDocumentBuilder.AddedFont fontBold)
+        PdfDocumentBuilder.AddedFont fontBold,
+        decimal offsetX = 0m)
     {
         bool hasDiffs = diffSegmentsCount > 0 || visualRegionsCount > 0;
         byte bgR = hasDiffs ? (byte)220 : (byte)16;
@@ -237,14 +238,14 @@ public class PdfDrawingService : IPdfDrawingService
         byte bgB = hasDiffs ? (byte)38 : (byte)129;
 
         pageBuilder.SetTextAndFillColor(bgR, bgG, bgB);
-        pageBuilder.DrawRectangle(new PdfPoint(10, 8), 265m, 16m, 0m, true);
+        pageBuilder.DrawRectangle(new PdfPoint((double)(offsetX + 10m), 8), 210m, 15m, 0m, true);
 
         pageBuilder.SetTextAndFillColor(255, 255, 255);
         string statusText = hasDiffs
-            ? $"{roleLabel} • P.{pageNumber}/{totalPages} • {diffSegmentsCount} TEXTE / {visualRegionsCount} VISUEL"
-            : $"{roleLabel} • P.{pageNumber}/{totalPages} • PAGE CONFORME";
+            ? $"{roleLabel} • P.{pageNumber}/{totalPages} • {diffSegmentsCount} diff(s)"
+            : $"{roleLabel} • P.{pageNumber}/{totalPages} • Conforme";
 
-        SafeAddText(pageBuilder, statusText, 8.5m, new PdfPoint(15, 12.5), fontBold);
+        SafeAddText(pageBuilder, statusText, 8.2m, new PdfPoint((double)(offsetX + 15m), 12.2), fontBold);
     }
 
     public decimal DrawTextLines(PdfPageBuilder page, string text, decimal startY, decimal startX, int maxChars, byte r, byte g, byte b, PdfDocumentBuilder.AddedFont fontToUse)

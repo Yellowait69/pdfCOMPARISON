@@ -19,6 +19,7 @@ public interface IConfigurationService
     void ApplyPreset(string presetName);
     void ApplyTidesTestingProfile(bool ignoreRepeatingDates, bool ignoreHeaderFooterZones);
     void AddQuickIgnoreRegexRule(string rawTextToIgnore, string? customRuleName = null);
+    void AddQuickIgnoreDiffBlockRule(DiffSummaryBlock block);
     void ExportProfile(string filePath);
     bool ImportProfile(string filePath, out string errorMessage);
     Regex? TryGetCompiledRegex(string pattern, bool ignoreCase = true);
@@ -73,6 +74,10 @@ public class ConfigurationService : IConfigurationService
                 var loaded = JsonSerializer.Deserialize<ComparisonProfile>(json, JsonOptions);
                 if (loaded != null)
                 {
+                    if (UpgradeLegacySavedProfile(loaded))
+                    {
+                        SaveProfileInternal(loaded, _profileFilePath);
+                    }
                     return loaded;
                 }
             }
@@ -85,6 +90,112 @@ public class ConfigurationService : IConfigurationService
         var defaultProfile = ComparisonProfile.CreateDefault();
         SaveProfileInternal(defaultProfile, _profileFilePath);
         return defaultProfile;
+    }
+
+    private static bool UpgradeLegacySavedProfile(ComparisonProfile profile)
+    {
+        if (string.Equals(profile.ProfileName, PresetVisualPixelPerfect, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        bool changed = false;
+
+        foreach (var existingRule in profile.RegexRules)
+        {
+            if (!existingRule.IsUserRule && IsCustomUserRule(existingRule))
+            {
+                existingRule.IsUserRule = true;
+                changed = true;
+            }
+        }
+
+        if (!profile.RegexRules.Any(r => r.Pattern != null && r.Pattern.Contains("exemplaire", StringComparison.OrdinalIgnoreCase)))
+        {
+            profile.RegexRules.Add(new RegexMaskingRule
+            {
+                Name = "Mentions d'exemplaire technique (exemplaire.../CODE/CODE)",
+                IsEnabled = true,
+                Pattern = ComparisonProfile.ExemplaireRoutingPattern,
+                ReplacementMask = "",
+                IgnoreCase = true,
+                MinOccurrences = 1
+            });
+            changed = true;
+        }
+
+        bool isTidesOrStandard =
+            string.Equals(profile.ProfileName, PresetTidesTesting, StringComparison.Ordinal) ||
+            string.Equals(profile.ProfileName, PresetStandard, StringComparison.Ordinal) ||
+            profile.ProfileName.StartsWith("Profil Standard", StringComparison.OrdinalIgnoreCase);
+
+        if (isTidesOrStandard)
+        {
+            if (!profile.EnableDynamicClientNameMasking)
+            {
+                profile.EnableDynamicClientNameMasking = true;
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(profile.ClientKeywordsPattern) ||
+                !profile.ClientKeywordsPattern.Contains("Preneur", StringComparison.OrdinalIgnoreCase))
+            {
+                profile.ClientKeywordsPattern = ComparisonProfile.DefaultClientKeywordsPattern;
+                changed = true;
+            }
+
+            if (!profile.ExclusionZones.Any(z => z.Origin == ZoneOrigin.TopLeft && z.Width >= 500 && z.Height >= 100))
+            {
+                profile.ExclusionZones.Insert(0, new ExclusionZoneRule
+                {
+                    Name = "En-tête de page (Header 130pt)",
+                    IsEnabled = true,
+                    Scope = PageScope.AllPages,
+                    Unit = CoordinateUnit.PdfPoints,
+                    Origin = ZoneOrigin.TopLeft,
+                    X = 0,
+                    Y = 0,
+                    Width = 2000,
+                    Height = 130,
+                    CollectDatesInZone = true
+                });
+                changed = true;
+            }
+
+            if (!profile.ExclusionZones.Any(z => z.Origin == ZoneOrigin.BottomLeft))
+            {
+                profile.ExclusionZones.Add(new ExclusionZoneRule
+                {
+                    Name = "Pied de page (Footer 40pt)",
+                    IsEnabled = true,
+                    Scope = PageScope.AllPages,
+                    Unit = CoordinateUnit.PdfPoints,
+                    Origin = ZoneOrigin.BottomLeft,
+                    X = 0,
+                    Y = 0,
+                    Width = 2000,
+                    Height = 40,
+                    CollectDatesInZone = false
+                });
+                changed = true;
+            }
+
+            if (!profile.RegexRules.Any(r => string.Equals(r.ReplacementMask, "[DATE_IGNORE]", StringComparison.Ordinal)))
+            {
+                profile.RegexRules.Insert(0, new RegexMaskingRule
+                {
+                    Name = "Dates variables répétées",
+                    IsEnabled = true,
+                    Pattern = ComparisonProfile.DefaultDateRegexPattern,
+                    ReplacementMask = "[DATE_IGNORE]",
+                    IgnoreCase = true,
+                    MinOccurrences = 2
+                });
+                changed = true;
+            }
+        }
+
+        return changed;
     }
 
     public void SaveActiveProfile()
@@ -103,6 +214,14 @@ public class ConfigurationService : IConfigurationService
 
     public void ApplyPreset(string presetName)
     {
+        var preservedUserZones = ActiveProfile.ExclusionZones
+            .Where(z => z.IsUserZone)
+            .ToList();
+
+        var preservedUserRules = ActiveProfile.RegexRules
+            .Where(IsCustomUserRule)
+            .ToList();
+
         var profile = ComparisonProfile.CreateDefault();
 
         switch (presetName)
@@ -112,18 +231,62 @@ public class ConfigurationService : IConfigurationService
                 profile.ExclusionZones.Clear();
                 profile.ExclusionZones.Add(new ExclusionZoneRule
                 {
-                    Name = "Marge technique gauche (45pt)",
+                    Name = "En-tête de page (Header 130pt)",
                     IsEnabled = true,
                     Scope = PageScope.AllPages,
                     Unit = CoordinateUnit.PdfPoints,
                     Origin = ZoneOrigin.TopLeft,
                     X = 0,
                     Y = 0,
-                    Width = 45,
+                    Width = 2000,
+                    Height = 130,
+                    CollectDatesInZone = true
+                });
+                profile.ExclusionZones.Add(new ExclusionZoneRule
+                {
+                    Name = "Pied de page (Footer 40pt)",
+                    IsEnabled = true,
+                    Scope = PageScope.AllPages,
+                    Unit = CoordinateUnit.PdfPoints,
+                    Origin = ZoneOrigin.BottomLeft,
+                    X = 0,
+                    Y = 0,
+                    Width = 2000,
+                    Height = 40,
+                    CollectDatesInZone = false
+                });
+                profile.ExclusionZones.Add(new ExclusionZoneRule
+                {
+                    Name = "Marge technique gauche (50pt)",
+                    IsEnabled = true,
+                    Scope = PageScope.AllPages,
+                    Unit = CoordinateUnit.PdfPoints,
+                    Origin = ZoneOrigin.TopLeft,
+                    X = 0,
+                    Y = 0,
+                    Width = 50,
                     Height = 2000,
                     CollectDatesInZone = false
                 });
                 profile.RegexRules.Clear();
+                profile.RegexRules.Add(new RegexMaskingRule
+                {
+                    Name = "Dates variables répétées",
+                    IsEnabled = true,
+                    Pattern = ComparisonProfile.DefaultDateRegexPattern,
+                    ReplacementMask = "[DATE_IGNORE]",
+                    IgnoreCase = true,
+                    MinOccurrences = 2
+                });
+                profile.RegexRules.Add(new RegexMaskingRule
+                {
+                    Name = "Mentions d'exemplaire technique (exemplaire.../CODE/CODE)",
+                    IsEnabled = true,
+                    Pattern = ComparisonProfile.ExemplaireRoutingPattern,
+                    ReplacementMask = "",
+                    IgnoreCase = true,
+                    MinOccurrences = 1
+                });
                 profile.RegexRules.Add(new RegexMaskingRule
                 {
                     Name = "Ancres techniques de signature (#...#)",
@@ -133,7 +296,8 @@ public class ConfigurationService : IConfigurationService
                     IgnoreCase = true,
                     MinOccurrences = 1
                 });
-                profile.EnableDynamicClientNameMasking = false;
+                profile.EnableDynamicClientNameMasking = true;
+                profile.ClientKeywordsPattern = ComparisonProfile.DefaultClientKeywordsPattern;
                 profile.IgnoreWhiteOnWhiteText = true;
                 profile.MinAllowedFontSizePt = 1.5;
                 profile.MaxLineShiftForFullLine = 10;
@@ -187,6 +351,28 @@ public class ConfigurationService : IConfigurationService
                 break;
         }
 
+        // Conserver systématiquement toutes les zones et règles Regex créées par l'utilisateur
+        foreach (var uz in preservedUserZones)
+        {
+            uz.IsUserZone = true;
+            if (!profile.ExclusionZones.Any(z => z.Id == uz.Id))
+            {
+                profile.ExclusionZones.Add(uz);
+            }
+        }
+
+        foreach (var ur in preservedUserRules)
+        {
+            ur.IsUserRule = true;
+            bool alreadyExists = profile.RegexRules.Any(r =>
+                r.Id == ur.Id ||
+                (!string.IsNullOrWhiteSpace(ur.Pattern) && string.Equals(r.Pattern, ur.Pattern, StringComparison.OrdinalIgnoreCase)));
+            if (!alreadyExists)
+            {
+                profile.RegexRules.Add(ur);
+            }
+        }
+
         CopyProfileValues(profile, ActiveProfile);
         SaveActiveProfile();
     }
@@ -195,47 +381,25 @@ public class ConfigurationService : IConfigurationService
     {
         ApplyPreset(PresetTidesTesting);
 
-        if (ignoreHeaderFooterZones)
+        foreach (var zone in ActiveProfile.ExclusionZones)
         {
-            ActiveProfile.ExclusionZones.Add(new ExclusionZoneRule
+            if (zone.Origin == ZoneOrigin.TopLeft && zone.Width >= 500)
             {
-                Name = "En-tête de page (Header 130pt)",
-                IsEnabled = true,
-                Scope = PageScope.AllPages,
-                Unit = CoordinateUnit.PdfPoints,
-                Origin = ZoneOrigin.TopLeft,
-                X = 0,
-                Y = 0,
-                Width = 2000,
-                Height = 130,
-                CollectDatesInZone = ignoreRepeatingDates
-            });
-            ActiveProfile.ExclusionZones.Add(new ExclusionZoneRule
+                zone.IsEnabled = ignoreHeaderFooterZones;
+                zone.CollectDatesInZone = ignoreRepeatingDates;
+            }
+            else if (zone.Origin == ZoneOrigin.BottomLeft)
             {
-                Name = "Pied de page (Footer 40pt)",
-                IsEnabled = true,
-                Scope = PageScope.AllPages,
-                Unit = CoordinateUnit.PdfPoints,
-                Origin = ZoneOrigin.BottomLeft,
-                X = 0,
-                Y = 0,
-                Width = 2000,
-                Height = 40,
-                CollectDatesInZone = false
-            });
+                zone.IsEnabled = ignoreHeaderFooterZones;
+            }
         }
 
-        if (ignoreRepeatingDates)
+        foreach (var rule in ActiveProfile.RegexRules)
         {
-            ActiveProfile.RegexRules.Add(new RegexMaskingRule
+            if (string.Equals(rule.ReplacementMask, "[DATE_IGNORE]", StringComparison.Ordinal))
             {
-                Name = "Dates variables répétées",
-                IsEnabled = true,
-                Pattern = @"\b\d{1,2}[./\-\s]+\d{1,2}[./\-\s]+\d{2,4}\b",
-                ReplacementMask = "[DATE_IGNORE]",
-                IgnoreCase = true,
-                MinOccurrences = 2
-            });
+                rule.IsEnabled = ignoreRepeatingDates;
+            }
         }
 
         SaveActiveProfile();
@@ -245,29 +409,155 @@ public class ConfigurationService : IConfigurationService
     {
         if (string.IsNullOrWhiteSpace(rawTextToIgnore)) return;
 
-        string trimmed = rawTextToIgnore.Trim();
-        if (trimmed.Length > 140)
+        string pattern = BuildFlexiblePatternFromDiffSide(rawTextToIgnore);
+        if (string.IsNullOrWhiteSpace(pattern)) return;
+
+        var existing = ActiveProfile.RegexRules.FirstOrDefault(r =>
+            string.Equals(r.Pattern, pattern, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
         {
-            trimmed = trimmed.Substring(0, 140).Trim();
+            existing.IsEnabled = true;
+            existing.IsUserRule = true;
+            SaveActiveProfile();
+            return;
         }
 
-        string escaped = Regex.Escape(trimmed);
-        string flexibleWhitespacePattern = Regex.Replace(escaped, @"(\\\s|\s)+", @"\s+");
-
-        if (ActiveProfile.RegexRules.Any(r => string.Equals(r.Pattern, flexibleWhitespacePattern, StringComparison.OrdinalIgnoreCase)))
-            return;
-
+        string trimmed = rawTextToIgnore.Trim();
         string previewLabel = trimmed.Length > 28 ? trimmed.Substring(0, 28) + "..." : trimmed;
         ActiveProfile.RegexRules.Add(new RegexMaskingRule
         {
             IsEnabled = true,
-            Name = customRuleName ?? $"Exclusion rapide ({previewLabel})",
-            Pattern = flexibleWhitespacePattern,
-            ReplacementMask = "[IGNORED_USER]",
-            IgnoreCase = true
+            IsUserRule = true,
+            Name = customRuleName ?? $"Ignorer : \"{previewLabel}\"",
+            Pattern = pattern,
+            ReplacementMask = string.Empty,
+            IgnoreCase = true,
+            MinOccurrences = 1
         });
 
         SaveActiveProfile();
+    }
+
+    public void AddQuickIgnoreDiffBlockRule(DiffSummaryBlock block)
+    {
+        if (block == null) return;
+
+        string oldRaw = (block.OldText ?? string.Empty).Trim();
+        string newRaw = (block.NewText ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(oldRaw) && string.IsNullOrWhiteSpace(newRaw)) return;
+
+        string signature = ProductDifferenceGroupingService.GetBlockSignature(block);
+
+        string oldPattern = BuildFlexiblePatternFromDiffSide(oldRaw);
+        string newPattern = BuildFlexiblePatternFromDiffSide(newRaw);
+
+        string finalPattern;
+        string replacementMask;
+        string ruleLabel;
+
+        if (!string.IsNullOrWhiteSpace(oldPattern) && !string.IsNullOrWhiteSpace(newPattern))
+        {
+            if (string.Equals(oldPattern, newPattern, StringComparison.OrdinalIgnoreCase))
+            {
+                finalPattern = oldPattern;
+            }
+            else
+            {
+                // Placer l'expression la plus longue en premier pour éviter tout match partiel
+                finalPattern = oldRaw.Length >= newRaw.Length
+                    ? $"(?:{oldPattern}|{newPattern})"
+                    : $"(?:{newPattern}|{oldPattern})";
+            }
+
+            replacementMask = "[IGNORED_USER]";
+            string pOld = oldRaw.Length > 18 ? oldRaw.Substring(0, 18) + "…" : oldRaw;
+            string pNew = newRaw.Length > 18 ? newRaw.Substring(0, 18) + "…" : newRaw;
+            ruleLabel = $"Ignorer : \"{pOld}\" ➔ \"{pNew}\"";
+        }
+        else
+        {
+            finalPattern = !string.IsNullOrWhiteSpace(newPattern) ? newPattern : oldPattern;
+            replacementMask = string.Empty;
+            string singleTxt = !string.IsNullOrWhiteSpace(newRaw) ? newRaw : oldRaw;
+            string preview = singleTxt.Length > 32 ? singleTxt.Substring(0, 32) + "…" : singleTxt;
+            ruleLabel = $"Ignorer : \"{preview}\"";
+        }
+
+        var existing = ActiveProfile.RegexRules.FirstOrDefault(r =>
+            (!string.IsNullOrWhiteSpace(signature) && string.Equals(r.IgnoredDiffSignature, signature, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrWhiteSpace(finalPattern) && string.Equals(r.Pattern, finalPattern, StringComparison.OrdinalIgnoreCase)));
+
+        if (existing != null)
+        {
+            existing.IsEnabled = true;
+            existing.IsUserRule = true;
+            existing.Pattern = finalPattern;
+            existing.ReplacementMask = replacementMask;
+            existing.IgnoredDiffSignature = signature;
+            SaveActiveProfile();
+            return;
+        }
+
+        ActiveProfile.RegexRules.Add(new RegexMaskingRule
+        {
+            IsEnabled = true,
+            IsUserRule = true,
+            Name = ruleLabel,
+            Pattern = finalPattern,
+            ReplacementMask = replacementMask,
+            IgnoreCase = true,
+            MinOccurrences = 1,
+            IgnoredDiffSignature = signature
+        });
+
+        SaveActiveProfile();
+    }
+
+    private static string BuildFlexiblePatternFromDiffSide(string? rawText)
+    {
+        if (string.IsNullOrWhiteSpace(rawText)) return string.Empty;
+
+        string trimmed = rawText.Trim();
+        if (trimmed.Length > 220)
+        {
+            trimmed = trimmed.Substring(0, 220).Trim();
+        }
+
+        var segments = trimmed
+            .Split('…', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(seg =>
+            {
+                var tokens = Regex.Split(seg, @"\s+")
+                    .Where(t => !string.IsNullOrWhiteSpace(t))
+                    .Select(Regex.Escape);
+                return string.Join(@"\s+", tokens);
+            })
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+
+        if (segments.Count == 0) return string.Empty;
+
+        string core = string.Join(@"(?:\s+\S+){1,25}\s+", segments);
+
+        bool startsAlphaNum = char.IsLetterOrDigit(trimmed[0]);
+        bool endsAlphaNum = char.IsLetterOrDigit(trimmed[^1]);
+
+        string prefixBoundary = startsAlphaNum ? @"(?<![\p{L}\p{N}])" : string.Empty;
+        string suffixBoundary = endsAlphaNum ? @"(?![\p{L}\p{N}])" : string.Empty;
+
+        return $"{prefixBoundary}{core}{suffixBoundary}";
+    }
+
+    private static bool IsCustomUserRule(RegexMaskingRule? r)
+    {
+        if (r == null) return false;
+        return r.IsUserRule ||
+               !string.IsNullOrWhiteSpace(r.IgnoredDiffSignature) ||
+               string.Equals(r.ReplacementMask, "[IGNORED_USER]", StringComparison.Ordinal) ||
+               (r.Name != null && (
+                   r.Name.StartsWith("Exclusion rapide", StringComparison.OrdinalIgnoreCase) ||
+                   r.Name.StartsWith("Ignorer :", StringComparison.OrdinalIgnoreCase) ||
+                   r.Name.StartsWith("Règle #", StringComparison.OrdinalIgnoreCase)));
     }
 
     public void ExportProfile(string filePath)

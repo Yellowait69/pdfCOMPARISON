@@ -50,6 +50,9 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
     [GeneratedRegex(@"[\p{L}\p{N}]+")]
     private static partial Regex WordTokenRegex();
 
+    [GeneratedRegex(ComparisonProfile.ExemplaireRoutingPattern, RegexOptions.IgnoreCase)]
+    private static partial Regex ExemplaireRoutingRegex();
+
     public TextDiffSummaryService(IConfigurationService? configService = null)
     {
         _configService = configService;
@@ -223,10 +226,35 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
         string ctxBefore,
         string ctxAfter)
     {
+        // Élaguer toute mention d'exemplaire technique (ex: exemplaireAG/1JQ3B/FIB16) qui ne doit jamais être marquée comme différence
+        string sanitizedOld = string.IsNullOrWhiteSpace(oldText) ? string.Empty : ExemplaireRoutingRegex().Replace(oldText, string.Empty).Trim();
+        string sanitizedNew = string.IsNullOrWhiteSpace(newText) ? string.Empty : ExemplaireRoutingRegex().Replace(newText, string.Empty).Trim();
+
+        // Appliquer les règles Regex utilisateur actives (MinOccurrences <= 1) directement sur les fragments candidats
+        if (_configService?.ActiveProfile?.RegexRules != null)
+        {
+            foreach (var rule in _configService.ActiveProfile.RegexRules)
+            {
+                if (!rule.IsEnabled || rule.MinOccurrences > 1 || string.IsNullOrWhiteSpace(rule.Pattern))
+                    continue;
+                if (!rule.IsUserRule && !string.Equals(rule.ReplacementMask, "[IGNORED_USER]", StringComparison.Ordinal) && !string.IsNullOrEmpty(rule.ReplacementMask))
+                    continue;
+
+                var rx = _configService.TryGetCompiledRegex(rule.Pattern, rule.IgnoreCase);
+                if (rx == null) continue;
+
+                string mask = rule.ReplacementMask ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(sanitizedOld))
+                    sanitizedOld = rx.Replace(sanitizedOld, mask).Trim();
+                if (!string.IsNullOrWhiteSpace(sanitizedNew))
+                    sanitizedNew = rx.Replace(sanitizedNew, mask).Trim();
+            }
+        }
+
         // Élaguer tout préfixe, suffixe ou séquence centrale de mots identiques pour n'afficher QUE ce qui est différent à l'œil nu
         var (diffOldOnly, diffNewOnly, updatedBefore, updatedAfter) = TrimCommonPrefixAndSuffixWords(
-            oldText,
-            newText,
+            sanitizedOld,
+            sanitizedNew,
             ctxBefore,
             ctxAfter);
 
@@ -256,6 +284,19 @@ public partial class TextDiffSummaryService : ITextDiffSummaryService
             ContextBefore = updatedBefore,
             ContextAfter = updatedAfter
         };
+
+        // Vérifier si cette différence exacte a été exclue par une règle utilisateur active
+        if (_configService?.ActiveProfile?.RegexRules != null)
+        {
+            string candidateSig = ProductDifferenceGroupingService.GetBlockSignature(block);
+            if (_configService.ActiveProfile.RegexRules.Any(r =>
+                    r.IsEnabled &&
+                    !string.IsNullOrWhiteSpace(r.IgnoredDiffSignature) &&
+                    string.Equals(r.IgnoredDiffSignature, candidateSig, StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+        }
 
         ClassifyBlockSeverityAndCategory(block, changedTokens);
 

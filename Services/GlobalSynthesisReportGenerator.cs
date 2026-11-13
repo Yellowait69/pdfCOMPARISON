@@ -103,7 +103,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
             255, 255, 255,
             fontBold);
 
-        string statsSummary = $"Genere le {DateTime.Now:dd/MM/yyyy a HH:mm}  |  Produits : {totalProducts}  |  Differences uniques : {totalUniqueChanges}  |  PDF impactes : {totalDocs}  |  Critiques : {criticalAlerts}";
+        string statsSummary = $"Genere le {DateTime.Now:dd/MM/yyyy a HH:mm}  |  Produits : {totalProducts}  |  Differences uniques : {totalUniqueChanges}  |  PDF impactes : {totalDocs}";
         _drawingService.DrawTextLines(
             page,
             statsSummary,
@@ -160,8 +160,7 @@ public partial class GlobalSynthesisReportGenerator : IGlobalSynthesisReportGene
                     yPos -= 18m;
                 }
 
-                string deltaInfo = !string.IsNullOrWhiteSpace(block.FinancialDelta) ? $" ({block.FinancialDelta})" : string.Empty;
-                string metaLine = $"{diffItem.PagesCompactLabel} - {block.Category}{deltaInfo}";
+                string metaLine = diffItem.PagesCompactLabel;
 
                 decimal yMeta = _drawingService.DrawTextLines(page, metaLine, yPos, colMetaX, maxCharsMeta, 30, 58, 138, fontBold);
 

@@ -169,7 +169,15 @@ public class PdfComparisonOrchestrator
 
             try
             {
-                _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, reportPath, diffResult.Highlights, diffResult.VisualRegions, diffResult.Summary.Blocks);
+                _individualReportGenerator.GenerateIndividualReport(
+                    pair.SourcePath,
+                    pair.TargetPath!,
+                    reportPath,
+                    diffResult.Highlights,
+                    diffResult.VisualRegions,
+                    diffResult.Summary.Blocks,
+                    pair.Channel,
+                    pair.ProductName);
                 diffResult.Summary.ReportFileName = Path.GetFileName(reportPath);
                 SetReportPath(pair, reportPath);
                 TryCopyReportToProductOutput(pair, reportPath, copyToProductOutput);
@@ -189,7 +197,15 @@ public class PdfComparisonOrchestrator
             catch (IOException)
             {
                 string fallbackPath = Path.Combine(outputDiffDir, $"DiffReport_Doc_{safeKey}_{DateTime.Now:HHmmss}.pdf");
-                _individualReportGenerator.GenerateIndividualReport(pair.SourcePath, pair.TargetPath!, fallbackPath, diffResult.Highlights, diffResult.VisualRegions, diffResult.Summary.Blocks);
+                _individualReportGenerator.GenerateIndividualReport(
+                    pair.SourcePath,
+                    pair.TargetPath!,
+                    fallbackPath,
+                    diffResult.Highlights,
+                    diffResult.VisualRegions,
+                    diffResult.Summary.Blocks,
+                    pair.Channel,
+                    pair.ProductName);
                 diffResult.Summary.ReportFileName = Path.GetFileName(fallbackPath);
                 SetReportPath(pair, fallbackPath);
                 TryCopyReportToProductOutput(pair, fallbackPath, copyToProductOutput);
@@ -257,8 +273,6 @@ public class PdfComparisonOrchestrator
             string[] relatedFiles =
             {
                 generatedReportPath,
-                Path.Combine(srcDir, $"{stem}_SOURCE.pdf"),
-                Path.Combine(srcDir, $"{stem}_TARGET.pdf"),
                 Path.Combine(srcDir, $"{stem}_SideBySide.html")
             };
 

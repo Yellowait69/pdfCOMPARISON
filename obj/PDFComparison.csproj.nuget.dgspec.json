@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\maxen\\Downloads\\PDFComparison\\PDFComparison.csproj": {}
+    "c:\\Users\\maxen\\Downloads\\PDFComparison\\PDFComparison.csproj": {}
   },
   "projects": {
-    "C:\\Users\\maxen\\Downloads\\PDFComparison\\PDFComparison.csproj": {
+    "c:\\Users\\maxen\\Downloads\\PDFComparison\\PDFComparison.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\maxen\\Downloads\\PDFComparison\\PDFComparison.csproj",
+        "projectUniqueName": "c:\\Users\\maxen\\Downloads\\PDFComparison\\PDFComparison.csproj",
         "projectName": "PDFComparison",
-        "projectPath": "C:\\Users\\maxen\\Downloads\\PDFComparison\\PDFComparison.csproj",
+        "projectPath": "c:\\Users\\maxen\\Downloads\\PDFComparison\\PDFComparison.csproj",
         "packagesPath": "C:\\Users\\maxen\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\maxen\\Downloads\\PDFComparison\\obj\\",
+        "outputPath": "c:\\Users\\maxen\\Downloads\\PDFComparison\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
